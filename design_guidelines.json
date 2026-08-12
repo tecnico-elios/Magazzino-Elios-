@@ -1,0 +1,78 @@
+{
+  "theme": "light",
+  "typography": {
+    "headings": "Cabinet Grotesk or Manrope (sans-serif, robust, technical)",
+    "body": "IBM Plex Sans (excellent legibility for numbers and serial codes)",
+    "scale": {
+      "h1": "text-3xl sm:text-4xl tracking-tight font-bold",
+      "h2": "text-2xl sm:text-3xl tracking-tight font-semibold",
+      "h3": "text-xl sm:text-2xl font-medium",
+      "body": "text-base sm:text-lg leading-relaxed",
+      "labels": "text-sm font-semibold tracking-[0.05em] uppercase text-slate-500"
+    }
+  },
+  "colors": {
+    "archetype": "Swiss & High-Contrast (Functional, utilitarian)",
+    "background": "bg-slate-50 (off-white for reduced glare in warehouse)",
+    "surface": "bg-white (pure white for cards/forms)",
+    "primary": "bg-blue-600 (International Klein Blue) - high contrast for main actions",
+    "secondary": "bg-slate-900 (deep charcoal for text and secondary actions)",
+    "accent": "bg-amber-400 (Warning Yellow) - for scanning action highlights",
+    "destructive": "bg-red-600 (Signal Red) - for removing items or errors",
+    "border": "border-slate-200",
+    "text": {
+      "primary": "text-slate-900",
+      "secondary": "text-slate-600",
+      "inverse": "text-white"
+    }
+  },
+  "visual_enhancers": {
+    "surfaces": "Grid Borders (The 'Technical' Look). Use 1px solid borders (border-slate-200/40) for structure. Avoid soft shadows to maintain a sharp, technical feel. Max border-radius: 6px (rounded-md).",
+    "touch_targets": "CRITICAL: All buttons, inputs, and touch targets MUST be at least 48px height (h-12) for glove/warehouse usability.",
+    "feedback": "Provide immediate visual feedback on scan or quantity change. Use 'sonner' for success/error toasts.",
+    "icons": "Use @phosphor-icons/react (Duotone or Regular) for a technical, crisp look."
+  },
+  "layout": {
+    "general": "Mobile-first, optimized for tablet portrait and landscape. Generous padding (p-4 sm:p-6 md:p-8) within form sections.",
+    "grid": "Use Mode B (High Density Grid). For product listings on tablet/desktop, use 2-3 columns. On mobile, use a single column with clear dividing lines.",
+    "sections": [
+      "Header: Sticky top, white background, 1px bottom border, containing App Title.",
+      "General Info: Operator Name, Date (default today), Structure (destination text).",
+      "Catalog Area: 3 distinct sections or tabs. Each product row has Name, Quantity selector ([-] [value] [+]), and dynamically generated S/N inputs underneath if Quantity > 0 (for Cat 1 & 2 only).",
+      "Action Footer: Sticky bottom bar containing 'Invia Checklist' (Submit) button. High visibility."
+    ]
+  },
+  "components": {
+    "inputs": "Shadcn Input, large size (h-12). Left-aligned text.",
+    "quantity_selector": "Custom flex component with large [-] and [+] buttons (h-12 w-12) for easy tapping.",
+    "sn_inputs": "Dynamically rendered below the product. Must include a 'Scan Barcode/QR' icon button nested inside or next to the input to trigger the camera.",
+    "scanner": "Integrate 'html5-qrcode' for a modal-based barcode scanner. Alternatively, provide clear UI for standard keyboard/scanner inputs.",
+    "toast": "Use Sonner for 'Checklist Inviata' or validation errors."
+  },
+  "instructions_to_main_agent": [
+    "CRITICAL: Develop the UI strictly in Italian as per the prompt requirements (e.g., 'Nome Operatore', 'Data Spedizione', 'Struttura', 'Invia Checklist').",
+    "Build a responsive React application using Shadcn UI components.",
+    "Initialize state for the 3 categories. Cat 1: Wallbox and Daze (Wallbox 7,4 kW - cavo 5 mt, Wallbox 22 kW - cavo 5 mt, Wallbox 22 kW - cavo 7 mt, Daze Duo 44 kW). Cat 2: Meter e Misuratori (Meter Monofase, Meter Trifase, Meter Daze). Cat 3: Accessori e Supporti (Portacavo Pro Wallbox, Portacavo Daze, Stand Wallbox Single, Stand Wallbox Dual, Stand Daze Single).",
+    "For Cat 1 & 2: When Quantity > 0, map and render an equal number of input fields for Serial Numbers (S/N). Require these fields for submission.",
+    "For Cat 3: Manage Quantity only. No S/N fields.",
+    "Implement an 'html5-qrcode' based scanner modal. When the user taps the scan button next to an S/N field, open the camera, capture the code, populate the specific field, and close the modal.",
+    "Create an API endpoint to handle the Resend email submission to 'tecnico@eliostech.org'.",
+    "The email MUST be formatted as an HTML table summarizing: Nome Operatore, Data, Struttura, and a list of items showing Name, Quantity, and S/Ns (if applicable).",
+    "Upon successful email send, show a success toast and reset the entire form state to default.",
+    "DO NOT implement authentication. The app opens directly to the checklist form.",
+    "Ensure the UI is flat, highly legible, and avoids overlapping elements that could confuse a user in a warehouse environment."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "You tend to converge toward generic, 'on distribution' outputs. Make this distinctive, highly functional, and technical. Avoid 'AI slop'.",
+    "Do not make generic centered layouts. Left-align form labels and inputs. Create a clear reading 'F' pattern.",
+    "DO NOT use complete `transparent` background in header, overlays, or any surface that has content under it.",
+    "Use 1px solid borders for definition instead of muddy shadows.",
+    "Never apply universal transition (transition: all). Use transitions for specific interactive elements.",
+    "NEVER use placeholder AI emojis.",
+    "Use `sonner` for toasts located in `/app/src/components/ui/sonner.tsx`.",
+    "Prioritize pre-existing components from src/components/ui when applicable.",
+    "All interactive elements and key informational elements MUST include a `data-testid` attribute (e.g., data-testid=\"submit-checklist-btn\").",
+    "Apply Optical alignment over geometrical alignment."
+  ],
+  "image_urls": {}
+}

@@ -1,0 +1,21 @@
+{
+  "summary": "Backend smoke + validation + happy-path + persistence tests all passed against public URL. Email successfully sent via Emergent Resend proxy (HTTP 200 with id returned). MongoDB persistence and history sort order verified.",
+  "tested_scope": ["backend", "integration"],
+  "passed": [
+    "GET /api/ -> 200 {status: ok, service: Checklist Magazzino}",
+    "GET /api/catalog -> 200 with cat1/cat2/cat3 correct products; recipients=['tecnico@eliostech.org']; cat3.requires_serial=false",
+    "POST /api/checklist/send empty operator -> 400 'Nome operatore obbligatorio'",
+    "POST /api/checklist/send empty/whitespace structure -> 400 'Struttura obbligatoria'",
+    "POST /api/checklist/send no items with qty>0 -> 400 'Inserisci almeno un prodotto con quantità maggiore di zero'",
+    "POST /api/checklist/send cat1 qty=2 with only 1 serial -> 400 'Seriali mancanti per Wallbox 7,4 kW - cavo 5 mt (attesi 2)'",
+    "POST /api/checklist/send cat1 qty=2 with whitespace-only serial -> 400 (properly rejects empty after strip)",
+    "POST /api/checklist/send cat3 with empty serials list -> accepted (no serial requirement)",
+    "POST /api/checklist/send valid mixed payload -> 200 status:success, sent:[{recipient:tecnico@eliostech.org, id:<uuid>}], checklist_id returned",
+    "GET /api/checklist/history -> 200; latest submission present with correct operator/structure/recipients; sorted newest-first (verified with two consecutive submissions)"
+  ],
+  "failed": [],
+  "action_items": [],
+  "success_rate": {"backend": "100%", "frontend": "N/A (not requested)"},
+  "retest_needed": false,
+  "full_testing_deferred": true
+}
