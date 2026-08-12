@@ -667,9 +667,10 @@ function HistoryTab() {
                         const mv = (it.movements || []).find(
                           (m) => m.page_id === row.page_id
                         );
+                        const rowKey = row.page_id || `${row.name}-${j}`;
                         return (
                           <div
-                            key={j}
+                            key={rowKey}
                             className="bg-white border border-slate-200 rounded-md px-3 py-2"
                           >
                             <div className="flex items-center justify-between gap-2">
@@ -686,7 +687,7 @@ function HistoryTab() {
                             {row.serials && row.serials.length > 0 && (
                               <ul className="mt-1 ml-4 text-xs font-mono-tight text-slate-600 list-disc">
                                 {row.serials.map((s, k) => (
-                                  <li key={k}>{s}</li>
+                                  <li key={`${rowKey}-sn-${s || k}`}>{s}</li>
                                 ))}
                               </ul>
                             )}

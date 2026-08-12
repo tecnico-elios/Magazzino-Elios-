@@ -484,7 +484,7 @@ export default function ChecklistPage() {
                           {sel.serials.map((sn, idx) => {
                             const sid = `${testKey}-sn-${idx}`;
                             return (
-                              <div key={idx} className="flex gap-2">
+                              <div key={`${it.id}-sn-${idx}`} className="flex gap-2">
                                 <Input
                                   value={sn}
                                   onChange={(e) => setSerial(it.id, idx, e.target.value)}

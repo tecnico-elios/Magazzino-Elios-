@@ -40,13 +40,14 @@ export default function BarcodeScanner({ open, onClose, onDetected, label }) {
       isRunningRef.current = false;
       try {
         await inst.stop();
-      } catch (_) {
-        /* ignore */
+      } catch (err) {
+        // Non-fatal: scanner may already be stopped (double-stop race)
+        console.debug("Scanner stop() ignored:", err?.message || err);
       }
       try {
         inst.clear();
-      } catch (_) {
-        /* ignore */
+      } catch (err) {
+        console.debug("Scanner clear() ignored:", err?.message || err);
       }
     };
 
