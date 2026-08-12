@@ -24,6 +24,7 @@ import {
   Envelope,
   ClockCounterClockwise,
   Package,
+  ArrowsClockwise,
 } from "@phosphor-icons/react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -100,21 +101,24 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-// ---------- Catalog tab ----------
-function CatalogTab() {
-  const [categories, setCategories] = useState([]);
+// ---------- Inventario Notion tab (read-only view + local Serialized override) ----------
+function InventoryTab() {
+  const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [savingId, setSavingId] = useState(null);
+  const [filter, setFilter] = useState("__ALL__");
 
   const load = async () => {
     setLoading(true);
     try {
-      const { data } = await axios.get(`${API}/admin/catalog`, {
+      const { data } = await axios.get(`${API}/admin/inventory`, {
         headers: authHeaders(),
       });
-      setCategories(data.categories || []);
+      setItems(data.items || []);
     } catch (e) {
-      toast.error("Errore caricamento", { description: e?.message });
+      toast.error("Errore caricamento Notion", {
+        description: e?.response?.data?.detail || e?.message,
+      });
     } finally {
       setLoading(false);
     }
@@ -124,226 +128,129 @@ function CatalogTab() {
     load();
   }, []);
 
-  const addCategory = () => {
-    const id = `cat_${Date.now().toString(36)}`;
-    setCategories((prev) => [
-      ...prev,
-      {
-        id,
-        name: "Nuova Categoria",
-        subtitle: "",
-        requires_serial: false,
-        products: [],
-      },
-    ]);
-  };
-
-  const removeCategory = (idx) => {
-    if (!window.confirm("Eliminare questa categoria e tutti i suoi prodotti?")) return;
-    setCategories((prev) => prev.filter((_, i) => i !== idx));
-  };
-
-  const updateCategory = (idx, patch) => {
-    setCategories((prev) =>
-      prev.map((c, i) => (i === idx ? { ...c, ...patch } : c))
-    );
-  };
-
-  const addProduct = (catIdx) => {
-    setCategories((prev) =>
-      prev.map((c, i) =>
-        i === catIdx ? { ...c, products: [...c.products, "Nuovo prodotto"] } : c
-      )
-    );
-  };
-
-  const updateProduct = (catIdx, prodIdx, value) => {
-    setCategories((prev) =>
-      prev.map((c, i) =>
-        i === catIdx
-          ? {
-              ...c,
-              products: c.products.map((p, j) => (j === prodIdx ? value : p)),
-            }
-          : c
-      )
-    );
-  };
-
-  const removeProduct = (catIdx, prodIdx) => {
-    setCategories((prev) =>
-      prev.map((c, i) =>
-        i === catIdx
-          ? { ...c, products: c.products.filter((_, j) => j !== prodIdx) }
-          : c
-      )
-    );
-  };
-
-  const save = async () => {
-    // Client validation
-    for (const c of categories) {
-      if (!c.id.trim() || !c.name.trim()) {
-        toast.error("Verifica dati", {
-          description: "ID e nome categoria obbligatori",
-        });
-        return;
-      }
-      const cleaned = c.products.map((p) => p.trim()).filter(Boolean);
-      if (cleaned.length !== new Set(cleaned).size) {
-        toast.error("Verifica dati", {
-          description: `Prodotti duplicati o vuoti in "${c.name}"`,
-        });
-        return;
-      }
-    }
-    setSaving(true);
+  const toggleSerial = async (item, next) => {
+    setSavingId(item.id);
     try {
-      const payload = {
-        categories: categories.map((c) => ({
-          id: c.id.trim(),
-          name: c.name.trim(),
-          subtitle: (c.subtitle || "").trim(),
-          requires_serial: !!c.requires_serial,
-          products: c.products.map((p) => p.trim()).filter(Boolean),
-        })),
-      };
-      await axios.put(`${API}/admin/catalog`, payload, { headers: authHeaders() });
-      toast.success("Catalogo salvato");
-      load();
+      await axios.put(
+        `${API}/admin/inventory/serial`,
+        { page_id: item.id, serialized: next },
+        { headers: authHeaders() }
+      );
+      setItems((prev) =>
+        prev.map((x) => (x.id === item.id ? { ...x, serialized: next, has_override: true } : x))
+      );
+      toast.success("Impostazione salvata");
     } catch (e) {
       toast.error("Salvataggio fallito", {
         description: e?.response?.data?.detail || e?.message,
       });
     } finally {
-      setSaving(false);
+      setSavingId(null);
     }
   };
 
-  if (loading) return <div className="text-slate-500">Caricamento…</div>;
+  const categories = Array.from(
+    new Set(items.map((i) => i.category || "Senza categoria"))
+  ).sort();
+
+  const visible = items.filter(
+    (i) => filter === "__ALL__" || (i.category || "Senza categoria") === filter
+  );
+
+  if (loading) return <div className="text-slate-500">Caricamento Notion…</div>;
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="text-sm text-slate-600">
-          Gestisci categorie e prodotti. Le modifiche si applicano subito al form checklist.
+        <div className="text-sm text-slate-600 max-w-xl">
+          Inventario letto direttamente dal DB Notion <strong>"Inventario"</strong>. Nomi, categorie
+          e quantità si modificano da Notion. Qui puoi solo marcare gli articoli che richiedono
+          <strong> numero seriale</strong> nella spedizione.
         </div>
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={addCategory}
-            data-testid="add-category-btn"
-            className="h-11"
-          >
-            <Plus size={18} className="mr-1" /> Nuova categoria
-          </Button>
-          <Button
-            type="button"
-            onClick={save}
-            disabled={saving}
-            data-testid="save-catalog-btn"
-            className="h-11 bg-blue-600 hover:bg-blue-700"
-          >
-            <FloppyDisk size={18} className="mr-1" />
-            {saving ? "Salvo…" : "Salva catalogo"}
-          </Button>
-        </div>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={load}
+          className="h-11"
+          data-testid="reload-inventory-btn"
+        >
+          <ArrowsClockwise size={16} className="mr-1" /> Aggiorna da Notion
+        </Button>
       </div>
 
-      {categories.map((cat, i) => (
-        <Card key={cat.id + i} className="border-slate-200">
-          <CardHeader className="pb-3">
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-              <div className="md:col-span-4">
-                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Nome categoria
-                </Label>
-                <Input
-                  value={cat.name}
-                  onChange={(e) => updateCategory(i, { name: e.target.value })}
-                  className="h-11 mt-1"
-                  data-testid={`cat-${i}-name`}
-                />
-              </div>
-              <div className="md:col-span-4">
-                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Sottotitolo
-                </Label>
-                <Input
-                  value={cat.subtitle || ""}
-                  onChange={(e) => updateCategory(i, { subtitle: e.target.value })}
-                  className="h-11 mt-1"
-                />
-              </div>
-              <div className="md:col-span-3 flex items-center gap-3 pt-1">
-                <Switch
-                  checked={!!cat.requires_serial}
-                  onCheckedChange={(v) => updateCategory(i, { requires_serial: v })}
-                  data-testid={`cat-${i}-serial-toggle`}
-                />
-                <span className="text-sm font-medium">Richiede Seriali S/N</span>
-              </div>
-              <div className="md:col-span-1 flex justify-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-11 w-11 border-red-200 text-red-600 hover:bg-red-50"
-                  onClick={() => removeCategory(i)}
-                  data-testid={`cat-${i}-remove`}
-                  aria-label="Elimina categoria"
-                >
-                  <Trash size={18} />
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="border-t border-slate-200 pt-3 space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                Prodotti ({cat.products.length})
-              </div>
-              {cat.products.map((p, j) => (
-                <div key={j} className="flex gap-2">
-                  <Input
-                    value={p}
-                    onChange={(e) => updateProduct(i, j, e.target.value)}
-                    className="h-11 flex-1"
-                    data-testid={`cat-${i}-prod-${j}`}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-11 w-11 border-red-200 text-red-600 hover:bg-red-50"
-                    onClick={() => removeProduct(i, j)}
-                    data-testid={`cat-${i}-prod-${j}-remove`}
-                    aria-label="Rimuovi prodotto"
-                  >
-                    <Trash size={16} />
-                  </Button>
-                </div>
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => addProduct(i)}
-                className="h-10 mt-1"
-                data-testid={`cat-${i}-add-prod`}
-              >
-                <Plus size={16} className="mr-1" /> Aggiungi prodotto
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs uppercase tracking-wider text-slate-500 font-semibold mr-1">
+          Filtra:
+        </span>
+        <Button
+          type="button"
+          variant={filter === "__ALL__" ? "default" : "outline"}
+          onClick={() => setFilter("__ALL__")}
+          className={`h-9 px-3 ${filter === "__ALL__" ? "bg-slate-900 hover:bg-slate-800" : ""}`}
+        >
+          Tutti ({items.length})
+        </Button>
+        {categories.map((c) => (
+          <Button
+            key={c}
+            type="button"
+            variant={filter === c ? "default" : "outline"}
+            onClick={() => setFilter(c)}
+            className={`h-9 px-3 ${filter === c ? "bg-slate-900 hover:bg-slate-800" : ""}`}
+          >
+            {c} ({items.filter((i) => (i.category || "Senza categoria") === c).length})
+          </Button>
+        ))}
+      </div>
 
-      {categories.length === 0 && (
-        <div className="text-center py-12 border border-dashed border-slate-300 rounded-md text-slate-500">
-          Nessuna categoria. Aggiungine una per iniziare.
-        </div>
-      )}
+      <ul className="border border-slate-200 rounded-md divide-y divide-slate-200 bg-white">
+        {visible.map((it) => (
+          <li
+            key={it.id}
+            className="flex items-center justify-between gap-3 px-4 py-3"
+            data-testid={`admin-item-${it.id}`}
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-slate-900">{it.name}</span>
+                {it.code && (
+                  <span className="text-xs font-mono-tight text-slate-400">{it.code}</span>
+                )}
+                {it.category && (
+                  <Badge variant="outline" className="border-slate-300 text-slate-600">
+                    {it.category}
+                  </Badge>
+                )}
+                {it.has_override && (
+                  <Badge variant="outline" className="border-blue-200 text-blue-700 bg-blue-50">
+                    override
+                  </Badge>
+                )}
+              </div>
+              <div className="text-xs text-slate-500 mt-0.5">
+                Disponibili:{" "}
+                <span className="font-mono-tight font-semibold text-slate-700">
+                  {it.quantity} {it.unit}
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              <span className="text-xs text-slate-600 hidden sm:inline">Serializzato</span>
+              <Switch
+                checked={!!it.serialized}
+                disabled={savingId === it.id}
+                onCheckedChange={(v) => toggleSerial(it, v)}
+                data-testid={`serial-toggle-${it.id}`}
+              />
+            </div>
+          </li>
+        ))}
+        {visible.length === 0 && (
+          <li className="px-4 py-8 text-center text-slate-500 text-sm">
+            Nessun articolo per questa categoria.
+          </li>
+        )}
+      </ul>
     </div>
   );
 }
@@ -536,10 +443,10 @@ function HistoryTab() {
             >
               <div className="flex-1 min-w-0">
                 <div className="font-semibold text-slate-900 truncate">
-                  {it.structure} — {it.shipping_date}
+                  Cliente: {it.structure} — {it.shipping_date}
                 </div>
                 <div className="text-xs text-slate-500 mt-0.5 truncate">
-                  {it.operator} • Inviato il {created}
+                  Operatore: {it.operator} • Inviato il {created}
                 </div>
               </div>
               <Badge variant="outline" className="border-slate-300 shrink-0">
@@ -549,29 +456,37 @@ function HistoryTab() {
             {isOpen && (
               <div className="border-t border-slate-200 px-4 py-3 space-y-3 bg-slate-50">
                 <div className="text-xs text-slate-500">
-                  Destinatari: {(it.recipients || []).join(", ") || "—"}
+                  Email: {(it.recipients || []).join(", ") || "—"}
                 </div>
                 <div className="space-y-2">
-                  {(it.items || []).map((row, j) => (
-                    <div
-                      key={j}
-                      className="bg-white border border-slate-200 rounded-md px-3 py-2"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium text-slate-900">{row.name}</span>
-                        <span className="font-mono-tight text-sm text-slate-600">
-                          × {row.quantity}
-                        </span>
+                  {(it.items || []).map((row, j) => {
+                    const mv = (it.movements || []).find((m) => m.page_id === row.page_id);
+                    return (
+                      <div
+                        key={j}
+                        className="bg-white border border-slate-200 rounded-md px-3 py-2"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-slate-900">{row.name}</span>
+                          <span className="font-mono-tight text-sm text-slate-600">
+                            × {row.quantity} {row.unit || "pz"}
+                          </span>
+                        </div>
+                        {mv && (
+                          <div className="text-xs text-slate-500 mt-1 font-mono-tight">
+                            Stock: {mv.before} → {mv.after} {mv.unit || "pz"}
+                          </div>
+                        )}
+                        {row.serials && row.serials.length > 0 && (
+                          <ul className="mt-1 ml-4 text-xs font-mono-tight text-slate-600 list-disc">
+                            {row.serials.map((s, k) => (
+                              <li key={k}>{s}</li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
-                      {row.serials && row.serials.length > 0 && (
-                        <ul className="mt-1 ml-4 text-xs font-mono-tight text-slate-600 list-disc">
-                          {row.serials.map((s, k) => (
-                            <li key={k}>{s}</li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 {it.notes && (
                   <div className="text-xs text-slate-700 bg-amber-50 border-l-2 border-amber-400 px-3 py-2 rounded-sm">
@@ -630,10 +545,10 @@ export default function AdminPage() {
         </div>
       </header>
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
-        <Tabs defaultValue="catalog">
+        <Tabs defaultValue="inventory">
           <TabsList className="mb-6">
-            <TabsTrigger value="catalog" data-testid="tab-catalog">
-              <Package size={16} className="mr-1" /> Catalogo
+            <TabsTrigger value="inventory" data-testid="tab-inventory">
+              <Package size={16} className="mr-1" /> Inventario Notion
             </TabsTrigger>
             <TabsTrigger value="recipients" data-testid="tab-recipients">
               <Envelope size={16} className="mr-1" /> Destinatari
@@ -642,8 +557,8 @@ export default function AdminPage() {
               <ClockCounterClockwise size={16} className="mr-1" /> Storico
             </TabsTrigger>
           </TabsList>
-          <TabsContent value="catalog">
-            <CatalogTab />
+          <TabsContent value="inventory">
+            <InventoryTab />
           </TabsContent>
           <TabsContent value="recipients">
             <RecipientsTab />
