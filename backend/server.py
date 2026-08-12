@@ -53,7 +53,7 @@ DEFAULT_CATALOG_SEED = [
         "id": "cat2",
         "name": "Meter e Misuratori",
         "subtitle": "Contatori di energia",
-        "requires_serial": True,
+        "requires_serial": False,
         "products": ["Meter Monofase", "Meter Trifase", "Meter Daze"],
     },
     {
