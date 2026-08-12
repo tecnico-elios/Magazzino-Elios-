@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { CATEGORIES, buildInitialState } from "../lib/catalog";
+import { Link } from "react-router-dom";
+import { useCatalog, buildInitialState } from "../lib/catalog";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Button } from "../components/ui/button";
@@ -17,6 +18,7 @@ import {
   Buildings,
   Package,
   CircleNotch,
+  Gear,
 } from "@phosphor-icons/react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -24,13 +26,25 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export default function ChecklistPage() {
+  const { categories: CATEGORIES } = useCatalog();
   const [operator, setOperator] = useState("");
   const [shippingDate, setShippingDate] = useState(todayISO());
   const [structure, setStructure] = useState("");
   const [notes, setNotes] = useState("");
-  const [items, setItems] = useState(buildInitialState);
+  const [items, setItems] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [scanTarget, setScanTarget] = useState(null); // {key, index, label}
+
+  // Rebuild items state whenever catalog changes (preserves existing values)
+  useEffect(() => {
+    setItems((prev) => {
+      const next = buildInitialState(CATEGORIES);
+      Object.keys(next).forEach((k) => {
+        if (prev[k]) next[k] = prev[k];
+      });
+      return next;
+    });
+  }, [CATEGORIES]);
 
   const totalUnits = useMemo(
     () => Object.values(items).reduce((a, i) => a + (i.quantity || 0), 0),
@@ -77,7 +91,7 @@ export default function ChecklistPage() {
     setShippingDate(todayISO());
     setStructure("");
     setNotes("");
-    setItems(buildInitialState());
+    setItems(buildInitialState(CATEGORIES));
   };
 
   const buildPayload = () => {
@@ -90,7 +104,7 @@ export default function ChecklistPage() {
             category: cat.id,
             name,
             quantity: entry.quantity,
-            serials: cat.requiresSerial ? entry.serials : [],
+            serials: cat.requires_serial ? entry.serials : [],
           });
         }
       });
@@ -111,7 +125,7 @@ export default function ChecklistPage() {
     if (payload.items.length === 0) return "Aggiungi almeno un prodotto";
     for (const it of payload.items) {
       const cat = CATEGORIES.find((c) => c.id === it.category);
-      if (cat?.requiresSerial) {
+      if (cat?.requires_serial) {
         if (
           it.serials.length !== it.quantity ||
           it.serials.some((s) => !s || !s.trim())
@@ -168,6 +182,15 @@ export default function ChecklistPage() {
               {totalUnits} pz totali
             </span>
           </div>
+          <Link
+            to="/admin"
+            className="ml-2 h-10 inline-flex items-center gap-1 px-3 border border-slate-200 rounded-md text-slate-600 hover:text-slate-900 hover:border-slate-300 text-sm"
+            data-testid="admin-link"
+            title="Pannello Admin"
+          >
+            <Gear size={16} />
+            <span className="hidden sm:inline">Admin</span>
+          </Link>
         </div>
       </header>
 
@@ -230,12 +253,14 @@ export default function ChecklistPage() {
             <div className="px-4 sm:px-6 py-4 border-b border-slate-200 bg-slate-900 text-white flex items-center justify-between">
               <div>
                 <div className="text-[10px] tracking-[0.2em] uppercase text-slate-400 font-semibold">
-                  {cat.id === "cat3" ? "Solo Quantità" : "Quantità + Seriali"}
+                  {cat.requires_serial ? "Quantità + Seriali" : "Solo Quantità"}
                 </div>
                 <h2 className="font-display text-lg sm:text-xl font-bold">
                   {cat.name}
                 </h2>
-                <div className="text-slate-400 text-xs mt-0.5">{cat.subtitle}</div>
+                {cat.subtitle && (
+                  <div className="text-slate-400 text-xs mt-0.5">{cat.subtitle}</div>
+                )}
               </div>
             </div>
             <ul className="divide-y divide-slate-200">
@@ -254,7 +279,7 @@ export default function ChecklistPage() {
                           type="button"
                           variant="outline"
                           size="icon"
-                          onClick={() => updateQuantity(key, -1, cat.requiresSerial)}
+                          onClick={() => updateQuantity(key, -1, cat.requires_serial)}
                           className="h-12 w-12 border-slate-300"
                           data-testid={`${qtyId}-dec`}
                           aria-label={`Diminuisci ${name}`}
@@ -272,7 +297,7 @@ export default function ChecklistPage() {
                               Math.min(99, parseInt(e.target.value || "0", 10))
                             );
                             const delta = v - entry.quantity;
-                            updateQuantity(key, delta, cat.requiresSerial);
+                            updateQuantity(key, delta, cat.requires_serial);
                           }}
                           className="h-12 w-16 text-center text-lg font-mono-tight font-semibold"
                           data-testid={`${qtyId}-value`}
@@ -281,7 +306,7 @@ export default function ChecklistPage() {
                           type="button"
                           variant="default"
                           size="icon"
-                          onClick={() => updateQuantity(key, 1, cat.requiresSerial)}
+                          onClick={() => updateQuantity(key, 1, cat.requires_serial)}
                           className="h-12 w-12 bg-slate-900 hover:bg-slate-800"
                           data-testid={`${qtyId}-inc`}
                           aria-label={`Aumenta ${name}`}
@@ -291,7 +316,7 @@ export default function ChecklistPage() {
                       </div>
                     </div>
 
-                    {cat.requiresSerial && entry.quantity > 0 && (
+                    {cat.requires_serial && entry.quantity > 0 && (
                       <div className="mt-4 space-y-2 border-l-2 border-amber-400 pl-4">
                         <div className="text-[11px] tracking-[0.1em] uppercase text-slate-500 font-semibold">
                           Seriali (S/N) — {entry.quantity} richiesti

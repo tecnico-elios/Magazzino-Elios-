@@ -2,6 +2,7 @@ import "@/App.css";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Toaster } from "sonner";
 import ChecklistPage from "@/pages/ChecklistPage";
+import AdminPage from "@/pages/AdminPage";
 
 function App() {
   return (
@@ -9,6 +10,7 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<ChecklistPage />} />
+          <Route path="/admin" element={<AdminPage />} />
           <Route path="*" element={<ChecklistPage />} />
         </Routes>
       </BrowserRouter>

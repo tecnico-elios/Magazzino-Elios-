@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, Header, Depends
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -7,7 +7,7 @@ import logging
 import uuid
 import html as html_lib
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from typing import List, Optional
 from datetime import datetime, timezone
 import httpx
@@ -25,17 +25,22 @@ EMAIL_BASE_URL = "https://integrations.emergentagent.com"
 EMAIL_KEY = os.environ["EMERGENT_EMAIL_KEY"]
 EMAIL_FROM_NAME = os.environ["EMAIL_FROM_NAME"]
 
-# Recipient list (comma-separated in .env)
-DEFAULT_RECIPIENTS = [
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
+
+# Default seed recipients (used only on first run to initialise DB)
+DEFAULT_RECIPIENTS_SEED = [
     r.strip()
     for r in os.environ.get("CHECKLIST_RECIPIENTS", "tecnico@eliostech.org").split(",")
     if r.strip()
 ]
 
-# Products catalog (source of truth also on backend for server-side validation)
-CATEGORIES = {
-    "cat1": {
+# Default seed catalog (used only on first run to initialise DB).
+# After the first run the catalog lives in MongoDB and is editable via /admin.
+DEFAULT_CATALOG_SEED = [
+    {
+        "id": "cat1",
         "name": "Wallbox e Daze",
+        "subtitle": "Colonnine di ricarica",
         "requires_serial": True,
         "products": [
             "Wallbox 7,4 kW - cavo 5 mt",
@@ -44,13 +49,17 @@ CATEGORIES = {
             "Daze Duo 44 kW",
         ],
     },
-    "cat2": {
+    {
+        "id": "cat2",
         "name": "Meter e Misuratori",
+        "subtitle": "Contatori di energia",
         "requires_serial": True,
         "products": ["Meter Monofase", "Meter Trifase", "Meter Daze"],
     },
-    "cat3": {
+    {
+        "id": "cat3",
         "name": "Accessori e Supporti",
+        "subtitle": "Portacavi e stand (no seriali)",
         "requires_serial": False,
         "products": [
             "Portacavo Pro Wallbox",
@@ -60,7 +69,54 @@ CATEGORIES = {
             "Stand Daze Single",
         ],
     },
-}
+]
+
+
+async def get_catalog() -> List[dict]:
+    doc = await db.settings.find_one({"_id": "catalog"}, {"_id": 0})
+    if doc and isinstance(doc.get("categories"), list):
+        return doc["categories"]
+    # Seed on first read
+    await db.settings.update_one(
+        {"_id": "catalog"},
+        {"$set": {"categories": DEFAULT_CATALOG_SEED}},
+        upsert=True,
+    )
+    return DEFAULT_CATALOG_SEED
+
+
+async def set_catalog(categories: List[dict]) -> None:
+    await db.settings.update_one(
+        {"_id": "catalog"},
+        {"$set": {"categories": categories}},
+        upsert=True,
+    )
+
+
+async def get_recipients() -> List[str]:
+    doc = await db.settings.find_one({"_id": "recipients"}, {"_id": 0})
+    if doc and isinstance(doc.get("emails"), list):
+        return doc["emails"]
+    await db.settings.update_one(
+        {"_id": "recipients"},
+        {"$set": {"emails": DEFAULT_RECIPIENTS_SEED}},
+        upsert=True,
+    )
+    return DEFAULT_RECIPIENTS_SEED
+
+
+async def set_recipients(emails: List[str]) -> None:
+    await db.settings.update_one(
+        {"_id": "recipients"},
+        {"$set": {"emails": emails}},
+        upsert=True,
+    )
+
+
+def require_admin(x_admin_password: Optional[str] = Header(default=None)):
+    if not x_admin_password or x_admin_password != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Non autorizzato")
+    return True
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -96,7 +152,7 @@ class ChecklistRecord(BaseModel):
 
 
 # ------------- Helpers -------------
-def validate_checklist(payload: ChecklistPayload) -> None:
+async def validate_checklist(payload: ChecklistPayload) -> None:
     if not payload.operator.strip():
         raise HTTPException(400, "Nome operatore obbligatorio")
     if not payload.structure.strip():
@@ -108,8 +164,11 @@ def validate_checklist(payload: ChecklistPayload) -> None:
     if not filled:
         raise HTTPException(400, "Inserisci almeno un prodotto con quantità maggiore di zero")
 
+    categories = await get_catalog()
+    cat_map = {c["id"]: c for c in categories}
+
     for item in filled:
-        cat = CATEGORIES.get(item.category)
+        cat = cat_map.get(item.category)
         if not cat:
             raise HTTPException(400, f"Categoria non valida: {item.category}")
         if item.name not in cat["products"]:
@@ -123,10 +182,11 @@ def validate_checklist(payload: ChecklistPayload) -> None:
                 )
 
 
-def build_html_email(payload: ChecklistPayload) -> str:
+def build_html_email(payload: ChecklistPayload, categories: List[dict]) -> str:
     esc = html_lib.escape
     rows = []
-    for cat_key, cat in CATEGORIES.items():
+    for cat in categories:
+        cat_key = cat["id"]
         cat_items = [i for i in payload.items if i.category == cat_key and i.quantity > 0]
         if not cat_items:
             continue
@@ -240,19 +300,33 @@ async def root():
 
 
 @api_router.get("/catalog")
-async def get_catalog():
-    return {"categories": CATEGORIES, "recipients": DEFAULT_RECIPIENTS}
+async def get_catalog_endpoint():
+    categories = await get_catalog()
+    recipients = await get_recipients()
+    # Return legacy `categories` dict shape for backwards compatibility
+    # PLUS the new list under `categories_list`.
+    categories_dict = {c["id"]: c for c in categories}
+    return {
+        "categories": categories_dict,
+        "categories_list": categories,
+        "recipients": recipients,
+    }
 
 
 @api_router.post("/checklist/send")
 async def submit_checklist(payload: ChecklistPayload):
-    validate_checklist(payload)
-    html_content = build_html_email(payload)
+    await validate_checklist(payload)
+    categories = await get_catalog()
+    recipients = await get_recipients()
+    if not recipients:
+        raise HTTPException(500, "Nessun destinatario configurato")
+
+    html_content = build_html_email(payload, categories)
     subject = f"Checklist Spedizione — {payload.structure} — {payload.shipping_date}"
 
     sent_ids = []
     errors = []
-    for r in DEFAULT_RECIPIENTS:
+    for r in recipients:
         try:
             eid = await send_email(r, subject, html_content)
             sent_ids.append({"recipient": r, "id": eid})
@@ -289,6 +363,76 @@ async def submit_checklist(payload: ChecklistPayload):
 
 @api_router.get("/checklist/history")
 async def history(limit: int = 20):
+    docs = await db.checklists.find({}, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    return {"items": docs}
+
+
+# ------------- Admin routes -------------
+class LoginRequest(BaseModel):
+    password: str
+
+
+class CategoryModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    name: str
+    subtitle: Optional[str] = ""
+    requires_serial: bool = False
+    products: List[str] = Field(default_factory=list)
+
+
+class CatalogUpdate(BaseModel):
+    categories: List[CategoryModel]
+
+
+class RecipientsUpdate(BaseModel):
+    emails: List[EmailStr]
+
+
+@api_router.post("/admin/login")
+async def admin_login(req: LoginRequest):
+    if req.password != ADMIN_PASSWORD:
+        raise HTTPException(401, "Password non valida")
+    return {"status": "ok"}
+
+
+@api_router.get("/admin/catalog", dependencies=[Depends(require_admin)])
+async def admin_get_catalog():
+    return {"categories": await get_catalog()}
+
+
+@api_router.put("/admin/catalog", dependencies=[Depends(require_admin)])
+async def admin_put_catalog(update: CatalogUpdate):
+    ids = [c.id for c in update.categories]
+    if len(ids) != len(set(ids)):
+        raise HTTPException(400, "ID categorie duplicati")
+    for cat in update.categories:
+        if not cat.id.strip() or not cat.name.strip():
+            raise HTTPException(400, "ID e nome categoria obbligatori")
+        if len(cat.products) != len({p.strip() for p in cat.products if p.strip()}):
+            raise HTTPException(400, f"Prodotti duplicati o vuoti in '{cat.name}'")
+    categories = [c.model_dump() for c in update.categories]
+    await set_catalog(categories)
+    return {"status": "ok", "categories": categories}
+
+
+@api_router.get("/admin/recipients", dependencies=[Depends(require_admin)])
+async def admin_get_recipients():
+    return {"emails": await get_recipients()}
+
+
+@api_router.put("/admin/recipients", dependencies=[Depends(require_admin)])
+async def admin_put_recipients(update: RecipientsUpdate):
+    emails = [str(e).strip() for e in update.emails if str(e).strip()]
+    if not emails:
+        raise HTTPException(400, "Inserisci almeno un destinatario")
+    unique = list(dict.fromkeys(emails))
+    await set_recipients(unique)
+    return {"status": "ok", "emails": unique}
+
+
+@api_router.get("/admin/history", dependencies=[Depends(require_admin)])
+async def admin_history(limit: int = 100):
     docs = await db.checklists.find({}, {"_id": 0}).sort("created_at", -1).to_list(limit)
     return {"items": docs}
 
