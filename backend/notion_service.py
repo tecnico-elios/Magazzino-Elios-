@@ -177,3 +177,71 @@ async def archive_page(page_id: str) -> None:
             await client.patch(url, headers=_headers(), json={"archived": True})
         except Exception as e:
             logger.warning(f"Rollback archive failed for {page_id}: {e}")
+
+
+async def list_exits() -> List[Dict[str, Any]]:
+    """Query the Inventory Tracker data source for ALL outgoing picks in Notion,
+    including those created outside this app.
+    Resolves the related Inventario item's name via a page_id -> name map."""
+    if not NOTION_TOKEN or not NOTION_TRACKER_DS_ID:
+        raise RuntimeError("Tracker non configurato")
+
+    inventory = await list_inventory()
+    name_map = {
+        it["id"]: {"name": it["name"], "unit": it["unit"], "category": it.get("category")}
+        for it in inventory
+    }
+
+    url = f"{NOTION_BASE}/data_sources/{NOTION_TRACKER_DS_ID}/query"
+    body: Dict[str, Any] = {"page_size": 100}
+    out: List[Dict[str, Any]] = []
+    async with httpx.AsyncClient(timeout=30) as client:
+        while True:
+            resp = await client.post(url, headers=_headers(), json=body)
+            if resp.status_code >= 400:
+                logger.error(f"Notion tracker query failed: {resp.status_code} {resp.text[:300]}")
+                resp.raise_for_status()
+            data = resp.json()
+            for p in data.get("results", []):
+                props = p.get("properties", {})
+                sn = _plain_text(_get_prop(props, "SN"))
+                cliente = _plain_text(_get_prop(props, "Preso per"))
+                qty_prop = _get_prop(props, "Quantità", "Quantita", "Quantity")
+                qty = qty_prop.get("number") if qty_prop and qty_prop.get("type") == "number" else None
+                date_prop = _get_prop(props, "Data Uscita", "Data")
+                d = None
+                if date_prop and date_prop.get("type") == "date":
+                    dv = date_prop.get("date") or {}
+                    d = dv.get("start")
+                rel_prop = _get_prop(props, "Item in uscita", "Item")
+                item_ids: List[str] = []
+                if rel_prop and rel_prop.get("type") == "relation":
+                    item_ids = [r.get("id") for r in (rel_prop.get("relation") or []) if r.get("id")]
+                item_names = [name_map.get(i, {}).get("name", "?") for i in item_ids]
+                units = [name_map.get(i, {}).get("unit", "pz") for i in item_ids]
+                categories = [name_map.get(i, {}).get("category") for i in item_ids]
+                out.append({
+                    "id": p["id"],
+                    "sn": sn,
+                    "cliente": cliente,
+                    "quantity": qty,
+                    "date": d,
+                    "item_ids": item_ids,
+                    "item_names": item_names,
+                    "item_name": item_names[0] if item_names else None,
+                    "unit": units[0] if units else "pz",
+                    "category": categories[0] if categories else None,
+                    "url": p.get("url"),
+                    "created_time": p.get("created_time"),
+                })
+            if not data.get("has_more"):
+                break
+            body["start_cursor"] = data.get("next_cursor")
+    # Filter out empty draft rows (no quantity and no relation and no cliente)
+    out = [
+        e for e in out
+        if (e.get("quantity") is not None) or e.get("item_ids") or e.get("cliente") or e.get("sn")
+    ]
+    # Sort by date descending (fallback to created_time)
+    out.sort(key=lambda x: (x.get("date") or "") + (x.get("created_time") or ""), reverse=True)
+    return out

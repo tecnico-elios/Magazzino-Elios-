@@ -34,6 +34,7 @@ export default function ChecklistPage() {
   const [operator, setOperator] = useState("");
   const [shippingDate, setShippingDate] = useState(todayISO());
   const [structure, setStructure] = useState("");
+  const [ddtNumber, setDdtNumber] = useState("");
   const [notes, setNotes] = useState("");
   const [selections, setSelections] = useState({}); // { page_id: { quantity, serials: [] } }
   const [submitting, setSubmitting] = useState(false);
@@ -111,6 +112,7 @@ export default function ChecklistPage() {
     setOperator("");
     setShippingDate(todayISO());
     setStructure("");
+    setDdtNumber("");
     setNotes("");
     setSelections({});
   };
@@ -140,6 +142,7 @@ export default function ChecklistPage() {
       operator: operator.trim(),
       shipping_date: shippingDate,
       structure: structure.trim(),
+      ddt_number: ddtNumber.trim() || null,
       notes: notes.trim() || null,
       items: itemsPayload,
     };
@@ -256,7 +259,7 @@ export default function ChecklistPage() {
           <div className="text-xs tracking-[0.1em] uppercase text-slate-500 font-semibold mb-4">
             Dati Generali
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <Label htmlFor="operator" className="text-slate-700 text-sm font-semibold">
                 <User size={14} className="inline mr-1" /> Nome Operatore
@@ -294,6 +297,19 @@ export default function ChecklistPage() {
                 onChange={(e) => setStructure(e.target.value)}
                 placeholder="Es. Cliente XXXXX"
                 className="h-12 mt-1 text-base"
+              />
+            </div>
+            <div>
+              <Label htmlFor="ddt" className="text-slate-700 text-sm font-semibold">
+                <Package size={14} className="inline mr-1" /> Numero DDT
+              </Label>
+              <Input
+                id="ddt"
+                data-testid="input-ddt"
+                value={ddtNumber}
+                onChange={(e) => setDdtNumber(e.target.value)}
+                placeholder="Es. DDT-2026-001"
+                className="h-12 mt-1 text-base font-mono-tight"
               />
             </div>
           </div>

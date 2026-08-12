@@ -114,6 +114,7 @@ class ChecklistPayload(BaseModel):
     operator: str
     shipping_date: str  # ISO date YYYY-MM-DD
     structure: str      # Cliente / Destinazione
+    ddt_number: Optional[str] = None
     items: List[ProductItem]
     notes: Optional[str] = None
 
@@ -124,6 +125,7 @@ class ChecklistRecord(BaseModel):
     operator: str
     shipping_date: str
     structure: str
+    ddt_number: Optional[str] = None
     items: List[ProductItem]
     notes: Optional[str] = None
     recipients: List[str] = Field(default_factory=list)
@@ -237,16 +239,20 @@ def build_html_email(payload: ChecklistPayload, movements: List[dict]) -> str:
       <tr><td style="padding:24px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;">
           <tr>
-            <td style="padding:12px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;width:35%;border-bottom:1px solid #e2e8f0;">Operatore</td>
-            <td style="padding:12px 14px;font-family:Arial,sans-serif;font-size:15px;color:#0f172a;font-weight:600;border-bottom:1px solid #e2e8f0;">{esc(payload.operator)}</td>
+            <td style="padding:12px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;width:35%;border-bottom:1px solid #e2e8f0;">Numero DDT</td>
+            <td style="padding:12px 14px;font-family:Arial,sans-serif;font-size:15px;color:#0f172a;font-weight:700;border-bottom:1px solid #e2e8f0;">{esc((payload.ddt_number or '—').strip() or '—')}</td>
+          </tr>
+          <tr>
+            <td style="padding:12px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;border-bottom:1px solid #e2e8f0;">Cliente / Destinazione</td>
+            <td style="padding:12px 14px;font-family:Arial,sans-serif;font-size:15px;color:#0f172a;font-weight:600;border-bottom:1px solid #e2e8f0;">{esc(payload.structure)}</td>
           </tr>
           <tr>
             <td style="padding:12px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;border-bottom:1px solid #e2e8f0;">Data Spedizione</td>
             <td style="padding:12px 14px;font-family:Arial,sans-serif;font-size:15px;color:#0f172a;font-weight:600;border-bottom:1px solid #e2e8f0;">{esc(payload.shipping_date)}</td>
           </tr>
           <tr>
-            <td style="padding:12px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;">Cliente / Destinazione</td>
-            <td style="padding:12px 14px;font-family:Arial,sans-serif;font-size:15px;color:#0f172a;font-weight:600;">{esc(payload.structure)}</td>
+            <td style="padding:12px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;">Operatore</td>
+            <td style="padding:12px 14px;font-family:Arial,sans-serif;font-size:15px;color:#0f172a;font-weight:600;">{esc(payload.operator)}</td>
           </tr>
         </table>
 
@@ -416,6 +422,7 @@ async def submit_checklist(payload: ChecklistPayload):
         operator=payload.operator,
         shipping_date=payload.shipping_date,
         structure=payload.structure,
+        ddt_number=(payload.ddt_number or "").strip() or None,
         items=filled,
         notes=payload.notes,
         recipients=[s["recipient"] for s in sent],
@@ -483,9 +490,89 @@ async def admin_put_recipients(update: RecipientsUpdate):
 
 
 @api_router.get("/admin/history", dependencies=[Depends(require_admin)])
-async def admin_history(limit: int = 200):
-    docs = await db.checklists.find({}, {"_id": 0}).sort("created_at", -1).to_list(limit)
-    return {"items": docs}
+async def admin_history(
+    limit: int = 500,
+    cliente: Optional[str] = None,
+    materiale: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    ddt: Optional[str] = None,
+):
+    q: Dict[str, Any] = {}
+    if cliente and cliente.strip():
+        q["structure"] = {"$regex": cliente.strip(), "$options": "i"}
+    if ddt and ddt.strip():
+        q["ddt_number"] = {"$regex": ddt.strip(), "$options": "i"}
+    if materiale and materiale.strip():
+        q["items"] = {"$elemMatch": {"name": {"$regex": materiale.strip(), "$options": "i"}}}
+    if date_from or date_to:
+        d: Dict[str, str] = {}
+        if date_from:
+            d["$gte"] = date_from
+        if date_to:
+            d["$lte"] = date_to
+        q["shipping_date"] = d
+    docs = await db.checklists.find(q, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    return {"items": docs, "count": len(docs)}
+
+
+@api_router.get("/admin/notion-exits", dependencies=[Depends(require_admin)])
+async def admin_notion_exits(
+    cliente: Optional[str] = None,
+    materiale: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+):
+    if not notion_service.is_configured():
+        raise HTTPException(503, "Integrazione Notion non configurata")
+    try:
+        exits = await notion_service.list_exits()
+    except Exception as e:
+        raise HTTPException(502, f"Impossibile leggere Notion Tracker: {e}")
+
+    # Which tracker page_ids were created by our app? Exclude to avoid duplicates.
+    docs = await db.checklists.find({}, {"_id": 0, "tracker_page_ids": 1}).to_list(2000)
+    internal_ids = set()
+    for d in docs:
+        for pid in (d.get("tracker_page_ids") or []):
+            if pid:
+                internal_ids.add(pid)
+
+    def _match(ex: Dict[str, Any]) -> bool:
+        if ex["id"] in internal_ids:
+            return False
+        if cliente and cliente.strip():
+            if cliente.strip().lower() not in (ex.get("cliente") or "").lower():
+                return False
+        if materiale and materiale.strip():
+            names = " | ".join(ex.get("item_names") or []).lower()
+            if materiale.strip().lower() not in names:
+                return False
+        d = ex.get("date") or ""
+        if date_from and d < date_from:
+            return False
+        if date_to and d > date_to:
+            return False
+        return True
+
+    filtered = [e for e in exits if _match(e)]
+    return {"items": filtered, "count": len(filtered)}
+
+
+@api_router.get("/admin/history/{checklist_id}/pdf", dependencies=[Depends(require_admin)])
+async def admin_history_pdf(checklist_id: str):
+    from fastapi.responses import StreamingResponse
+    import pdf_service
+    doc = await db.checklists.find_one({"id": checklist_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Spedizione non trovata")
+    pdf_buf = pdf_service.generate_ddt_pdf(doc)
+    fname_key = (doc.get("ddt_number") or checklist_id).replace("/", "-").replace(" ", "_")
+    return StreamingResponse(
+        pdf_buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="DDT-{fname_key}.pdf"'},
+    )
 
 
 app.include_router(api_router)

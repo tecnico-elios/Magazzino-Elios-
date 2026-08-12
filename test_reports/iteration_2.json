@@ -1,0 +1,66 @@
+{
+  "summary": "Tested new admin features (history filters, PDF DDT, Notion exits) + QR scanner refactor + DDT field on checklist. Backend: 15/15 pytest passed against public URL (all endpoints + filters + auth + PDF magic bytes). Frontend: DDT field, admin login, tabs, PDF download, notion-exits toggle (475 rows), DDT filter reduce-to-zero all work. QR scanner refactor SUCCEEDED at eliminating console errors — 0 pageerrors across 3 open/close cycles, no 'Cannot transition' errors. Two frontend issues found: (1) Clear-filters button uses stale closure so it doesn't restore results, (2) QR scanner shows generic 'sconosciuto' error in headless (probably portal-timing constructor failure). No test shipments were created per instructions.",
+  "tested_scope": ["backend", "frontend", "integration"],
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "AdminPage HistoryTab.clearFilters",
+        "issue": "Pressing 'Pulisci' does not restore the unfiltered list. After applying a filter that yields 0 rows and clicking 'Pulisci', Spedizioni App still shows 0. Root cause: clearFilters calls setFCliente('') etc then setTimeout(()=>loadLocal(),0). loadLocal is a closure captured from the previous render, so it reads the OLD filter state (fCliente still='ZZZ...'). React re-render happens before setTimeout, but the loadLocal reference inside the setTimeout is the stale one. Fix: pass the empty values explicitly to a helper, or use useEffect on filter state, or call loadLocalWith({cliente:'',...}).",
+        "selector": "[data-testid=\"clear-filters-btn\"]",
+        "priority": "HIGH"
+      },
+      {
+        "component": "BarcodeScanner",
+        "issue": "Scanner dialog displays 'Errore inizializzazione scanner: sconosciuto' on every open (verified across 3 open/close cycles) in headless/browser test. new Html5Qrcode(id) is throwing but with no message. Likely the Radix Dialog portal has not yet inserted the target div id=barcode-scanner-region-N into the DOM when the useEffect runs (portal children mount happens in a microtask on some Radix versions). Recommend: defer constructor with a short setTimeout / requestAnimationFrame, or wait for document.getElementById(containerIdRef.current) to exist before constructing. Note: NO uncaught console errors were thrown — the refactor DID succeed at preventing 'Cannot transition to a new state' errors and unhandled rejections. This is only a UX degradation (generic error text).",
+        "selector": "[data-testid=\"scanner-dialog\"]",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed": [
+    "Backend GET /api/ 200 with notion_configured=true",
+    "Backend POST /api/admin/login 200 admin123 / 401 wrong password",
+    "Backend GET /api/admin/history 401 without header, 200 with X-Admin-Password",
+    "Backend GET /api/admin/history?cliente/ddt/materiale/date_from/date_to filters all reduce results correctly",
+    "Backend GET /api/admin/notion-exits 200 with items list; cliente filter reduces results; requires admin auth",
+    "Backend GET /api/admin/history/{id}/pdf: 404 for nonexistent, 200 application/pdf with 'DDT-' in Content-Disposition and %PDF magic bytes for real id",
+    "Frontend Admin login (admin123) succeeds",
+    "Frontend Storico tab loads 7 app shipments + 475 Notion external exits",
+    "Frontend PDF button downloads file named DDT-DDT-2026-TEST-001.pdf (correct pattern)",
+    "Frontend DDT filter with nonexistent value reduces to 0 rows",
+    "Frontend Notion exits checkbox: uncheck → 0 rows visible, recheck → 475 rows back",
+    "Frontend checklist page loads, Numero DDT input present (data-testid=input-ddt) and accepts text",
+    "Frontend Wallbox filter shows serialized items with S/N badge, incrementing quantity reveals serial input row with QR scan button",
+    "Frontend QR scanner opens dialog on click; 3 open/close cycles → 0 uncaught console errors, 0 pageerrors, no 'Cannot transition to a new state' errors (refactor goal achieved)"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_admin_features.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix HistoryTab.clearFilters — replace setTimeout(loadLocal, 0) with an approach that reads the reset values. Simplest: pass explicit params like loadLocal({cliente:'', materiale:'', ddt:'', from:'', to:''}) and refactor loadLocal to accept overrides, OR add a useEffect on filter state that debounces load, OR call loadLocal after state resets via a ref.",
+    "Improve BarcodeScanner initialization: wait until document.getElementById(containerIdRef.current) exists (using requestAnimationFrame or a short setTimeout) before calling new Html5Qrcode(). Also surface e?.name in the error message so 'sconosciuto' becomes actionable."
+  ],
+  "critical_code_review_comments": [
+    "clearFilters uses stale closure — high-impact functional bug for admin UX.",
+    "BarcodeScanner useEffect deps on [open] is correct; onDetectedRef fix is good; however constructor should be defensive against portal timing (see action item).",
+    "Backend /api/admin/notion-exits performs list_inventory() every call (used to build name_map). Consider caching for a few seconds — currently ~1-3 s per admin history reload, and the frontend loads it on Applica/Pulisci/toggle. Minor perf.",
+    "PDF endpoint: media_type + Content-Disposition correct; consider streaming via BackgroundTask cleanup, minor.",
+    "server.py has ~600 lines, still manageable but starting to warrant splitting admin routes into a separate module."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_admin_features.py (new)"
+  ],
+  "success_rate": {"backend": "100% (15/15)", "frontend": "~85% (2 issues)"},
+  "test_credentials": "admin_password=admin123 (from backend/.env ADMIN_PASSWORD)",
+  "seed_data_creation": "No new shipments created (per instructions). Reused existing 7 app history rows + 475 Notion exits already present.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend endpoints for history filters, notion-exits, PDF are solid — regression suite at /app/backend/tests/test_admin_features.py. When retesting after fixes, prioritize (1) applying a filter, then Pulisci → verify all 7 (or current count) app shipments reappear, and (2) reopen BarcodeScanner in headless browser and verify no 'sconosciuto' error appears (either 'Avvio fotocamera…' persists or a specific permission/HTTPS error). Do NOT create real shipments — Notion inventory really decrements."
+}

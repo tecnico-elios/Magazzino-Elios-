@@ -25,6 +25,7 @@ import {
   ClockCounterClockwise,
   Package,
   ArrowsClockwise,
+  FilePdf,
 } from "@phosphor-icons/react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -387,117 +388,374 @@ function RecipientsTab() {
   );
 }
 
-// ---------- History tab ----------
+// ---------- History tab (with filters + PDF + Notion exits) ----------
 function HistoryTab() {
   const [items, setItems] = useState([]);
+  const [notionExits, setNotionExits] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingNotion, setLoadingNotion] = useState(false);
   const [expanded, setExpanded] = useState(null);
+  const [downloadingId, setDownloadingId] = useState(null);
+
+  // Filters
+  const [fCliente, setFCliente] = useState("");
+  const [fMateriale, setFMateriale] = useState("");
+  const [fDdt, setFDdt] = useState("");
+  const [fFrom, setFFrom] = useState("");
+  const [fTo, setFTo] = useState("");
+  const [showNotion, setShowNotion] = useState(true);
+
+  const loadLocal = async (override) => {
+    const f = override || { c: fCliente, m: fMateriale, d: fDdt, from: fFrom, to: fTo };
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if ((f.c || "").trim()) params.set("cliente", f.c.trim());
+      if ((f.m || "").trim()) params.set("materiale", f.m.trim());
+      if ((f.d || "").trim()) params.set("ddt", f.d.trim());
+      if (f.from) params.set("date_from", f.from);
+      if (f.to) params.set("date_to", f.to);
+      const { data } = await axios.get(
+        `${API}/admin/history?${params.toString()}`,
+        { headers: authHeaders() }
+      );
+      setItems(data.items || []);
+    } catch (e) {
+      toast.error("Errore caricamento", {
+        description: e?.response?.data?.detail || e?.message,
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadNotion = async (override) => {
+    if (!showNotion && !override) return;
+    const f = override || { c: fCliente, m: fMateriale, from: fFrom, to: fTo };
+    setLoadingNotion(true);
+    try {
+      const params = new URLSearchParams();
+      if ((f.c || "").trim()) params.set("cliente", f.c.trim());
+      if ((f.m || "").trim()) params.set("materiale", f.m.trim());
+      if (f.from) params.set("date_from", f.from);
+      if (f.to) params.set("date_to", f.to);
+      const { data } = await axios.get(
+        `${API}/admin/notion-exits?${params.toString()}`,
+        { headers: authHeaders() }
+      );
+      setNotionExits(data.items || []);
+    } catch (e) {
+      setNotionExits([]);
+    } finally {
+      setLoadingNotion(false);
+    }
+  };
 
   useEffect(() => {
-    (async () => {
-      try {
-        const { data } = await axios.get(`${API}/admin/history?limit=200`, {
-          headers: authHeaders(),
-        });
-        setItems(data.items || []);
-      } catch (e) {
-        toast.error("Errore caricamento", { description: e?.message });
-      } finally {
-        setLoading(false);
-      }
-    })();
+    loadLocal();
+    loadNotion();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (loading) return <div className="text-slate-500">Caricamento…</div>;
-  if (items.length === 0)
-    return (
-      <div className="text-center py-12 border border-dashed border-slate-300 rounded-md text-slate-500">
-        Nessuna checklist inviata ancora.
-      </div>
-    );
+  const applyFilters = () => {
+    loadLocal();
+    loadNotion();
+  };
+
+  const clearFilters = () => {
+    setFCliente("");
+    setFMateriale("");
+    setFDdt("");
+    setFFrom("");
+    setFTo("");
+    const empty = { c: "", m: "", d: "", from: "", to: "" };
+    loadLocal(empty);
+    loadNotion(empty);
+  };
+
+  const downloadPdf = async (checklistId, ddt) => {
+    setDownloadingId(checklistId);
+    try {
+      const resp = await axios.get(
+        `${API}/admin/history/${checklistId}/pdf`,
+        { headers: authHeaders(), responseType: "blob" }
+      );
+      const blob = new Blob([resp.data], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `DDT-${(ddt || checklistId).replace(/[\/ ]/g, "_")}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast.success("PDF generato");
+    } catch (e) {
+      toast.error("Errore generazione PDF", {
+        description: e?.response?.data?.detail || e?.message,
+      });
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  const fmtDateTime = (iso) => {
+    if (!iso) return "";
+    try {
+      return new Date(iso).toLocaleString("it-IT");
+    } catch {
+      return iso;
+    }
+  };
 
   return (
-    <div className="space-y-2">
-      <div className="text-sm text-slate-600 mb-2">
-        {items.length} spedizione/i registrate (più recenti in cima).
-      </div>
-      {items.map((it) => {
-        const isOpen = expanded === it.id;
-        const totalUnits = (it.items || []).reduce(
-          (a, i) => a + (i.quantity || 0),
-          0
-        );
-        const created = it.created_at
-          ? new Date(it.created_at).toLocaleString("it-IT")
-          : "";
-        return (
-          <div
-            key={it.id}
-            className="border border-slate-200 rounded-md bg-white overflow-hidden"
-            data-testid={`history-${it.id}`}
+    <div className="space-y-4">
+      {/* Filters */}
+      <div className="bg-white border border-slate-200 rounded-md p-4 space-y-3">
+        <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          Filtri
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div>
+            <Label className="text-xs font-semibold text-slate-600">Cliente</Label>
+            <Input
+              value={fCliente}
+              onChange={(e) => setFCliente(e.target.value)}
+              placeholder="Nome cliente…"
+              className="h-10 mt-1"
+              data-testid="filter-cliente"
+            />
+          </div>
+          <div>
+            <Label className="text-xs font-semibold text-slate-600">Materiale</Label>
+            <Input
+              value={fMateriale}
+              onChange={(e) => setFMateriale(e.target.value)}
+              placeholder="Nome materiale…"
+              className="h-10 mt-1"
+              data-testid="filter-materiale"
+            />
+          </div>
+          <div>
+            <Label className="text-xs font-semibold text-slate-600">Numero DDT</Label>
+            <Input
+              value={fDdt}
+              onChange={(e) => setFDdt(e.target.value)}
+              placeholder="DDT-2026-…"
+              className="h-10 mt-1 font-mono-tight"
+              data-testid="filter-ddt"
+            />
+          </div>
+          <div>
+            <Label className="text-xs font-semibold text-slate-600">Data da</Label>
+            <Input
+              type="date"
+              value={fFrom}
+              onChange={(e) => setFFrom(e.target.value)}
+              className="h-10 mt-1"
+              data-testid="filter-from"
+            />
+          </div>
+          <div>
+            <Label className="text-xs font-semibold text-slate-600">Data a</Label>
+            <Input
+              type="date"
+              value={fTo}
+              onChange={(e) => setFTo(e.target.value)}
+              className="h-10 mt-1"
+              data-testid="filter-to"
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            type="button"
+            onClick={applyFilters}
+            className="h-10 bg-slate-900 hover:bg-slate-800"
+            data-testid="apply-filters-btn"
           >
-            <button
-              type="button"
-              onClick={() => setExpanded(isOpen ? null : it.id)}
-              className="w-full text-left px-4 py-3 flex items-center justify-between gap-2 hover:bg-slate-50"
-            >
-              <div className="flex-1 min-w-0">
-                <div className="font-semibold text-slate-900 truncate">
-                  Cliente: {it.structure} — {it.shipping_date}
+            Applica filtri
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={clearFilters}
+            className="h-10"
+            data-testid="clear-filters-btn"
+          >
+            Pulisci
+          </Button>
+          <label className="flex items-center gap-2 ml-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={showNotion}
+              onChange={(e) => setShowNotion(e.target.checked)}
+              className="h-4 w-4"
+            />
+            Includi uscite Notion (esterne all'app)
+          </label>
+        </div>
+      </div>
+
+      {/* Local shipments */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Spedizioni App ({items.length})
+          </div>
+        </div>
+        {loading ? (
+          <div className="text-slate-500">Caricamento…</div>
+        ) : items.length === 0 ? (
+          <div className="text-center py-8 border border-dashed border-slate-300 rounded-md text-slate-500 text-sm">
+            Nessuna spedizione app corrisponde ai filtri.
+          </div>
+        ) : (
+          items.map((it) => {
+            const isOpen = expanded === it.id;
+            const totalUnits = (it.items || []).reduce(
+              (a, i) => a + (i.quantity || 0),
+              0
+            );
+            return (
+              <div
+                key={it.id}
+                className="border border-slate-200 rounded-md bg-white overflow-hidden"
+                data-testid={`history-${it.id}`}
+              >
+                <div className="w-full px-4 py-3 flex items-center justify-between gap-2 hover:bg-slate-50">
+                  <button
+                    type="button"
+                    onClick={() => setExpanded(isOpen ? null : it.id)}
+                    className="flex-1 min-w-0 text-left"
+                  >
+                    <div className="font-semibold text-slate-900 truncate">
+                      Cliente: {it.structure} — {it.shipping_date}
+                      {it.ddt_number && (
+                        <span className="ml-2 font-mono-tight text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-0.5">
+                          DDT {it.ddt_number}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-0.5 truncate">
+                      Operatore: {it.operator} • Inviato il {fmtDateTime(it.created_at)}
+                    </div>
+                  </button>
+                  <Badge variant="outline" className="border-slate-300 shrink-0">
+                    <Package size={14} className="mr-1" /> {totalUnits} pz
+                  </Badge>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => downloadPdf(it.id, it.ddt_number)}
+                    disabled={downloadingId === it.id}
+                    className="h-9 shrink-0"
+                    data-testid={`pdf-${it.id}`}
+                    title="Scarica PDF DDT"
+                  >
+                    <FilePdf size={16} className="mr-1" />
+                    {downloadingId === it.id ? "…" : "PDF"}
+                  </Button>
                 </div>
-                <div className="text-xs text-slate-500 mt-0.5 truncate">
-                  Operatore: {it.operator} • Inviato il {created}
-                </div>
-              </div>
-              <Badge variant="outline" className="border-slate-300 shrink-0">
-                <Package size={14} className="mr-1" /> {totalUnits} pz
-              </Badge>
-            </button>
-            {isOpen && (
-              <div className="border-t border-slate-200 px-4 py-3 space-y-3 bg-slate-50">
-                <div className="text-xs text-slate-500">
-                  Email: {(it.recipients || []).join(", ") || "—"}
-                </div>
-                <div className="space-y-2">
-                  {(it.items || []).map((row, j) => {
-                    const mv = (it.movements || []).find((m) => m.page_id === row.page_id);
-                    return (
-                      <div
-                        key={j}
-                        className="bg-white border border-slate-200 rounded-md px-3 py-2"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium text-slate-900">{row.name}</span>
-                          <span className="font-mono-tight text-sm text-slate-600">
-                            × {row.quantity} {row.unit || "pz"}
-                          </span>
-                        </div>
-                        {mv && (
-                          <div className="text-xs text-slate-500 mt-1 font-mono-tight">
-                            Stock: {mv.before} → {mv.after} {mv.unit || "pz"}
+                {isOpen && (
+                  <div className="border-t border-slate-200 px-4 py-3 space-y-3 bg-slate-50">
+                    <div className="text-xs text-slate-500">
+                      Email: {(it.recipients || []).join(", ") || "—"}
+                    </div>
+                    <div className="space-y-2">
+                      {(it.items || []).map((row, j) => {
+                        const mv = (it.movements || []).find(
+                          (m) => m.page_id === row.page_id
+                        );
+                        return (
+                          <div
+                            key={j}
+                            className="bg-white border border-slate-200 rounded-md px-3 py-2"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-medium text-slate-900">{row.name}</span>
+                              <span className="font-mono-tight text-sm text-slate-600">
+                                × {row.quantity} {row.unit || "pz"}
+                              </span>
+                            </div>
+                            {mv && (
+                              <div className="text-xs text-slate-500 mt-1 font-mono-tight">
+                                Stock: {mv.before} → {mv.after} {mv.unit || "pz"}
+                              </div>
+                            )}
+                            {row.serials && row.serials.length > 0 && (
+                              <ul className="mt-1 ml-4 text-xs font-mono-tight text-slate-600 list-disc">
+                                {row.serials.map((s, k) => (
+                                  <li key={k}>{s}</li>
+                                ))}
+                              </ul>
+                            )}
                           </div>
-                        )}
-                        {row.serials && row.serials.length > 0 && (
-                          <ul className="mt-1 ml-4 text-xs font-mono-tight text-slate-600 list-disc">
-                            {row.serials.map((s, k) => (
-                              <li key={k}>{s}</li>
-                            ))}
-                          </ul>
-                        )}
+                        );
+                      })}
+                    </div>
+                    {it.notes && (
+                      <div className="text-xs text-slate-700 bg-amber-50 border-l-2 border-amber-400 px-3 py-2 rounded-sm">
+                        <strong>Note:</strong> {it.notes}
                       </div>
-                    );
-                  })}
-                </div>
-                {it.notes && (
-                  <div className="text-xs text-slate-700 bg-amber-50 border-l-2 border-amber-400 px-3 py-2 rounded-sm">
-                    <strong>Note:</strong> {it.notes}
+                    )}
                   </div>
                 )}
               </div>
-            )}
+            );
+          })
+        )}
+      </div>
+
+      {/* Notion external exits */}
+      {showNotion && (
+        <div className="space-y-2 pt-4">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+              Uscite Notion esterne all'app ({notionExits.length})
+            </div>
+            {loadingNotion && <span className="text-xs text-slate-400">Caricamento…</span>}
           </div>
-        );
-      })}
+          {!loadingNotion && notionExits.length === 0 ? (
+            <div className="text-center py-6 border border-dashed border-slate-300 rounded-md text-slate-500 text-sm">
+              Nessuna uscita Notion esterna con questi filtri.
+            </div>
+          ) : (
+            notionExits.map((ex) => (
+              <div
+                key={ex.id}
+                className="border border-slate-200 rounded-md bg-white px-4 py-3 flex items-center justify-between gap-3"
+                data-testid={`notion-exit-${ex.id}`}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-slate-900 truncate">
+                    {ex.item_name || "Materiale ?"}
+                    <span className="ml-2 font-mono-tight text-xs text-slate-500">
+                      SN: {ex.sn || "—"}
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-0.5 truncate">
+                    Cliente: {ex.cliente || "—"} • {ex.date || fmtDateTime(ex.created_time)}
+                  </div>
+                </div>
+                <Badge variant="outline" className="border-slate-300 shrink-0">
+                  × {ex.quantity ?? "?"} {ex.unit || "pz"}
+                </Badge>
+                {ex.url && (
+                  <a
+                    href={ex.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-blue-600 hover:underline shrink-0"
+                  >
+                    Notion ↗
+                  </a>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }

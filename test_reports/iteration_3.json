@@ -1,0 +1,31 @@
+{
+  "summary": "Re-tested the 2 regression fixes described in the review. BOTH FIXES ARE NOT APPLIED in the current source code. HistoryTab.clearFilters still uses setTimeout(...,0) with stale closure (loadLocal/loadNotion do NOT accept an override object). BarcodeScanner still calls new Html5Qrcode(containerIdRef.current) immediately without the requestAnimationFrame wait. Live behavior matches the pre-fix bugs: 'Pulisci' does NOT restore full list, and the scanner shows 'Errore inizializzazione scanner: sconosciuto' every open. Sanity regressions (PDF download, DDT filter->0, Notion toggle, DDT input on checklist) still pass.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "AdminPage HistoryTab / clearFilters", "issue": "REGRESSION FIX NOT APPLIED. File still contains: const clearFilters=()=>{ setFCliente(''); ... setTimeout(()=>{ loadLocal(); loadNotion(); },0); }. loadLocal/loadNotion still read from state via closure; setTimeout(fn,0) does NOT capture the newly-set empty state — the function refs used inside setTimeout are the SAME references defined during the current render, which close over the pre-clear filter values. Observed: baseline 7 rows -> filter DDT=ZZZZZZ -> 0 rows -> Pulisci -> STILL 0 rows (expected 7). Reproduced 3x (DDT, Cliente, Data range).", "selector": "[data-testid=\"clear-filters-btn\"]", "priority": "HIGH"},
+      {"component": "BarcodeScanner", "issue": "REGRESSION FIX NOT APPLIED. File still calls `new Html5Qrcode(containerIdRef.current, {verbose:false})` synchronously inside the useEffect on `open`. There is no requestAnimationFrame loop waiting for document.getElementById(containerIdRef.current). Result: html5-qrcode throws at construction (target node not yet in DOM inside the Radix Dialog portal on first paint) with an Error whose `.message` is empty/undefined, so the fallback string 'sconosciuto' is displayed. Reproduced 3/3 open cycles: 'Errore inizializzazione scanner: sconosciuto'. 'Avvio fotocamera…' text is NEVER shown (starting is set to false immediately in the synchronous catch).", "selector": "[data-testid=\"scanner-error\"]", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_3.json", "/app/test_reports/iteration_2.json"],
+  "action_items": [
+    "Actually apply Fix #1 to /app/frontend/src/pages/AdminPage.jsx: change loadLocal/loadNotion signatures to accept an override object { c, m, d, from, to } and use those inside the function bodies instead of reading state via closure. clearFilters should call loadLocal({c:'',m:'',d:'',from:'',to:''}) and loadNotion({c:'',m:'',from:'',to:''}) directly (drop setTimeout). Currently the file still has the old setTimeout-based stale-closure version.",
+    "Actually apply Fix #2 to /app/frontend/src/components/BarcodeScanner.jsx: before `new Html5Qrcode(containerIdRef.current)`, wait via requestAnimationFrame (up to ~60 frames) until document.getElementById(containerIdRef.current) returns a node. Also include err.name in the fallback: setError('Errore inizializzazione scanner: ' + (e?.name||'') + ' ' + (e?.message||'sconosciuto')). Currently file constructs synchronously with no wait.",
+    "After applying both fixes, retest with the same steps in this report."
+  ],
+  "critical_code_review_comments": [
+    "AdminPage.jsx clearFilters bug is a classic React stale-closure. setTimeout(fn,0) does NOT solve it because the loader functions referenced inside the setTimeout callback are the same function objects defined during the current render — they close over the pre-clear state. Passing overrides as arguments (as the review request describes) is the correct fix.",
+    "BarcodeScanner.jsx: fatal error message uses 'e?.message || \"sconosciuto\"' — html5-qrcode sometimes throws a plain Error with an empty message when the target element id is not yet in the DOM. This is exactly what is happening because the Dialog portal mounts its children after the effect fires. Add DOM readiness check via rAF as described, and include e?.name for diagnostics.",
+    "AdminPage.jsx is 831 lines — split HistoryTab, InventoryTab, RecipientsTab, LoginScreen into their own files."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (per request)", "frontend": "2/5 regression tests pass (sanity items pass; both new fixes fail)"},
+  "test_credentials": "admin_password=admin123",
+  "seed_data_creation": "None. As per instructions, no new shipments were created (Notion decrements real stock).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 3: E1 claimed 2 fixes were applied but source inspection shows neither AdminPage.jsx nor BarcodeScanner.jsx were actually modified. Live behavior confirms both bugs still present. Once E1 applies the described fixes, rerun the same Playwright flow: (1) login /admin admin123 -> Storico -> baseline count -> apply filter that yields 0 -> Pulisci -> assert count returns to baseline (repeat for Cliente and Data range). (2) On / filter Wallbox -> increase qty on any serialized item (S/N badge) -> click item-{id}-sn-0-scan -> open dialog -> assert scanner-error text does NOT contain 'sconosciuto' and 'Avvio fotocamera' is shown briefly. Do 3 cycles. Baseline history was 7 rows; local shipments and Notion exits are separate lists.",
+  "rca of the issue": "Both fixes described in the review request appear undelivered/uncommitted. AdminPage.jsx clearFilters at lines 464-474 still contains the setTimeout stale-closure version. BarcodeScanner.jsx at lines 55-61 still calls new Html5Qrcode synchronously. Reproduction: 100% (3/3 for each). Mitigation: apply the code changes as specified in the review request — accept override args in loaders, wait for DOM element via rAF before constructing Html5Qrcode."
+}

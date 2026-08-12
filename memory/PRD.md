@@ -1,61 +1,55 @@
 # PRD — Checklist Magazzino Spedizioni (Elios Tech)
 
 ## Original Problem Statement
-Applicazione web/mobile responsive per gestione magazzino e controllo checklist spedizioni. Integrata con Notion come single-source-of-truth per le quantità.
+Applicazione web/mobile responsive per gestione magazzino e controllo checklist spedizioni. Integrata con Notion (DB INVENTARIO) come single-source-of-truth per le quantità disponibili.
 
 ## User Choices
-- **Servizio email**: Resend gestito da Emergent
-- **Destinatario prefissato**: `tecnico@eliostech.org` (modificabile da admin)
-- **Notion Database**: `INVENTARIO` (id `279a9b09-6783-8059-95c0-cc6bcab9ed80`), data source `Inventario` (materiali) + `Inventory Tracker` (uscite/picks)
-- **Password admin**: `admin123` (env `ADMIN_PASSWORD`)
-- **Campo "Cliente / Destinazione"** al posto di "Struttura"
-- **Nessuna autenticazione operatore** per la checklist
+- Servizio email: **Resend gestito da Emergent** → `tecnico@eliostech.org`
+- Notion Database: **INVENTARIO**, data source `Inventario` (materiali con formula `QTA in magazzino`) + `Inventory Tracker` (uscite/picks)
+- Password admin: `admin123` (env `ADMIN_PASSWORD`)
+- Campo shipment: **"Cliente / Destinazione"** + **"Numero DDT"** (opzionale)
+- Nessuna autenticazione operatore
 
 ## Architecture
-- **Backend**: FastAPI + Motor (MongoDB) + httpx (Resend + Notion)
-- **Frontend**: React + Shadcn UI + Tailwind + Sonner + html5-qrcode + @phosphor-icons/react
-- **Notion**: API v2025-09-03, data-source endpoint. Legge `Inventario` (con formula `QTA in magazzino`), scrive un record in `Inventory Tracker` per ogni spedizione (audit trail nativo)
-- **DB Mongo**: `checklists` (storico), `settings` (destinatari + override "serializzato" per page_id)
+- **Backend**: FastAPI + Motor (Mongo) + httpx (Resend + Notion) + reportlab (PDF)
+- **Frontend**: React + Shadcn UI + Sonner + html5-qrcode + @phosphor-icons/react
+- **Notion**: API v2025-09-03, endpoint data-source
+- **DB Mongo**: `checklists` (storico app), `settings.recipients` (destinatari email), `settings.serial_overrides` (override "serializzato" per page_id)
 
-## Environment Variables (backend/.env)
-- `EMERGENT_EMAIL_KEY`, `EMAIL_FROM_NAME` — Resend gestito da Emergent
-- `CHECKLIST_RECIPIENTS` — seed destinatari
+## Env vars (backend/.env)
+- `EMERGENT_EMAIL_KEY`, `EMAIL_FROM_NAME`, `CHECKLIST_RECIPIENTS`
 - `ADMIN_PASSWORD`
-- `NOTION_TOKEN` — Internal Integration Token
-- `NOTION_INVENTARIO_DS_ID` — data source "Inventario"
-- `NOTION_TRACKER_DS_ID` — data source "Inventory Tracker"
-- `NOTION_VERSION=2025-09-03`
+- `NOTION_TOKEN`, `NOTION_INVENTARIO_DS_ID`, `NOTION_TRACKER_DS_ID`, `NOTION_VERSION`
 
-## What's Been Implemented
+## Implementation Timeline
+
 ### v1 — MVP checklist (12/02/2026)
-- Form spedizione responsive con 3 categorie hardcoded, quantità + seriali, scanner QR/barcode, invio email Resend.
+Form spedizione responsive, 3 categorie hardcoded, quantità + seriali, scanner QR/barcode, invio email Resend.
 
 ### v2 — Pannello admin (12/02/2026)
-- `/admin` protetto da password, tab Catalogo (edit), Destinatari, Storico. Catalogo in MongoDB.
+`/admin` con password, tab Catalogo (edit), Destinatari, Storico. Catalogo su MongoDB.
 
 ### v3 — Integrazione Notion (12/02/2026)
-- **Notion diventa la fonte primaria** dei materiali e delle quantità disponibili.
-- `GET /api/inventory`: legge live da Notion (data source Inventario) con quantità formula `QTA in magazzino`, categorie, unità, override "serializzato" locale.
-- `POST /api/checklist/send`: **re-legge** ogni item da Notion al momento della conferma → verifica disponibilità → crea record in `Inventory Tracker` (uno per SN per materiali serializzati, uno aggregato per non-serializzati) → Notion aggiorna la quantità via formula/rollup → invia email → persiste storico. Rollback (archive) dei tracker in caso di errore.
-- Frontend: `useInventory` hook, filtri per categoria, badge "S/N" e "disponibili X pz" per riga, bottone **Aggiorna Magazzino** (rileggi da Notion), errore chiaro se Notion non raggiungibile, disabilita quantità > disponibile.
-- Admin tab "Catalogo" sostituito da **"Inventario Notion"** (read-only + toggle Serializzato per page_id — salvato in MongoDB `settings.serial_overrides`).
-- Storico admin: mostra ora "Cliente" + movimenti (before → after) per ogni riga.
-- Rinominato campo form da "Struttura" a "Cliente / Destinazione".
+`GET /api/inventory` live da Notion, `POST /api/checklist/send` re-legge + verifica + crea pick in Tracker + email + storico. Rollback su errore. Frontend: filtri per categoria, badge S/N, bottone Aggiorna. Admin: Catalogo → Inventario Notion (read-only + toggle Serializzato locale).
 
-## Test Coverage — v3 E2E
-Tutti passati (verifica manuale via curl su URL pubblico):
-- ✅ 400 se manca operatore/cliente/data
-- ✅ 400 se nessun materiale con quantità > 0
-- ✅ 400 se materiale serializzato senza seriali completi (esatto match tra n. serials e quantity)
-- ✅ 409 "Quantità non disponibile. {nome}: disponibili {X} {unit} — richiesti {Y} {unit}"
-- ✅ 200 spedizione reale: Cavo Molex 5→4 su Notion (record Inventory Tracker creato) + email inviata + storico salvato
-- ✅ /api/inventory ritorna 42 items live da Notion, 5 categorie corrette
-- ✅ Frontend: carica 42 items in ~2s, filtri categoria funzionanti, WWallbox marcato serializzato di default
+### v4 — DDT, Storico completo, Filtri, PDF, Fix QR (12/02/2026)
+- **Numero DDT**: nuovo campo opzionale nel form spedizione, mostrato in badge nello storico + prominente nel PDF
+- **Storico Uscite Notion**: `GET /api/admin/notion-exits` legge live Inventory Tracker, risolve nomi materiali via inventario map, filtra righe vuote (475 righe reali). Sezione dedicata nel tab Storico admin (con toggle on/off)
+- **Filtri Storico**: Cliente, Materiale, Numero DDT, Data da/a. Applicati sia a spedizioni app (query MongoDB) sia a uscite Notion (filtro post-fetch)
+- **PDF DDT**: `GET /api/admin/history/{id}/pdf` genera PDF professionale con reportlab: header con DDT number, info block (Cliente/Data/Operatore), tabella materiali (Codice, Q.tà, Unità, Seriali), note, area firma operatore + firma cliente. Download via axios blob
+- **Fix BarcodeScanner**: refactor per fixare `sconosciuto` error causato da Radix Dialog portal mount timing. Ora usa `requestAnimationFrame` loop fino a 60 frames per attendere il div nel DOM prima di costruire Html5Qrcode. Callback ref pattern per onDetected. Guard su start/stop concurrent calls. Messaggi errore specifici (permission/https/notfound/inuse)
+- **Fix clearFilters**: passa override object direttamente a loadLocal/loadNotion (no più stale closure via setTimeout)
+
+## Test Coverage — v4
+- **Backend**: 15/15 pytest passed (iteration_2). Filtri storico, notion-exits, PDF 200 con Content-Disposition, PDF 404 su id inesistente, magic bytes PDF verificati
+- **Frontend**: 100% (iteration_4). ClearFilters ripristina baseline count, BarcodeScanner 3 cicli open/close puliti, PDF download DDT-*.pdf, filtri riducono correttamente, Notion exits toggle
+- **PDF visivo verificato**: layout professionale, testo leggibile, aree firma con linee, DDT number prominente
 
 ## Prioritized Backlog
-- P1 **Storico su Notion**: leggere Inventory Tracker per mostrare uscite anche fatte fuori app
-- P1 **Multi-spedizione per cliente**: gruppo di uscite sotto un unico DDT
-- P2 **PWA/Installabile**: manifest + service worker per icona home screen
-- P2 **Filtro storico**: per cliente, data range, materiale
-- P2 **Export PDF/DDT**: dallo storico admin
-- P3 **Notion Serializzato nativo**: se l'utente aggiunge una colonna checkbox "Serializzato" in Notion, il codice la usa automaticamente (già supportato) invece dell'override locale
+- P1 **Modifica/annulla spedizione**: dallo storico ripristinare quantità Notion se una spedizione è stata registrata per errore
+- P1 **Aggiungi colonne Notion**: opzionalmente aggiungere `Serializzato` (checkbox) e `Unità` (select) direttamente in Notion per dismettere override locale
+- P2 **PWA installabile**: manifest + service worker per icona home + funzionamento offline base
+- P2 **Multi-utente**: login operatore con tracciamento "Preso da" (people) su Notion Tracker
+- P2 **Export CSV storico**: bulk download di tutti i record filtrati
+- P3 **Notifiche in tempo reale**: dashboard che mostra soglie sotto stock minimo (QTA Minima in Stock esiste già in Notion)
+- P3 **Split file server.py**: refactoring in moduli (admin_routes.py, notion_routes.py) — attualmente ~600 righe
