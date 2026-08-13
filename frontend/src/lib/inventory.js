@@ -33,5 +33,14 @@ export function useInventory() {
     load();
   }, [load]);
 
+  // Auto-refresh from Notion every 10 minutes so long-open tabs stay fresh
+  useEffect(() => {
+    const AUTO_REFRESH_MS = 10 * 60 * 1000;
+    const id = setInterval(() => {
+      load();
+    }, AUTO_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [load]);
+
   return { items, categories, loading, error, refreshedAt, refresh: load };
 }
