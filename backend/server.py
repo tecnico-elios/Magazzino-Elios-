@@ -335,6 +335,63 @@ async def inventory():
     }
 
 
+@api_router.get("/inventory/lookup")
+async def inventory_lookup(code: str):
+    """Look up a scanned code against Notion.
+    Matches (in order):
+      1) Codice prodotto on Inventario -> status=ok, matched_by=sku
+      2) SN on Inventory Tracker      -> status=already_shipped
+      3) Otherwise                    -> status=not_found
+    """
+    code_clean = (code or "").strip()
+    if not code_clean:
+        raise HTTPException(400, "Codice mancante")
+    if not notion_service.is_configured():
+        raise HTTPException(503, "Integrazione Notion non configurata")
+    try:
+        items = await notion_service.list_inventory()
+    except Exception as e:
+        raise HTTPException(502, f"Errore lettura Notion: {e}")
+    overrides = await get_serial_overrides()
+    code_lower = code_clean.lower()
+
+    # 1) Match on Codice prodotto (SKU)
+    for it in items:
+        if (it.get("code") or "").strip().lower() == code_lower:
+            it["serialized"] = resolve_serialized(it, overrides)
+            return {
+                "status": "ok",
+                "matched_by": "sku",
+                "item": it,
+                "code": code_clean,
+            }
+
+    # 2) Match on Tracker SN (already shipped)
+    try:
+        hit = await notion_service.lookup_tracker_sn(code_clean)
+    except Exception as e:
+        raise HTTPException(502, f"Errore ricerca seriale: {e}")
+    if hit:
+        matched_item = None
+        for i in items:
+            if hit.get("item_ids") and i["id"] == hit["item_ids"][0]:
+                i["serialized"] = resolve_serialized(i, overrides)
+                matched_item = i
+                break
+        return {
+            "status": "already_shipped",
+            "matched_by": "sn_tracker",
+            "code": code_clean,
+            "serial": code_clean,
+            "item": matched_item,
+            "shipped_to": hit.get("cliente"),
+            "shipped_date": hit.get("date"),
+            "tracker_url": hit.get("url"),
+        }
+
+    return {"status": "not_found", "code": code_clean}
+
+
 @api_router.post("/checklist/send")
 async def submit_checklist(payload: ChecklistPayload):
     validate_checklist_basic(payload)

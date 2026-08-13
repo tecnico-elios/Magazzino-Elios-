@@ -9,6 +9,7 @@ import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import { Badge } from "../components/ui/badge";
 import BarcodeScanner from "../components/BarcodeScanner";
+import ScannerBar from "../components/ScannerBar";
 import {
   Minus,
   Plus,
@@ -40,6 +41,8 @@ export default function ChecklistPage() {
   const [submitting, setSubmitting] = useState(false);
   const [scanTarget, setScanTarget] = useState(null); // { page_id, index, label }
   const [filter, setFilter] = useState(CAT_ALL);
+  const [lastScan, setLastScan] = useState(null);
+  const [pendingSerializedItem, setPendingSerializedItem] = useState(null);
 
   const totalUnits = useMemo(
     () => Object.values(selections).reduce((a, s) => a + (Number(s.quantity) || 0), 0),
@@ -115,6 +118,156 @@ export default function ChecklistPage() {
     setDdtNumber("");
     setNotes("");
     setSelections({});
+    setPendingSerializedItem(null);
+    setLastScan(null);
+  };
+
+  const handleScannedCode = async (rawCode) => {
+    const code = (rawCode || "").trim();
+    if (!code) return;
+    try {
+      const { data } = await axios.get(`${API}/inventory/lookup`, {
+        params: { code },
+      });
+
+      // Case A: Notion tells us this exact SN is already in the Tracker
+      if (data.status === "already_shipped") {
+        setLastScan({
+          type: "warn",
+          title: "PRODOTTO GIÀ ASSEGNATO",
+          subtitle: data.item
+            ? `${data.item.name} — SN ${data.serial}${
+                data.shipped_to ? ` → ${data.shipped_to}` : ""
+              }${data.shipped_date ? ` (${data.shipped_date})` : ""}`
+            : `SN ${data.serial} già spedito`,
+          code,
+        });
+        return;
+      }
+
+      // Case B: Not found — possibly a fresh serial for the pending serialized item
+      if (data.status === "not_found") {
+        if (pendingSerializedItem) {
+          const target = items.find((i) => i.id === pendingSerializedItem.id);
+          if (!target) {
+            setLastScan({
+              type: "error",
+              title: "PRODOTTO NON RICONOSCIUTO",
+              subtitle: "Codice non trovato in Notion",
+              code,
+            });
+            return;
+          }
+          const avail = Number(target.quantity) || 0;
+          const cur = selections[target.id] || { quantity: 0, serials: [] };
+          if (cur.serials.some((s) => (s || "").trim() === code)) {
+            setLastScan({
+              type: "warn",
+              title: "SERIALE GIÀ NELLA CHECKLIST",
+              subtitle: `${target.name} — SN ${code}`,
+              code,
+            });
+            return;
+          }
+          if (cur.quantity + 1 > avail) {
+            setLastScan({
+              type: "warn",
+              title: "PRODOTTO NON DISPONIBILE",
+              subtitle: `${target.name} — disponibili ${avail}, richiesti ${
+                cur.quantity + 1
+              }`,
+              code,
+            });
+            return;
+          }
+          setSelections((prev) => {
+            const c = prev[target.id] || { quantity: 0, serials: [] };
+            return {
+              ...prev,
+              [target.id]: {
+                quantity: c.quantity + 1,
+                serials: [...c.serials, code],
+              },
+            };
+          });
+          setLastScan({
+            type: "ok",
+            title: "Prodotto riconosciuto",
+            subtitle: `${target.name} — SN ${code}`,
+            code,
+          });
+          return;
+        }
+        setLastScan({
+          type: "error",
+          title: "PRODOTTO NON RICONOSCIUTO",
+          subtitle:
+            "Codice non trovato in Notion. Se è un seriale, scansiona prima il codice del prodotto.",
+          code,
+        });
+        return;
+      }
+
+      // Case C: Matched SKU (Codice prodotto)
+      if (data.status === "ok" && data.item) {
+        const item = data.item;
+        const avail = Number(item.quantity) || 0;
+        if (avail <= 0) {
+          setLastScan({
+            type: "warn",
+            title: "PRODOTTO NON DISPONIBILE",
+            subtitle: `${item.name} — stock 0`,
+            code,
+          });
+          return;
+        }
+        const cur = selections[item.id] || { quantity: 0, serials: [] };
+        if (item.serialized) {
+          // Do NOT increment yet: wait for the SN scan to arrive
+          setPendingSerializedItem({ id: item.id, name: item.name });
+          setLastScan({
+            type: "ok",
+            title: "PRODOTTO DISPONIBILE — Scansiona il seriale",
+            subtitle: `${item.name} — disponibili ${avail}`,
+            code,
+          });
+          return;
+        }
+        if (cur.quantity + 1 > avail) {
+          setLastScan({
+            type: "warn",
+            title: "QUANTITÀ MASSIMA RAGGIUNTA",
+            subtitle: `${item.name} — disponibili ${avail}`,
+            code,
+          });
+          return;
+        }
+        setSelections((prev) => {
+          const c = prev[item.id] || { quantity: 0, serials: [] };
+          return {
+            ...prev,
+            [item.id]: { quantity: c.quantity + 1, serials: [] },
+          };
+        });
+        setPendingSerializedItem(null);
+        setLastScan({
+          type: "ok",
+          title: "Prodotto aggiunto",
+          subtitle: `${item.name} — quantità ora ${cur.quantity + 1} ${
+            item.unit || "pz"
+          }`,
+          code,
+        });
+      }
+    } catch (e) {
+      setLastScan({
+        type: "error",
+        title: "Errore ricerca Notion",
+        subtitle:
+          e?.response?.data?.detail || e?.message || "Riprova più tardi",
+        code,
+      });
+    }
   };
 
   const doRefresh = async () => {
@@ -254,6 +407,18 @@ export default function ChecklistPage() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+        {/* General product scanner (USB/Bluetooth keyboard + camera) */}
+        <ScannerBar
+          onScanned={handleScannedCode}
+          lastScan={lastScan}
+          onClearLastScan={() => setLastScan(null)}
+          hint={
+            pendingSerializedItem
+              ? `In attesa del seriale per: ${pendingSerializedItem.name}`
+              : "Scansiona un codice prodotto o un seriale — l'articolo sarà aggiunto automaticamente"
+          }
+        />
+
         {/* General info */}
         <section className="bg-white border border-slate-200 rounded-md p-4 sm:p-6">
           <div className="text-xs tracking-[0.1em] uppercase text-slate-500 font-semibold mb-4">

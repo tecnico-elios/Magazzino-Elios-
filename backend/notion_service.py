@@ -179,6 +179,46 @@ async def archive_page(page_id: str) -> None:
             logger.warning(f"Rollback archive failed for {page_id}: {e}")
 
 
+async def lookup_tracker_sn(sn: str) -> Optional[Dict[str, Any]]:
+    """Find an Inventory Tracker row whose SN (title) equals `sn`.
+    Used to detect a scanned serial number that has already been shipped."""
+    if not is_configured() or not NOTION_TRACKER_DS_ID:
+        return None
+    url = f"{NOTION_BASE}/data_sources/{NOTION_TRACKER_DS_ID}/query"
+    body = {
+        "filter": {"property": "SN", "title": {"equals": sn}},
+        "page_size": 5,
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(url, headers=_headers(), json=body)
+        if resp.status_code >= 400:
+            logger.error(f"Notion tracker SN lookup failed: {resp.status_code} {resp.text[:200]}")
+            return None
+        data = resp.json()
+    results = data.get("results", [])
+    if not results:
+        return None
+    p = results[0]
+    props = p.get("properties", {})
+    cliente = _plain_text(_get_prop(props, "Preso per"))
+    date_prop = _get_prop(props, "Data Uscita")
+    d = None
+    if date_prop and date_prop.get("type") == "date":
+        dv = date_prop.get("date") or {}
+        d = dv.get("start")
+    rel_prop = _get_prop(props, "Item in uscita")
+    item_ids: List[str] = []
+    if rel_prop and rel_prop.get("type") == "relation":
+        item_ids = [r.get("id") for r in (rel_prop.get("relation") or []) if r.get("id")]
+    return {
+        "id": p["id"],
+        "cliente": cliente,
+        "date": d,
+        "item_ids": item_ids,
+        "url": p.get("url"),
+    }
+
+
 async def list_exits() -> List[Dict[str, Any]]:
     """Query the Inventory Tracker data source for ALL outgoing picks in Notion,
     including those created outside this app.
