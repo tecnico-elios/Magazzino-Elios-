@@ -208,7 +208,7 @@ export default function ChecklistPage() {
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[11px] tracking-[0.2em] uppercase text-slate-500 font-semibold">
-              Elios Tech — Magazzino Notion
+              Elios Tech — Magazzino
             </div>
             <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900">
               Checklist Spedizione
