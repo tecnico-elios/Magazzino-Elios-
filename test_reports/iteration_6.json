@@ -1,0 +1,25 @@
+{
+  "summary": "Frontend-only regression after Vercel build-fix (date-fns pinned to 3.6.0, .npmrc legacy-peer-deps, resolutions/overrides). Verified via preview URL: home '/' renders brand header 'Elios Tech — Magazzino', 'Checklist Spedizione', all four input fields (Nome Operatore/Data Spedizione/Cliente/Numero DDT), filter chips Tutti(42)/Accessori(23)/E-Bike(1)/Go-e(2)/Stand(4)/Wallbox(12) with correct counts, inventory rows loaded from Notion (Cavo Molex, Cable Dock Daze, Modem Daze, etc.). /admin login with admin123 works; all three tabs (Inventario Notion / Destinatari / Storico) switch and load data (9 spedizioni in Storico). Zero console errors, zero pageerrors, zero date-fns / react-day-picker module-resolution errors on both routes. Bundle loads cleanly.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/admin Storico filters", "issues": ["Date-da/Date-a use browser-native date input (mm/dd/yyyy) rather than shadcn Calendar — inconsistent with data-spedizione HTML5 date on home; low priority, unchanged by this build fix"]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "package.json now has three redundant date-fns pins (dependencies=3.6.0, resolutions=3.6.0, overrides=3.6.0). Keep them aligned to avoid future drift.",
+    ".npmrc legacy-peer-deps=true only affects npm/Vercel; note in README so future upgrades to react-day-picker v9 remove the workaround."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (not tested per request)", "frontend": "100%"},
+  "test_credentials": "admin_password=admin123",
+  "seed_data_creation": "none — instructed not to create shipments (would decrement Notion stock)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Vercel deps fix verified runtime-safe. No shipments created during test. QR scanner button was not visible from home page top-level — if next test needs to verify QR scanner, look for it inside per-row inventory expand or a fab; was not reachable via generic 'QR/Scan' text search on '/'.",
+  "rca of the issue": "N/A — build/deps fix only, no runtime regression detected."
+}
