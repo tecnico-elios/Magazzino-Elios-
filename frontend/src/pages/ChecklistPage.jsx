@@ -208,9 +208,10 @@ export default function ChecklistPage() {
         return;
       }
 
-      // Case C: Matched SKU (Codice prodotto)
+      // Case C: Matched SKU (Codice prodotto) OR direct SN match on Receipts
       if (data.status === "ok" && data.item) {
         const item = data.item;
+        const scannedSerial = data.serial || null; // present when matched_by === "sn_receipt"
         const avail = Number(item.quantity) || 0;
         if (avail <= 0) {
           setLastScan({
@@ -222,6 +223,47 @@ export default function ChecklistPage() {
           return;
         }
         const cur = selections[item.id] || { quantity: 0, serials: [] };
+
+        // Direct serial hit from Receipts: auto-add qty +1 with the matched SN
+        if (scannedSerial && data.matched_by === "sn_receipt") {
+          if (cur.serials.some((s) => (s || "").trim() === scannedSerial)) {
+            setLastScan({
+              type: "warn",
+              title: "SERIALE GIÀ NELLA CHECKLIST",
+              subtitle: `${item.name} — SN ${scannedSerial}`,
+              code,
+            });
+            return;
+          }
+          if (cur.quantity + 1 > avail) {
+            setLastScan({
+              type: "warn",
+              title: "PRODOTTO NON DISPONIBILE",
+              subtitle: `${item.name} — disponibili ${avail}`,
+              code,
+            });
+            return;
+          }
+          setSelections((prev) => {
+            const c = prev[item.id] || { quantity: 0, serials: [] };
+            return {
+              ...prev,
+              [item.id]: {
+                quantity: c.quantity + 1,
+                serials: [...c.serials, scannedSerial],
+              },
+            };
+          });
+          setPendingSerializedItem(null);
+          setLastScan({
+            type: "ok",
+            title: "SERIALE RICONOSCIUTO",
+            subtitle: `${item.name} — SN ${scannedSerial}`,
+            code,
+          });
+          return;
+        }
+
         if (item.serialized) {
           // Do NOT increment yet: wait for the SN scan to arrive
           setPendingSerializedItem({ id: item.id, name: item.name });

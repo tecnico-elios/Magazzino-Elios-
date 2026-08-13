@@ -1,0 +1,22 @@
+{
+  "summary": "Verified Wallbox SN Receipts lookup bug fix. Backend /api/inventory/lookup returns status=ok matched_by=sn_receipt for real SNs from Inventory Receipts, including single-serial cell (1427354 → Pulsar Pro Socket) and dot-separated multi-serial cell (1425027 → Pulsar Pro 22kw 7M). Not-found still 404-equivalent (status=not_found). SKU regression (CH02 → Cable Dock Daze, matched_by=sku) works. Frontend ChecklistPage: scanning 1427354 shows green '🟢 SERIALE RICONOSCIUTO' banner with 'Pulsar Pro Socket — SN 1427354', increments the Wallbox Pulsar Pro Socket row to qty 1 with the SN pushed. Second scan of 1427354 shows orange 'SERIALE GIÀ NELLA CHECKLIST'. CH02 SKU scan adds Cable Dock Daze qty 1. BOGUS_XYZ shows red 'PRODOTTO NON RICONOSCIUTO'. No shipments confirmed. 4/4 pytest + 4/4 frontend flows PASS.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_receipts_lookup.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "lookup_receipts_sn paginates the entire Inventory Receipts DS (page_size=100) on every scan — O(N) per lookup. For a busy warehouse this will grow slowly; consider narrowing via Notion title 'contains' filter as a first-pass short-circuit before doing the full scan.",
+    "In server.py inventory_lookup, the 3-step pipeline (list_inventory + tracker_sn + receipts_sn) issues up to 3 sequential Notion API round-trips per scan — noticeable latency (~2-3s observed). Could be parallelized with asyncio.gather for tracker+receipts.",
+    "_parse_serials splits on '.', which also matches decimal-like tokens. Not an issue for numeric serials but worth documenting; a serial like '1.5' would be split into ['1','5']. Real wallbox SNs are integers so acceptable."
+  ],
+  "updated_files": ["/app/backend/tests/test_receipts_lookup.py", "/app/test_reports/iteration_8.json"],
+  "success_rate": {"backend": "100% (4/4)", "frontend": "100% (4/4 flows)"},
+  "test_credentials": "admin_password=admin123 (not exercised in this iteration)",
+  "seed_data_creation": "None — did NOT click CONFERMA SPEDIZIONE. Local checklist state only.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Wallbox Receipts SN lookup fully validated. Real SNs to reuse: 1427354 (Pulsar Pro Socket, single-serial cell), 1425027 (Pulsar Pro 22kw 7M, dot-separated cell '1425027. 1428280. 1425022, ...'). Frontend banner selectors work via document.body.innerText check; keyword 'RICONOSCIUTO' distinguishes green banner, 'GIÀ NELLA' identifies duplicate orange banner. Backend lookup takes ~2-3s per Receipts scan (pagination full DS); wait ≥3s after each scan."
+}

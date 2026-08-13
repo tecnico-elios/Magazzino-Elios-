@@ -11,6 +11,7 @@ shipment, and Notion recomputes the available quantity automatically.
 """
 import os
 import logging
+import re
 import httpx
 from typing import List, Dict, Any, Optional
 
@@ -19,8 +20,20 @@ logger = logging.getLogger(__name__)
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "")
 NOTION_INVENTARIO_DS_ID = os.environ.get("NOTION_INVENTARIO_DS_ID", "")
 NOTION_TRACKER_DS_ID = os.environ.get("NOTION_TRACKER_DS_ID", "")
+NOTION_RECEIPTS_DS_ID = os.environ.get("NOTION_RECEIPTS_DS_ID", "")
 NOTION_VERSION = os.environ.get("NOTION_VERSION", "2025-09-03")
 NOTION_BASE = "https://api.notion.com/v1"
+
+# Serials in Inventory Receipts titles can be separated by any of: , . ; whitespace, newlines
+_SN_SEP_RE = re.compile(r"[,.;\s]+")
+
+
+def _parse_serials(text: str) -> List[str]:
+    """Split a Receipts title into individual serial tokens.
+    Handles separators: ',', '.', ';', spaces, newlines. Trims and drops empties."""
+    if not text:
+        return []
+    return [s for s in _SN_SEP_RE.split(text.strip()) if s]
 
 
 def is_configured() -> bool:
@@ -180,8 +193,6 @@ async def archive_page(page_id: str) -> None:
 
 
 async def lookup_tracker_sn(sn: str) -> Optional[Dict[str, Any]]:
-    """Find an Inventory Tracker row whose SN (title) equals `sn`.
-    Used to detect a scanned serial number that has already been shipped."""
     if not is_configured() or not NOTION_TRACKER_DS_ID:
         return None
     url = f"{NOTION_BASE}/data_sources/{NOTION_TRACKER_DS_ID}/query"
@@ -217,6 +228,61 @@ async def lookup_tracker_sn(sn: str) -> Optional[Dict[str, Any]]:
         "item_ids": item_ids,
         "url": p.get("url"),
     }
+
+
+async def lookup_receipts_sn(sn: str) -> Optional[Dict[str, Any]]:
+    """Find an Inventory Receipts row whose 'Item' title contains `sn` as one of
+    the tokens separated by commas/dots/semicolons/whitespace/newlines.
+    Returns the matched serial + relation to the Inventario item."""
+    if not is_configured() or not NOTION_RECEIPTS_DS_ID:
+        return None
+    url = f"{NOTION_BASE}/data_sources/{NOTION_RECEIPTS_DS_ID}/query"
+    body: Dict[str, Any] = {"page_size": 100}
+    sn_norm = sn.strip().lower()
+    async with httpx.AsyncClient(timeout=25) as client:
+        while True:
+            resp = await client.post(url, headers=_headers(), json=body)
+            if resp.status_code >= 400:
+                logger.error(
+                    f"Receipts query failed: {resp.status_code} {resp.text[:200]}"
+                )
+                return None
+            data = resp.json()
+            for p in data.get("results", []):
+                props = p.get("properties", {})
+                title_prop = _get_prop(props, "Item", "Aa item", "Aa Item")
+                title_text = _plain_text(title_prop)
+                serials = _parse_serials(title_text)
+                for s in serials:
+                    if s.strip().lower() == sn_norm:
+                        rel_prop = _get_prop(
+                            props, "Item in entrata", "Item in ingresso", "Item"
+                        )
+                        item_ids: List[str] = []
+                        if rel_prop and rel_prop.get("type") == "relation":
+                            item_ids = [
+                                r.get("id")
+                                for r in (rel_prop.get("relation") or [])
+                                if r.get("id")
+                            ]
+                        date_prop = _get_prop(props, "Data Consegna", "Data")
+                        d = None
+                        if date_prop and date_prop.get("type") == "date":
+                            dv = date_prop.get("date") or {}
+                            d = dv.get("start")
+                        return {
+                            "id": p["id"],
+                            "matched_serial": s,
+                            "all_serials": serials,
+                            "date": d,
+                            "item_ids": item_ids,
+                            "url": p.get("url"),
+                            "raw_title": title_text,
+                        }
+            if not data.get("has_more"):
+                break
+            body["start_cursor"] = data.get("next_cursor")
+    return None
 
 
 async def list_exits() -> List[Dict[str, Any]]:

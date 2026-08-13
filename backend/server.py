@@ -389,6 +389,28 @@ async def inventory_lookup(code: str):
             "tracker_url": hit.get("url"),
         }
 
+    # 3) Match on Inventory Receipts SN — parse multi-serial cells with , . ; \s separators
+    try:
+        rhit = await notion_service.lookup_receipts_sn(code_clean)
+    except Exception as e:
+        raise HTTPException(502, f"Errore ricerca entrate: {e}")
+    if rhit:
+        matched_item = None
+        for i in items:
+            if rhit.get("item_ids") and i["id"] == rhit["item_ids"][0]:
+                i["serialized"] = resolve_serialized(i, overrides)
+                matched_item = i
+                break
+        return {
+            "status": "ok",
+            "matched_by": "sn_receipt",
+            "code": code_clean,
+            "serial": rhit.get("matched_serial") or code_clean,
+            "item": matched_item,
+            "receipt_date": rhit.get("date"),
+            "receipt_url": rhit.get("url"),
+        }
+
     return {"status": "not_found", "code": code_clean}
 
 
