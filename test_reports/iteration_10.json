@@ -1,0 +1,25 @@
+{
+  "summary": "Retest of iteration_9 bug (arbitrary SN after Wallbox SKU no longer adds row). All 4 frontend scenarios PASS. Fresh navigation via Playwright confirms fix on disk is live in the served bundle.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "detailed_results": {
+    "step1_sku_scan": {"code": "PPR2-0-2-4-K-002", "banner": "🟢 PRODOTTO DISPONIBILE — Scansiona il seriale — Pulsar Pro 22kw 5M — disponibili 30", "pass": true},
+    "step2_invalid_sn": {"code": "9999999999", "banner": "🔴 SERIALE NON TROVATO — Il codice non risulta né tra le entrate né come codice prodotto. Non può essere aggiunto.", "total_units_after": "0 pz totali", "pass": true, "note": "Iteration_9 bug is FIXED. No row was added, red NOT_FOUND banner shown as expected."},
+    "step3_real_sn": {"code": "1427354", "banner": "🟢 SERIALE RICONOSCIUTO — Pulsar Pro Socket — SN 1427354", "total_units_after": "1 pz totali", "pass": true},
+    "step4_rescan_same_sn": {"code": "1427354", "banner": "🟠 SERIALE GIÀ NELLA CHECKLIST — Pulsar Pro Socket — SN 1427354", "pass": true}
+  },
+  "backend_grep_verification": "Not re-run (frontend-only request). Prior iteration confirmed server.py lines 435-456 have serial_conflicts pre-check and notion_service.py lookup_tracker_sn paginates via _parse_serials.",
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A", "frontend": "100%"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "iteration_9 bug (arbitrary SN added as pending row after Wallbox SKU scan) is fully resolved. ChecklistPage NOT_FOUND branch renders red 'SERIALE NON TROVATO' banner and does not mutate selections. Real SN 1427354 = Pulsar Pro Socket confirmed via Receipts lookup. Did NOT click CONFERMA SPEDIZIONE (per instructions)."
+}

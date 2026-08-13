@@ -145,64 +145,15 @@ export default function ChecklistPage() {
         return;
       }
 
-      // Case B: Not found — possibly a fresh serial for the pending serialized item
+      // Case B: Not found — a scanned serial that is NOT in Receipts.
+      // Per specification, an arbitrary SN can NEVER be added: it must be
+      // present in the Entrate database. Block with a clear message.
       if (data.status === "not_found") {
-        if (pendingSerializedItem) {
-          const target = items.find((i) => i.id === pendingSerializedItem.id);
-          if (!target) {
-            setLastScan({
-              type: "error",
-              title: "PRODOTTO NON RICONOSCIUTO",
-              subtitle: "Codice non trovato in Notion",
-              code,
-            });
-            return;
-          }
-          const avail = Number(target.quantity) || 0;
-          const cur = selections[target.id] || { quantity: 0, serials: [] };
-          if (cur.serials.some((s) => (s || "").trim() === code)) {
-            setLastScan({
-              type: "warn",
-              title: "SERIALE GIÀ NELLA CHECKLIST",
-              subtitle: `${target.name} — SN ${code}`,
-              code,
-            });
-            return;
-          }
-          if (cur.quantity + 1 > avail) {
-            setLastScan({
-              type: "warn",
-              title: "PRODOTTO NON DISPONIBILE",
-              subtitle: `${target.name} — disponibili ${avail}, richiesti ${
-                cur.quantity + 1
-              }`,
-              code,
-            });
-            return;
-          }
-          setSelections((prev) => {
-            const c = prev[target.id] || { quantity: 0, serials: [] };
-            return {
-              ...prev,
-              [target.id]: {
-                quantity: c.quantity + 1,
-                serials: [...c.serials, code],
-              },
-            };
-          });
-          setLastScan({
-            type: "ok",
-            title: "Prodotto riconosciuto",
-            subtitle: `${target.name} — SN ${code}`,
-            code,
-          });
-          return;
-        }
         setLastScan({
           type: "error",
-          title: "PRODOTTO NON RICONOSCIUTO",
+          title: "SERIALE NON TROVATO",
           subtitle:
-            "Codice non trovato in Notion. Se è un seriale, scansiona prima il codice del prodotto.",
+            "Il codice non risulta né tra le entrate né come codice prodotto. Non può essere aggiunto.",
           code,
         });
         return;

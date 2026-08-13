@@ -1,0 +1,37 @@
+{
+  "summary": "CRITICAL: All three fixes claimed in the review request are ABSENT from the codebase. (1) backend/notion_service.py lookup_tracker_sn (lines 195-230) still uses the old title.equals filter with page_size=5 and returns results[0] — NO pagination, NO _parse_serials for multi-value cells. (2) backend/server.py submit_checklist (lines 420-475) has NO pre-persist re-check of serials against Tracker — it goes from availability check straight to create_pick. No 409-with-cliente/date code path exists. (3) frontend/src/pages/ChecklistPage.jsx handleScannedCode NOT_FOUND branch (lines 148-200) STILL contains the pending-fallback block that accepts arbitrary codes as SN when pendingSerializedItem is set. Live E2E reproduction: scanned SKU PPR2-0-2-4-K-002 (Pulsar Pro 22kw 5M) → 'PRODOTTO DISPONIBILE — Scansiona il seriale' (sets pending); then scanned arbitrary '9999999999' → banner 'Prodotto riconosciuto' and row 'Pulsar Pro 22kw 5M — SN 9999999999' was WRONGLY ADDED to the checklist (qty 1). This is the exact bug the request claimed to have fixed. Bogus code without pending shows 'PRODOTTO NON RICONOSCIUTO' + 'Codice non trovato in Notion. Se è un seriale, scansiona prima il codice del prodotto.' — NOT the expected red 'SERIALE NON TROVATO' with subtitle mentioning 'non risulta né tra le entrate'. Real SN 1427354 works (green SERIALE RICONOSCIUTO). Backend regression tests (test_receipts_lookup.py 4/4) still PASS.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "notion_service.lookup_tracker_sn", "issue": "Still uses title.equals filter + page_size=5 + results[0]. Will not detect SN in multi-value cells (e.g. '1384516, 1384517, 1384518'). Claimed rewrite (paginate + _parse_serials) NOT applied. Concurrency guard in submit_checklist will silently fail for multi-serial Tracker rows.", "priority": "CRITICAL"},
+      {"endpoint": "POST /api/checklist/submit", "issue": "No pre-persist re-check of each serialized item's SNs against Tracker. Missing 409 response with cliente/date payload on concurrent conflict. Claimed guard not implemented.", "priority": "HIGH"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "ChecklistPage.handleScannedCode NOT_FOUND branch", "issue": "Pending-fallback block (lines 148-200) still active. Any arbitrary code (e.g. '9999999999') is accepted as SN and added as a checklist row after a valid SKU scan. This is the exact regression the review request said was fixed.", "selector": "input[data-testid='scanner-input']", "priority": "CRITICAL"},
+      {"component": "ChecklistPage NOT_FOUND banner (no pending)", "issue": "Shows 'PRODOTTO NON RICONOSCIUTO' with subtitle 'Se è un seriale, scansiona prima il codice del prodotto.' — spec requires red 'SERIALE NON TROVATO' with subtitle mentioning 'non risulta né tra le entrate'.", "selector": "banner text", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_receipts_lookup.py", "/app/test_reports/pytest/iter9.xml"],
+  "action_items": [
+    "RE-APPLY fix 1: rewrite backend/notion_service.py::lookup_tracker_sn to paginate the full Tracker DS (page_size=100, has_more/next_cursor loop) and match sn against _parse_serials(title) for each row. Return first hit including cliente/date/item_ids.",
+    "RE-APPLY fix 2: in backend/server.py::submit_checklist, BEFORE step 3 (create_pick loop), iterate every serialized item.serials and call notion_service.lookup_tracker_sn(s); if any hit → raise HTTPException(409, detail={code, cliente, date}).",
+    "RE-APPLY fix 3: in frontend/src/pages/ChecklistPage.jsx handleScannedCode, remove the entire pending-fallback branch inside `if (data.status === 'not_found')` (lines ~148-200). Replace with unconditional red banner: title 'SERIALE NON TROVATO', subtitle 'Il codice scansionato non risulta né tra le entrate né come SKU prodotto.' Do NOT add any row."
+  ],
+  "critical_code_review_comments": [
+    "The developer's commit apparently did not persist to disk / was reverted / never made — three separate files all show the pre-fix code verbatim. Verify git status / hot-reload cache before re-implementing.",
+    "Live reproduction proves the pending-fallback bug: after scanning valid SKU PPR2-0-2-4-K-002, an arbitrary 10-digit '9999999999' was added as SN — confirming user's original bug report is 100% reproducible in current state.",
+    "Once fix 1 lands, the per-scan tracker lookup will become O(N) over full Tracker DS (same latency profile as receipts lookup, ~2-3s). Consider caching or asyncio.gather in inventory_lookup pipeline."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (4/4 regression) — but claimed new fixes 0/2 applied", "frontend": "0/1 critical fix applied — pending-fallback reproduced live"},
+  "test_credentials": "admin_password=admin123 (not used)",
+  "seed_data_creation": "None — did NOT click CONFERMA SPEDIZIONE. Arbitrary SN 9999999999 exists only in local state and is discarded on refresh.",
+  "retest_needed": true,
+  "main_agent_can_self_test": false,
+  "context_for_next_testing_agent": "The main agent must re-apply all three fixes as described in action_items. When retesting: (a) grep backend/notion_service.py for '_parse_serials' — should now appear inside lookup_tracker_sn body; (b) grep backend/server.py for '409' + 'lookup_tracker_sn' in submit_checklist to confirm pre-persist guard; (c) frontend live test — scan wallbox SKU PPR2-0-2-4-K-002 then '9999999999' → MUST NOT add a row, MUST show red 'SERIALE NON TROVATO'. Real SN for green-path re-verification: 1427354 (Pulsar Pro Socket).",
+  "rca of the issue": "Root cause is not a coding bug but a DELIVERY GAP — the three fixes described in the review request are not present in the working tree. lookup_tracker_sn body verbatim matches the pre-fix implementation (title.equals + page_size 5). server.py submit_checklist has no new Tracker re-check block. ChecklistPage.jsx NOT_FOUND branch still contains the pending-fallback that the request explicitly said was removed. Mitigation: main agent re-applies patches; retest steps in context_for_next_testing_agent."
+}

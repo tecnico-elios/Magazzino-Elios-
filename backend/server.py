@@ -430,7 +430,33 @@ async def submit_checklist(payload: ChecklistPayload):
         except Exception as e:
             raise HTTPException(502, f"Impossibile aggiornare il magazzino. Riprova. ({it.name}: {e})")
 
-    # 2) Verify availability
+    # 2) Re-check every serial against Inventory Tracker to prevent double-shipping
+    #    (concurrency: two operators may both have marked the same SN as available).
+    serial_conflicts = []
+    for it in filled:
+        if not it.serialized:
+            continue
+        for sn in (it.serials or []):
+            sn_c = (sn or "").strip()
+            if not sn_c:
+                continue
+            try:
+                hit = await notion_service.lookup_tracker_sn(sn_c)
+            except Exception as e:
+                raise HTTPException(502, f"Errore verifica seriale: {e}")
+            if hit:
+                serial_conflicts.append(
+                    f"{it.name} — SN {sn_c} risulta già uscito"
+                    + (f" (cliente {hit.get('cliente')})" if hit.get("cliente") else "")
+                    + (f" il {hit.get('date')}" if hit.get("date") else "")
+                )
+    if serial_conflicts:
+        raise HTTPException(
+            409,
+            "Uno o più seriali risultano già usciti. " + " • ".join(serial_conflicts),
+        )
+
+    # 3) Verify availability
     shortages = []
     for it in filled:
         avail = fresh_map[it.page_id].get("quantity") or 0
