@@ -6,6 +6,7 @@ import { useOperator } from "../lib/useOperator";
 import ScannerBar from "../components/ScannerBar";
 import QtyDialog from "../components/QtyDialog";
 import ProductPicker from "../components/ProductPicker";
+import ConfirmSubmitDialog from "../components/ConfirmSubmitDialog";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Button } from "../components/ui/button";
@@ -49,6 +50,8 @@ export default function ArriviPage() {
   const [picker, setPicker] = useState(null); // {filter, pendingSn}
   const [pending, setPending] = useState(null); // {id, name} — modello selezionato per SN successivi
   const [rientroConfirm, setRientroConfirm] = useState(null); // {sn, productId, productName, cliente, shippedDate}
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmError, setConfirmError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
   const focusScanner = () => {
@@ -227,7 +230,7 @@ export default function ArriviPage() {
     }
   };
 
-  const submit = async () => {
+  const openConfirm = () => {
     if (!fornitore.trim()) {
       toast.error("Fornitore / Mittente obbligatorio");
       return;
@@ -244,7 +247,13 @@ export default function ArriviPage() {
       toast.error("Aggiungi almeno un prodotto");
       return;
     }
+    setConfirmError(null);
+    setShowConfirm(true);
+  };
+
+  const submit = async () => {
     setSubmitting(true);
+    setConfirmError(null);
     try {
       const payload = {
         operator: operator.trim(),
@@ -268,9 +277,11 @@ export default function ArriviPage() {
       setNotes("");
       setPending(null);
       setLastScan(null);
+      setShowConfirm(false);
       await refresh();
     } catch (e) {
       const msg = e?.response?.data?.detail || e?.message || "Errore invio";
+      setConfirmError(msg);
       toast.error("Errore", { description: msg, duration: 8000 });
     } finally {
       setSubmitting(false);
@@ -565,7 +576,7 @@ export default function ArriviPage() {
           </div>
           <Button
             type="button"
-            onClick={submit}
+            onClick={openConfirm}
             disabled={submitting || list.length === 0}
             className="h-12 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-base"
             data-testid="submit-arrivo-btn"
@@ -634,6 +645,32 @@ export default function ArriviPage() {
           }}
         />
       )}
+
+      <ConfirmSubmitDialog
+        open={showConfirm}
+        kind="arrivo"
+        items={list.map((li) => ({
+          name: li.name,
+          serialized: !!li.serialized,
+          quantity: li.quantity,
+          unit: li.unit || "pz",
+          serials: li.serialized ? li.serials : [],
+          code: li.code,
+        }))}
+        meta={[
+          { label: "Fornitore", value: fornitore.trim() },
+          { label: "Operatore", value: operator.trim() },
+          { label: "Data", value: arrivalDate },
+        ]}
+        submitting={submitting}
+        errorMsg={confirmError}
+        onCancel={() => {
+          if (submitting) return;
+          setShowConfirm(false);
+          setConfirmError(null);
+        }}
+        onConfirm={submit}
+      />
 
       {rientroConfirm && (
         <div

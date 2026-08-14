@@ -5,6 +5,7 @@ import { useInventoryCtx } from "../lib/InventoryContext";
 import { useOperator } from "../lib/useOperator";
 import ScannerBar from "../components/ScannerBar";
 import QtyDialog from "../components/QtyDialog";
+import ConfirmSubmitDialog from "../components/ConfirmSubmitDialog";
 import ProductPicker from "../components/ProductPicker";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -50,6 +51,8 @@ export default function ChecklistPage() {
   const [picker, setPicker] = useState(null); // {filter, pendingSn}
   const [pending, setPending] = useState(null); // {id, name}
   const [submitting, setSubmitting] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmError, setConfirmError] = useState(null);
 
   const focusScanner = () =>
     setTimeout(() => document.getElementById("scanner-input")?.focus(), 0);
@@ -248,7 +251,7 @@ export default function ChecklistPage() {
     }
   };
 
-  const submit = async () => {
+  const openConfirm = () => {
     if (!cliente.trim()) {
       toast.error("Cliente obbligatorio");
       return;
@@ -265,7 +268,13 @@ export default function ChecklistPage() {
       toast.error("Aggiungi almeno un prodotto");
       return;
     }
+    setConfirmError(null);
+    setShowConfirm(true);
+  };
+
+  const submit = async () => {
     setSubmitting(true);
+    setConfirmError(null);
     try {
       const payload = {
         operator: operator.trim(),
@@ -290,9 +299,11 @@ export default function ChecklistPage() {
       setNotes("");
       setPending(null);
       setLastScan(null);
+      setShowConfirm(false);
       await refresh();
     } catch (e) {
       const msg = e?.response?.data?.detail || e?.message || "Errore invio";
+      setConfirmError(msg);
       toast.error("Errore", { description: msg, duration: 8000 });
     } finally {
       setSubmitting(false);
@@ -537,7 +548,7 @@ export default function ChecklistPage() {
           </div>
           <Button
             type="button"
-            onClick={submit}
+            onClick={openConfirm}
             disabled={submitting || list.length === 0}
             className="h-12 px-6 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-base"
             data-testid="submit-checklist-btn"
@@ -597,6 +608,33 @@ export default function ChecklistPage() {
           }}
         />
       )}
+
+      <ConfirmSubmitDialog
+        open={showConfirm}
+        kind="spedizione"
+        items={list.map((li) => ({
+          name: li.name,
+          serialized: !!li.serialized,
+          quantity: li.quantity,
+          unit: li.unit || "pz",
+          serials: li.serialized ? li.serials : [],
+          code: li.code,
+        }))}
+        meta={[
+          { label: "Cliente", value: cliente.trim() },
+          { label: "Preso da", value: operator.trim() },
+          { label: "Operatore", value: operator.trim() },
+          { label: "Data", value: shippingDate },
+        ]}
+        submitting={submitting}
+        errorMsg={confirmError}
+        onCancel={() => {
+          if (submitting) return;
+          setShowConfirm(false);
+          setConfirmError(null);
+        }}
+        onConfirm={submit}
+      />
     </div>
   );
 }
