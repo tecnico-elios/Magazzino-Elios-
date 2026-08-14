@@ -20,8 +20,9 @@ def test_receipts_sn_simple():
     r = _get("1427354")
     assert r.status_code == 200
     d = r.json()
-    assert d["status"] == "ok"
-    assert d["matched_by"] == "sn_receipt"
+    # F6-rientri: status is now in_warehouse or out (latest-movement), matched_by="sn"
+    assert d["status"] in ("in_warehouse", "out")
+    assert d["matched_by"] == "sn"
     assert d["serial"] == "1427354"
     assert d["item"] and d["item"]["name"]
 
@@ -30,8 +31,8 @@ def test_receipts_sn_dot_separated():
     r = _get("1425027")
     assert r.status_code == 200
     d = r.json()
-    assert d["status"] == "ok"
-    assert d["matched_by"] == "sn_receipt"
+    assert d["status"] in ("in_warehouse", "out")
+    assert d["matched_by"] == "sn"
     assert d["serial"] == "1425027"
     assert d["item"] and d["item"]["name"]
 

@@ -48,6 +48,7 @@ export default function ArriviPage() {
   const [qtyDialog, setQtyDialog] = useState(null); // {item}
   const [picker, setPicker] = useState(null); // {filter, pendingSn}
   const [pending, setPending] = useState(null); // {id, name} — modello selezionato per SN successivi
+  const [rientroConfirm, setRientroConfirm] = useState(null); // {sn, productId, productName, cliente, shippedDate}
   const [submitting, setSubmitting] = useState(false);
 
   const focusScanner = () => {
@@ -55,8 +56,8 @@ export default function ArriviPage() {
   };
 
   useEffect(() => {
-    if (!qtyDialog && !picker) focusScanner();
-  }, [qtyDialog, picker]);
+    if (!qtyDialog && !picker && !rientroConfirm) focusScanner();
+  }, [qtyDialog, picker, rientroConfirm]);
 
   useEffect(() => {
     // Se cambia l'operatore in AppLayout mentre siamo qui, riflette
@@ -201,15 +202,15 @@ export default function ArriviPage() {
         return;
       }
       if (data.status === "out" && data.item) {
-        // Rientro valido — l'ultima movimentazione è un'uscita
-        if (pending && pending.id === data.item.id) {
-          addSerialToList(pending, code);
-          setLastScan({ type: "ok", title: "🟢 RIENTRO VALIDO", subtitle: `${pending.name} — SN ${code}`, code });
-        } else {
-          setPending({ id: data.item.id, name: data.item.name });
-          addSerialToList({ id: data.item.id, name: data.item.name }, code);
-          setLastScan({ type: "ok", title: "🟢 RIENTRO VALIDO", subtitle: `${data.item.name} — SN ${code}`, code });
-        }
+        // F6-rientri: NON reintegrare automaticamente. Chiedi conferma con ultimo cliente.
+        setRientroConfirm({
+          sn: code,
+          productId: data.item.id,
+          productName: data.item.name,
+          cliente: data.shipped_to || "sconosciuto",
+          shippedDate: data.shipped_date || null,
+        });
+        setLastScan(null);
         return;
       }
       // status === "not_found" → SN nuovo (OK per arrivi!)
@@ -631,6 +632,84 @@ export default function ArriviPage() {
             }
           }}
         />
+      )}
+
+      {rientroConfirm && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          data-testid="rientro-confirm-dialog"
+        >
+          <div className="bg-white rounded-lg w-full max-w-md p-6 shadow-xl">
+            <div className="text-[10px] tracking-[0.2em] uppercase text-amber-700 font-semibold">
+              ⚠️ Rientro Wallbox
+            </div>
+            <div className="font-display text-xl font-bold text-slate-900 mt-2">
+              Seriale già associato a un cliente
+            </div>
+            <div className="mt-4 text-sm text-slate-700 leading-relaxed">
+              Il seriale{" "}
+              <span className="font-mono-tight font-semibold text-slate-900">
+                {rientroConfirm.sn}
+              </span>{" "}
+              risulta associato al cliente{" "}
+              <span className="font-semibold text-slate-900">
+                {rientroConfirm.cliente}
+              </span>
+              {rientroConfirm.shippedDate && (
+                <>
+                  {" "}(uscita del{" "}
+                  <span className="font-mono-tight">
+                    {rientroConfirm.shippedDate}
+                  </span>
+                  )
+                </>
+              )}
+              .
+              <div className="mt-3 text-slate-600">
+                Vuoi davvero reintegrarlo in magazzino?
+              </div>
+            </div>
+            <div className="mt-6 flex gap-2 justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setRientroConfirm(null);
+                  focusScanner();
+                }}
+                className="h-11"
+                data-testid="rientro-cancel-btn"
+              >
+                No
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  const product = {
+                    id: rientroConfirm.productId,
+                    name: rientroConfirm.productName,
+                  };
+                  addSerialToList(product, rientroConfirm.sn);
+                  setPending(product);
+                  setLastScan({
+                    type: "ok",
+                    title: "🟢 RIENTRO CONFERMATO",
+                    subtitle: `${product.name} — SN ${rientroConfirm.sn}`,
+                    code: rientroConfirm.sn,
+                  });
+                  setRientroConfirm(null);
+                  focusScanner();
+                }}
+                className="h-11 bg-amber-600 hover:bg-amber-700 text-white"
+                data-testid="rientro-confirm-btn"
+              >
+                Sì, reintegra
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

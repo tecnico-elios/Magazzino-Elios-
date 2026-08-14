@@ -17,6 +17,25 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 import notion_service
+try:
+    from zoneinfo import ZoneInfo
+    ROME_TZ = ZoneInfo("Europe/Rome")
+except Exception:  # pragma: no cover — fallback if tzdata missing
+    ROME_TZ = timezone.utc
+
+
+def _now_rome() -> datetime:
+    """Wall-clock time in Europe/Rome — used for emails and 'today' KPIs."""
+    return datetime.now(ROME_TZ)
+
+
+def _today_rome_iso() -> str:
+    return _now_rome().date().isoformat()
+
+
+def _fmt_rome_stamp() -> str:
+    """Human-readable Rome timestamp for emails, e.g. '14/02/2026 14:35 (Ora italiana)'."""
+    return _now_rome().strftime("%d/%m/%Y %H:%M") + " (Ora italiana)"
 
 # MongoDB
 mongo_url = os.environ['MONGO_URL']
@@ -354,11 +373,12 @@ async def inventory():
 
 @api_router.get("/inventory/lookup")
 async def inventory_lookup(code: str):
-    """Look up a scanned code against Notion.
-    Matches (in order):
-      1) Codice prodotto on Inventario -> status=ok, matched_by=sku
-      2) SN on Inventory Tracker      -> status=already_shipped
-      3) Otherwise                    -> status=not_found
+    """Look up a scanned code against Notion (F6-rientri).
+    Returns:
+      - {status:"ok",   matched_by:"sku",  item}                          — SKU match
+      - {status:"in_warehouse", matched_by:"sn", item, receipt_date, ...} — SN currently in
+      - {status:"out",  matched_by:"sn", item, shipped_to, shipped_date}  — SN currently out
+      - {status:"not_found", code}                                        — never seen
     """
     code_clean = (code or "").strip()
     if not code_clean:
@@ -382,52 +402,46 @@ async def inventory_lookup(code: str):
                 "code": code_clean,
             }
 
-    # 2) Match on Tracker SN (already shipped)
+    # 2) SN → latest-movement status (Notion SSOT)
     try:
-        hit = await notion_service.lookup_tracker_sn(code_clean)
+        st = await notion_service.latest_serial_status(code_clean)
     except Exception as e:
         raise HTTPException(502, f"Errore ricerca seriale: {e}")
-    if hit:
-        matched_item = None
+
+    if st["status"] == "unseen":
+        return {"status": "not_found", "code": code_clean}
+
+    last = st.get("last") or {}
+    matched_item = None
+    item_ids = last.get("item_ids") or []
+    if item_ids:
         for i in items:
-            if hit.get("item_ids") and i["id"] == hit["item_ids"][0]:
+            if i["id"] == item_ids[0]:
                 annotate_item(i)
                 matched_item = i
                 break
-        return {
-            "status": "already_shipped",
-            "matched_by": "sn_tracker",
-            "code": code_clean,
-            "serial": code_clean,
-            "item": matched_item,
-            "shipped_to": hit.get("cliente"),
-            "shipped_date": hit.get("date"),
-            "tracker_url": hit.get("url"),
-        }
 
-    # 3) Match on Inventory Receipts SN — parse multi-serial cells with , . ; \s separators
-    try:
-        rhit = await notion_service.lookup_receipts_sn(code_clean)
-    except Exception as e:
-        raise HTTPException(502, f"Errore ricerca entrate: {e}")
-    if rhit:
-        matched_item = None
-        for i in items:
-            if rhit.get("item_ids") and i["id"] == rhit["item_ids"][0]:
-                annotate_item(i)
-                matched_item = i
-                break
+    if st["status"] == "in_warehouse":
         return {
-            "status": "ok",
-            "matched_by": "sn_receipt",
+            "status": "in_warehouse",
+            "matched_by": "sn",
             "code": code_clean,
-            "serial": rhit.get("matched_serial") or code_clean,
+            "serial": last.get("matched_serial") or code_clean,
             "item": matched_item,
-            "receipt_date": rhit.get("date"),
-            "receipt_url": rhit.get("url"),
+            "receipt_date": last.get("date"),
+            "receipt_url": last.get("url"),
         }
-
-    return {"status": "not_found", "code": code_clean}
+    # status == "out"
+    return {
+        "status": "out",
+        "matched_by": "sn",
+        "code": code_clean,
+        "serial": last.get("matched_serial") or code_clean,
+        "item": matched_item,
+        "shipped_to": last.get("cliente"),
+        "shipped_date": last.get("date"),
+        "tracker_url": last.get("url"),
+    }
 
 
 @api_router.post("/checklist/send")
@@ -706,7 +720,7 @@ async def dashboard_kpi():
     for it in items:
         annotate_item(it)
 
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = _today_rome_iso()
     total_products = len(items)
     total_units = sum(float(it.get("quantity") or 0) for it in items)
     arrivi_today = sum(1 for r in entrate if (r.get("date") or "") == today)
