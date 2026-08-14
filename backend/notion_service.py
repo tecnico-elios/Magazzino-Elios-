@@ -112,10 +112,19 @@ def parse_item(page: Dict[str, Any]) -> Dict[str, Any]:
         c = cat_prop.get("select") or {}
         category = c.get("name")
 
-    ser_prop = _get_prop(props, "Serializzato", "Serialized")
-    serialized_notion: Optional[bool] = None
-    if ser_prop and ser_prop.get("type") == "checkbox":
-        serialized_notion = bool(ser_prop.get("checkbox", False))
+    # F5: Tipo Gestione — Single Source of Truth (Notion Select).
+    # Notion actual property name is "Tipo gestione" (lowercase g). Accept both cases.
+    tg_prop = _get_prop(props, "Tipo gestione", "Tipo Gestione")
+    tipo_gestione: Optional[str] = None  # None = NON CONFIGURATO
+    if tg_prop and tg_prop.get("type") == "select":
+        sel = tg_prop.get("select") or {}
+        sel_name = (sel.get("name") or "").strip()
+        # Accept exact Italian labels + common variants (accented vs unaccented)
+        low = sel_name.lower().replace("à", "a").replace("è", "e")
+        if low == "a seriale":
+            tipo_gestione = "a_seriale"
+        elif low == "a quantita":
+            tipo_gestione = "a_quantita"
 
     return {
         "id": page["id"],
@@ -124,9 +133,30 @@ def parse_item(page: Dict[str, Any]) -> Dict[str, Any]:
         "quantity": quantity if quantity is not None else 0,
         "unit": unit or "pz",
         "category": category,
-        "serialized_notion": serialized_notion,
+        "tipo_gestione": tipo_gestione,
         "url": page.get("url"),
     }
+
+
+async def update_tipo_gestione(page_id: str, tipo: str) -> None:
+    """Update Notion Inventario `Tipo gestione` select property.
+    `tipo` must be exactly 'a_seriale' or 'a_quantita'. Writes DIRECTLY to Notion —
+    Notion remains SSOT. Invalidates cache on success."""
+    if tipo not in ("a_seriale", "a_quantita"):
+        raise ValueError("tipo must be 'a_seriale' or 'a_quantita'")
+    if not NOTION_TOKEN or not page_id:
+        raise RuntimeError("Notion non configurato")
+    name = "A Seriale" if tipo == "a_seriale" else "A Quantità"
+    url = f"{NOTION_BASE}/pages/{page_id}"
+    body = {"properties": {"Tipo gestione": {"select": {"name": name}}}}
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.patch(url, headers=_headers(), json=body)
+        if resp.status_code >= 400:
+            logger.error(
+                f"Notion update_tipo_gestione failed: {resp.status_code} {resp.text[:300]}"
+            )
+            resp.raise_for_status()
+    invalidate_inventory_cache()
 
 
 async def list_inventory(force_refresh: bool = False) -> List[Dict[str, Any]]:

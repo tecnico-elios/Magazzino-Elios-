@@ -133,19 +133,27 @@ export default function InventarioPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center">
-                          {it.serialized ? (
+                          {it.tipo_gestione === "a_seriale" ? (
                             <Badge
                               variant="outline"
                               className="border-amber-300 text-amber-800 bg-amber-50"
                             >
                               A Seriale
                             </Badge>
-                          ) : (
+                          ) : it.tipo_gestione === "a_quantita" ? (
                             <Badge
                               variant="outline"
                               className="border-slate-300 text-slate-600"
                             >
                               A Quantità
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="border-red-300 text-red-700 bg-red-50"
+                              data-testid={`inv-nonconfig-${it.id}`}
+                            >
+                              NON CONFIGURATO
                             </Badge>
                           )}
                         </td>

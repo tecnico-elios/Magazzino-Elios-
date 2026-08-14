@@ -160,6 +160,15 @@ export default function ChecklistPage() {
 
     // (1) LOCAL SKU pre-check — instant
     const local = lookupLocalBySku(code);
+    if (local && !local.configured) {
+      setLastScan({
+        type: "error",
+        title: "🔴 TIPO GESTIONE NON CONFIGURATO",
+        subtitle: `${local.name} — configurarlo da Admin › Gestione Prodotti`,
+        code,
+      });
+      return;
+    }
     if (local && !local.serialized) {
       setPending(null);
       openQtyForItem(local);

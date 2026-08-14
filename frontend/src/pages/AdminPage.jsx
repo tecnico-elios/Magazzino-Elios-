@@ -13,7 +13,6 @@ import {
   CardDescription,
 } from "../components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
-import { Switch } from "../components/ui/switch";
 import { Badge } from "../components/ui/badge";
 import {
   Plus,
@@ -101,12 +100,13 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-// ---------- Inventario Notion tab (read-only view + local Serialized override) ----------
+// ---------- F5: Gestione Prodotti — Tipo Gestione da Notion (SSOT) ----------
 function InventoryTab() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
-  const [filter, setFilter] = useState("__ALL__");
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("__ALL__"); // __ALL__ | seriale | quantita | nonconfig
 
   const load = async () => {
     setLoading(true);
@@ -128,20 +128,35 @@ function InventoryTab() {
     load();
   }, []);
 
-  const toggleSerial = async (item, next) => {
+  const setTipoGestione = async (item, tipo) => {
+    // tipo: "a_seriale" | "a_quantita"
+    if (item.tipo_gestione === tipo) return;
     setSavingId(item.id);
     try {
       await axios.put(
-        `${API}/admin/inventory/serial`,
-        { page_id: item.id, serialized: next },
+        `${API}/admin/inventory/tipo-gestione`,
+        { page_id: item.id, tipo_gestione: tipo },
         { headers: authHeaders() }
       );
       setItems((prev) =>
-        prev.map((x) => (x.id === item.id ? { ...x, serialized: next, has_override: true } : x))
+        prev.map((x) =>
+          x.id === item.id
+            ? {
+                ...x,
+                tipo_gestione: tipo,
+                serialized: tipo === "a_seriale",
+                configured: true,
+              }
+            : x
+        )
       );
-      toast.success("Impostazione salvata");
+      toast.success(
+        `Tipo Gestione aggiornato su Notion: ${
+          tipo === "a_seriale" ? "A Seriale" : "A Quantità"
+        }`
+      );
     } catch (e) {
-      toast.error("Salvataggio fallito", {
+      toast.error("Salvataggio Notion fallito", {
         description: e?.response?.data?.detail || e?.message,
       });
     } finally {
@@ -149,23 +164,35 @@ function InventoryTab() {
     }
   };
 
-  const categories = Array.from(
-    new Set(items.map((i) => i.category || "Senza categoria"))
-  ).sort();
+  const q = query.trim().toLowerCase();
+  const visible = items.filter((it) => {
+    if (filter === "seriale" && it.tipo_gestione !== "a_seriale") return false;
+    if (filter === "quantita" && it.tipo_gestione !== "a_quantita") return false;
+    if (filter === "nonconfig" && it.configured) return false;
+    if (!q) return true;
+    return (
+      (it.name || "").toLowerCase().includes(q) ||
+      (it.code || "").toLowerCase().includes(q) ||
+      (it.category || "").toLowerCase().includes(q)
+    );
+  });
 
-  const visible = items.filter(
-    (i) => filter === "__ALL__" || (i.category || "Senza categoria") === filter
-  );
+  const counts = {
+    all: items.length,
+    seriale: items.filter((i) => i.tipo_gestione === "a_seriale").length,
+    quantita: items.filter((i) => i.tipo_gestione === "a_quantita").length,
+    nonconfig: items.filter((i) => !i.configured).length,
+  };
 
   if (loading) return <div className="text-slate-500">Caricamento Notion…</div>;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-testid="admin-gestione-prodotti">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="text-sm text-slate-600 max-w-xl">
-          Inventario letto direttamente dal DB Notion <strong>"Inventario"</strong>. Nomi, categorie
-          e quantità si modificano da Notion. Qui puoi solo marcare gli articoli che richiedono
-          <strong> numero seriale</strong> nella spedizione.
+          Prodotti letti da Notion (SSOT). Il <strong>Tipo Gestione</strong> viene
+          salvato <strong>direttamente su Notion</strong> — nessuna copia
+          MongoDB. Nuovi prodotti aggiunti su Notion appaiono automaticamente qui.
         </div>
         <Button
           type="button"
@@ -179,75 +206,122 @@ function InventoryTab() {
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-xs uppercase tracking-wider text-slate-500 font-semibold mr-1">
-          Filtra:
-        </span>
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Cerca prodotto per nome, codice o categoria…"
+          className="h-10 max-w-md"
+          data-testid="admin-product-search"
+        />
         <Button
           type="button"
           variant={filter === "__ALL__" ? "default" : "outline"}
           onClick={() => setFilter("__ALL__")}
           className={`h-9 px-3 ${filter === "__ALL__" ? "bg-slate-900 hover:bg-slate-800" : ""}`}
+          data-testid="filter-all"
         >
-          Tutti ({items.length})
+          Tutti ({counts.all})
         </Button>
-        {categories.map((c) => (
-          <Button
-            key={c}
-            type="button"
-            variant={filter === c ? "default" : "outline"}
-            onClick={() => setFilter(c)}
-            className={`h-9 px-3 ${filter === c ? "bg-slate-900 hover:bg-slate-800" : ""}`}
-          >
-            {c} ({items.filter((i) => (i.category || "Senza categoria") === c).length})
-          </Button>
-        ))}
+        <Button
+          type="button"
+          variant={filter === "seriale" ? "default" : "outline"}
+          onClick={() => setFilter("seriale")}
+          className={`h-9 px-3 ${filter === "seriale" ? "bg-amber-600 hover:bg-amber-700 text-white" : ""}`}
+          data-testid="filter-seriale"
+        >
+          A Seriale ({counts.seriale})
+        </Button>
+        <Button
+          type="button"
+          variant={filter === "quantita" ? "default" : "outline"}
+          onClick={() => setFilter("quantita")}
+          className={`h-9 px-3 ${filter === "quantita" ? "bg-slate-700 hover:bg-slate-800 text-white" : ""}`}
+          data-testid="filter-quantita"
+        >
+          A Quantità ({counts.quantita})
+        </Button>
+        <Button
+          type="button"
+          variant={filter === "nonconfig" ? "default" : "outline"}
+          onClick={() => setFilter("nonconfig")}
+          className={`h-9 px-3 ${filter === "nonconfig" ? "bg-red-600 hover:bg-red-700 text-white" : ""}`}
+          data-testid="filter-nonconfig"
+        >
+          Non configurati ({counts.nonconfig})
+        </Button>
       </div>
 
       <ul className="border border-slate-200 rounded-md divide-y divide-slate-200 bg-white">
-        {visible.map((it) => (
-          <li
-            key={it.id}
-            className="flex items-center justify-between gap-3 px-4 py-3"
-            data-testid={`admin-item-${it.id}`}
-          >
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-semibold text-slate-900">{it.name}</span>
-                {it.code && (
-                  <span className="text-xs font-mono-tight text-slate-400">{it.code}</span>
-                )}
-                {it.category && (
-                  <Badge variant="outline" className="border-slate-300 text-slate-600">
-                    {it.category}
-                  </Badge>
-                )}
-                {it.has_override && (
-                  <Badge variant="outline" className="border-blue-200 text-blue-700 bg-blue-50">
-                    override
-                  </Badge>
-                )}
+        {visible.map((it) => {
+          const isSaving = savingId === it.id;
+          return (
+            <li
+              key={it.id}
+              className="flex items-center justify-between gap-3 px-4 py-3 flex-wrap"
+              data-testid={`admin-item-${it.id}`}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-slate-900">{it.name}</span>
+                  {it.code && (
+                    <span className="text-xs font-mono-tight text-slate-400">{it.code}</span>
+                  )}
+                  {it.category && (
+                    <Badge variant="outline" className="border-slate-300 text-slate-600">
+                      {it.category}
+                    </Badge>
+                  )}
+                  {!it.configured && (
+                    <Badge
+                      variant="outline"
+                      className="border-red-300 text-red-700 bg-red-50"
+                      data-testid={`badge-nonconfig-${it.id}`}
+                    >
+                      NON CONFIGURATO
+                    </Badge>
+                  )}
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5">
+                  Disponibili:{" "}
+                  <span className="font-mono-tight font-semibold text-slate-700">
+                    {it.quantity} {it.unit}
+                  </span>
+                </div>
               </div>
-              <div className="text-xs text-slate-500 mt-0.5">
-                Disponibili:{" "}
-                <span className="font-mono-tight font-semibold text-slate-700">
-                  {it.quantity} {it.unit}
-                </span>
+              <div className="flex items-center gap-1 shrink-0" role="radiogroup" aria-label="Tipo Gestione">
+                <button
+                  type="button"
+                  onClick={() => setTipoGestione(it, "a_quantita")}
+                  disabled={isSaving}
+                  className={`h-9 px-3 rounded-md text-xs font-semibold border transition-colors ${
+                    it.tipo_gestione === "a_quantita"
+                      ? "bg-slate-900 border-slate-900 text-white"
+                      : "bg-white border-slate-300 text-slate-600 hover:border-slate-500"
+                  } disabled:opacity-60`}
+                  data-testid={`set-quantita-${it.id}`}
+                >
+                  A Quantità
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTipoGestione(it, "a_seriale")}
+                  disabled={isSaving}
+                  className={`h-9 px-3 rounded-md text-xs font-semibold border transition-colors ${
+                    it.tipo_gestione === "a_seriale"
+                      ? "bg-amber-600 border-amber-600 text-white"
+                      : "bg-white border-slate-300 text-slate-600 hover:border-amber-500"
+                  } disabled:opacity-60`}
+                  data-testid={`set-seriale-${it.id}`}
+                >
+                  A Seriale
+                </button>
               </div>
-            </div>
-            <div className="flex items-center gap-3 shrink-0">
-              <span className="text-xs text-slate-600 hidden sm:inline">Serializzato</span>
-              <Switch
-                checked={!!it.serialized}
-                disabled={savingId === it.id}
-                onCheckedChange={(v) => toggleSerial(it, v)}
-                data-testid={`serial-toggle-${it.id}`}
-              />
-            </div>
-          </li>
-        ))}
+            </li>
+          );
+        })}
         {visible.length === 0 && (
           <li className="px-4 py-8 text-center text-slate-500 text-sm">
-            Nessun articolo per questa categoria.
+            Nessun prodotto corrisponde ai criteri.
           </li>
         )}
       </ul>
@@ -749,7 +823,7 @@ export default function AdminPage() {
         <Tabs defaultValue="inventory">
           <TabsList className="mb-6">
             <TabsTrigger value="inventory" data-testid="tab-inventory">
-              <Package size={16} className="mr-1" /> Inventario Notion
+              <Package size={16} className="mr-1" /> Gestione Prodotti
             </TabsTrigger>
             <TabsTrigger value="recipients" data-testid="tab-recipients">
               <Envelope size={16} className="mr-1" /> Destinatari

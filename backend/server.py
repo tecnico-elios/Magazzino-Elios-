@@ -38,10 +38,6 @@ DEFAULT_RECIPIENTS_SEED = [
     if r.strip()
 ]
 
-# Categories that default to "serialized" when no local override / no Notion property
-DEFAULT_SERIALIZED_CATEGORIES = {"wallbox", "e-bike", "ebike", "colonnina"}
-
-
 # ---------- Settings helpers ----------
 async def get_recipients() -> List[str]:
     doc = await db.settings.find_one({"_id": "recipients"}, {"_id": 0})
@@ -63,33 +59,23 @@ async def set_recipients(emails: List[str]) -> None:
     )
 
 
-async def get_serial_overrides() -> Dict[str, bool]:
-    """Local per-item overrides for 'serialized' flag (since Notion DB doesn't have this property)."""
-    doc = await db.settings.find_one({"_id": "serial_overrides"}, {"_id": 0})
-    if not doc:
-        return {}
-    return dict(doc.get("overrides") or {})
+def resolve_serialized(item: Dict[str, Any]) -> Optional[bool]:
+    """F5: Tipo Gestione = Notion Single Source of Truth.
+    Returns True (A Seriale), False (A Quantità), or None (NON CONFIGURATO)."""
+    tg = item.get("tipo_gestione")
+    if tg == "a_seriale":
+        return True
+    if tg == "a_quantita":
+        return False
+    return None
 
 
-async def set_serial_override(page_id: str, serialized: bool) -> None:
-    overrides = await get_serial_overrides()
-    overrides[page_id] = bool(serialized)
-    await db.settings.update_one(
-        {"_id": "serial_overrides"},
-        {"$set": {"overrides": overrides}},
-        upsert=True,
-    )
-
-
-def resolve_serialized(item: Dict[str, Any], overrides: Dict[str, bool]) -> bool:
-    """Determine if a Notion item should require serial numbers.
-    Priority: local override > Notion 'Serializzato' property > category-based default."""
-    if item["id"] in overrides:
-        return bool(overrides[item["id"]])
-    if item.get("serialized_notion") is not None:
-        return bool(item["serialized_notion"])
-    cat = (item.get("category") or "").lower()
-    return cat in DEFAULT_SERIALIZED_CATEGORIES
+def annotate_item(it: Dict[str, Any]) -> Dict[str, Any]:
+    """Attach `serialized` (bool) + `configured` (bool) derived from Notion Tipo gestione."""
+    ser = resolve_serialized(it)
+    it["serialized"] = bool(ser) if ser is not None else False
+    it["configured"] = ser is not None
+    return it
 
 
 def require_admin(x_admin_password: Optional[str] = Header(default=None)):
@@ -351,7 +337,7 @@ async def root():
 
 @api_router.get("/inventory")
 async def inventory():
-    """Fresh read of Notion Inventario (bypasses backend cache), augmented with local overrides."""
+    """Fresh read of Notion Inventario — Tipo Gestione (Notion SSOT) attached."""
     if not notion_service.is_configured():
         raise HTTPException(503, "Integrazione Notion non configurata")
     try:
@@ -360,9 +346,8 @@ async def inventory():
         raise HTTPException(502, f"Notion HTTP {e.response.status_code}: {e.response.text[:200]}")
     except Exception as e:
         raise HTTPException(502, f"Impossibile leggere Notion: {e}")
-    overrides = await get_serial_overrides()
     for it in items:
-        it["serialized"] = resolve_serialized(it, overrides)
+        annotate_item(it)
     categories = sorted({(it.get("category") or "Senza categoria") for it in items})
     return {
         "items": items,
@@ -388,13 +373,12 @@ async def inventory_lookup(code: str):
         items = await notion_service.list_inventory()
     except Exception as e:
         raise HTTPException(502, f"Errore lettura Notion: {e}")
-    overrides = await get_serial_overrides()
     code_lower = code_clean.lower()
 
     # 1) Match on Codice prodotto (SKU)
     for it in items:
         if (it.get("code") or "").strip().lower() == code_lower:
-            it["serialized"] = resolve_serialized(it, overrides)
+            annotate_item(it)
             return {
                 "status": "ok",
                 "matched_by": "sku",
@@ -411,7 +395,7 @@ async def inventory_lookup(code: str):
         matched_item = None
         for i in items:
             if hit.get("item_ids") and i["id"] == hit["item_ids"][0]:
-                i["serialized"] = resolve_serialized(i, overrides)
+                annotate_item(i)
                 matched_item = i
                 break
         return {
@@ -434,7 +418,7 @@ async def inventory_lookup(code: str):
         matched_item = None
         for i in items:
             if rhit.get("item_ids") and i["id"] == rhit["item_ids"][0]:
-                i["serialized"] = resolve_serialized(i, overrides)
+                annotate_item(i)
                 matched_item = i
                 break
         return {
@@ -465,6 +449,27 @@ async def submit_checklist(payload: ChecklistPayload):
             fresh_map[it.page_id] = await notion_service.get_item(it.page_id)
         except Exception as e:
             raise HTTPException(502, f"Impossibile aggiornare il magazzino. Riprova. ({it.name}: {e})")
+
+    # F5: BLOCK if any product has no `Tipo gestione` configured on Notion.
+    not_configured = [
+        fresh_map[it.page_id].get("name") or it.name
+        for it in filled
+        if fresh_map[it.page_id].get("tipo_gestione") not in ("a_seriale", "a_quantita")
+    ]
+    if not_configured:
+        await log_anomaly(
+            kind="tipo_gestione_missing",
+            description=f"Prodotti senza Tipo Gestione: {', '.join(not_configured)}",
+            operator=payload.operator,
+            product=", ".join(not_configured),
+            source="spedizione",
+        )
+        raise HTTPException(
+            400,
+            "TIPO DI GESTIONE NON CONFIGURATO su Notion per: "
+            + ", ".join(not_configured)
+            + ". Configurarlo dall'Admin prima di procedere.",
+        )
 
     # 2) STRICT SERIAL VALIDATION for serialized items:
     #    A serial can only be shipped if:
@@ -668,6 +673,99 @@ async def list_movimenti(limit: int = 200):
     return {"items": items[:limit], "count": min(len(items), limit)}
 
 
+@api_router.get("/dashboard/kpi")
+async def dashboard_kpi():
+    """F5: aggregated KPIs — LIVE from Notion. No secondary source of truth.
+    Reads use the short-lived (60s) inventory cache to stay fast — Notion write
+    paths (arrivi/spedizioni/admin) invalidate the cache so KPIs stay correct."""
+    if not notion_service.is_configured():
+        raise HTTPException(503, "Integrazione Notion non configurata")
+    try:
+        items = await notion_service.list_inventory()
+        entrate = await notion_service.list_receipts_all()
+        uscite = await notion_service.list_exits()
+    except Exception as e:
+        raise HTTPException(502, f"Impossibile leggere Notion: {e}")
+
+    for it in items:
+        annotate_item(it)
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    total_products = len(items)
+    total_units = sum(float(it.get("quantity") or 0) for it in items)
+    arrivi_today = sum(1 for r in entrate if (r.get("date") or "") == today)
+    spedizioni_today = sum(1 for u in uscite if (u.get("date") or "") == today)
+
+    LOW_STOCK_THRESHOLD = 2
+    sotto_scorta = [
+        {
+            "id": it["id"],
+            "name": it["name"],
+            "code": it.get("code"),
+            "quantity": it.get("quantity") or 0,
+            "unit": it.get("unit") or "pz",
+        }
+        for it in items
+        if 0 < (float(it.get("quantity") or 0)) <= LOW_STOCK_THRESHOLD
+    ]
+    esauriti = [
+        {
+            "id": it["id"],
+            "name": it["name"],
+            "code": it.get("code"),
+            "unit": it.get("unit") or "pz",
+        }
+        for it in items
+        if (float(it.get("quantity") or 0)) <= 0
+    ]
+
+    non_configurati = [
+        {"id": it["id"], "name": it["name"], "code": it.get("code")}
+        for it in items
+        if not it.get("configured")
+    ]
+
+    movements: List[Dict[str, Any]] = []
+    for r in entrate:
+        movements.append({
+            "type": "arrivo",
+            "date": r.get("date"),
+            "created_time": r.get("created_time"),
+            "product": r.get("item_name"),
+            "quantity": r.get("quantity"),
+            "unit": r.get("unit") or "pz",
+            "serial_or_code": r.get("sn") or "",
+        })
+    for u in uscite:
+        movements.append({
+            "type": "spedizione",
+            "date": u.get("date"),
+            "created_time": u.get("created_time"),
+            "product": u.get("item_name"),
+            "quantity": u.get("quantity"),
+            "unit": u.get("unit") or "pz",
+            "serial_or_code": u.get("sn") or "",
+            "cliente": u.get("cliente"),
+        })
+    movements.sort(
+        key=lambda x: (x.get("date") or "", x.get("created_time") or ""),
+        reverse=True,
+    )
+
+    return {
+        "total_products": total_products,
+        "total_units": total_units,
+        "arrivi_today": arrivi_today,
+        "spedizioni_today": spedizioni_today,
+        "low_stock_threshold": LOW_STOCK_THRESHOLD,
+        "sotto_scorta": sotto_scorta,
+        "esauriti": esauriti,
+        "non_configurati": non_configurati,
+        "recent_movements": movements[:10],
+        "refreshed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @api_router.get("/checklist/history")
 async def history(limit: int = 20):
     docs = await db.checklists.find({}, {"_id": 0}).sort("created_at", -1).to_list(limit)
@@ -772,6 +870,33 @@ async def submit_arrivo(payload: ArrivoPayload):
         raise HTTPException(503, "Integrazione Notion non configurata")
 
     filled = [i for i in payload.items if i.quantity > 0]
+
+    # F5: BLOCK if any product has no `Tipo gestione` configured on Notion.
+    fresh_arr: Dict[str, Dict[str, Any]] = {}
+    for it in filled:
+        try:
+            fresh_arr[it.page_id] = await notion_service.get_item(it.page_id)
+        except Exception as e:
+            raise HTTPException(502, f"Impossibile leggere Notion ({it.name}): {e}")
+    not_configured = [
+        fresh_arr[it.page_id].get("name") or it.name
+        for it in filled
+        if fresh_arr[it.page_id].get("tipo_gestione") not in ("a_seriale", "a_quantita")
+    ]
+    if not_configured:
+        await log_anomaly(
+            kind="tipo_gestione_missing",
+            description=f"Prodotti senza Tipo Gestione: {', '.join(not_configured)}",
+            operator=payload.operator,
+            product=", ".join(not_configured),
+            source="arrivo",
+        )
+        raise HTTPException(
+            400,
+            "TIPO DI GESTIONE NON CONFIGURATO su Notion per: "
+            + ", ".join(not_configured)
+            + ". Configurarlo dall'Admin prima di procedere.",
+        )
 
     # 1) STRICT SERIAL VALIDATION for serialized items (LIVE — multi-user safe):
     #      (a) SN must NOT already exist in Receipts (else already registered)
@@ -893,17 +1018,39 @@ async def admin_login(req: LoginRequest):
 async def admin_inventory():
     if not notion_service.is_configured():
         raise HTTPException(503, "Integrazione Notion non configurata")
-    items = await notion_service.list_inventory()
-    overrides = await get_serial_overrides()
+    items = await notion_service.list_inventory(force_refresh=True)
     for it in items:
-        it["serialized"] = resolve_serialized(it, overrides)
-        it["has_override"] = it["id"] in overrides
-    return {"items": items, "overrides": overrides}
+        annotate_item(it)
+    return {"items": items}
+
+
+class TipoGestioneUpdate(BaseModel):
+    page_id: str
+    tipo_gestione: str  # 'a_seriale' | 'a_quantita'
+
+
+@api_router.put("/admin/inventory/tipo-gestione", dependencies=[Depends(require_admin)])
+async def admin_set_tipo_gestione(update: TipoGestioneUpdate):
+    """F5: Update Notion `Tipo gestione` DIRECTLY. Notion = SSOT. Invalidates cache."""
+    if update.tipo_gestione not in ("a_seriale", "a_quantita"):
+        raise HTTPException(400, "tipo_gestione deve essere 'a_seriale' o 'a_quantita'")
+    try:
+        await notion_service.update_tipo_gestione(update.page_id, update.tipo_gestione)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(502, f"Notion HTTP {e.response.status_code}: {e.response.text[:200]}")
+    except Exception as e:
+        raise HTTPException(502, f"Impossibile aggiornare Notion: {e}")
+    return {"status": "ok", "page_id": update.page_id, "tipo_gestione": update.tipo_gestione}
 
 
 @api_router.put("/admin/inventory/serial", dependencies=[Depends(require_admin)])
 async def admin_set_serial(update: SerialOverrideUpdate):
-    await set_serial_override(update.page_id, update.serialized)
+    """DEPRECATED — proxies to Notion Tipo gestione. Kept for backward compat."""
+    tipo = "a_seriale" if update.serialized else "a_quantita"
+    try:
+        await notion_service.update_tipo_gestione(update.page_id, tipo)
+    except Exception as e:
+        raise HTTPException(502, f"Impossibile aggiornare Notion: {e}")
     return {"status": "ok"}
 
 

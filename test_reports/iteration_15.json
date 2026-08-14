@@ -1,0 +1,27 @@
+{
+  "summary": "F5 (Notion Tipo Gestione SSOT + Dashboard KPI + Admin Gestione Prodotti) fully verified end-to-end. Backend pytest: 53 passed, 1 skipped (expected — all 42 products currently configured on Notion so the 'blocks not_configured' scenario cannot be reproduced without altering real Notion data; the endpoint logic is already covered by test_admin_features + code review of server.py:455 & server.py:772). Frontend E2E: Dashboard shows 4 KPI cards (Stock totale=196 pz, Arrivi oggi=0, Spedizioni oggi=0, Sotto scorta ≤2 = 10), 'Sotto scorta' section (10 items), 'Esauriti' section (12 items), 'Ultimi 10 movimenti Notion' visible with green Arrivo / blue Spedizione badges, refresh-btn works, no red 'non-configurati' alert (correct — 0 non-configurati). Admin login (admin123) OK; Gestione Prodotti tab shows 42 products with filters Tutti(42)/A Seriale(13)/A Quantità(29)/Non configurati(0), live search ('cavo' → 1 match), reload-inventory-btn OK. ROUNDTRIP verified live: picked a_quantita item (page_id 3b8a9b09-...075b), clicked set-seriale-{id}, PUT /api/admin/inventory/tipo-gestione returned 200, toast 'Tipo Gestione aggiornato su Notion: A Seriale' shown, button state flipped to amber; then clicked set-quantita-{id} to RESTORE, again 200 + toast, state back to slate-900. Notion Select 'Tipo gestione' was really written twice (no MongoDB override). InventarioPage badges: 13 A Seriale (ambra), 29 A Quantità (grigio), 0 NON CONFIGURATO — coherent. Arrivi scanner autofocus verified (activeElement=scanner-input). Spedizioni page loads with scanner. Movimenti page loads. NO real arrivi/spedizioni were confirmed on Notion (only the tipo-gestione flip → restore roundtrip touched Notion, and it was reverted).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_f5_tipo_gestione.py",
+    "/app/test_reports/pytest/iteration_15_f5.xml",
+    "/app/test_reports/pytest/iteration_15_all.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "F5 architecture is clean: notion_service.parse_item() reads the Select property 'Tipo gestione' as SSOT; annotate_item() at server.py:79 attaches tipo_gestione + configured booleans consistently everywhere (/api/inventory, /api/admin/inventory, /api/dashboard/kpi). No MongoDB override collection is used (verified by test_no_mongo_override_effect: deprecated /admin/inventory/serial now proxies to Notion).",
+    "PUT /api/admin/inventory/tipo-gestione properly writes to Notion (verified live via roundtrip) and invalidates the 60s cache — subsequent GET /api/inventory returns the new value immediately.",
+    "Guardrails at server.py:455 (submit_checklist) and server.py:772 (submit_arrivo) that reject items where tipo_gestione is None with 400 'TIPO DI GESTIONE NON CONFIGURATO' are in place — could not be exercised end-to-end because all 42 Notion items are currently configured; recommend adding a unit test that mocks the notion_service.get_items() to inject a configured=False item so the block path is covered without touching real Notion. Non-blocking.",
+    "DashboardPage.jsx auto-refresh interval (60s, silent) does not toggle loading state — good UX, no flash. Refresh button is disabled during load.",
+    "Admin InventoryTab counts (all/seriale/quantita/nonconfig) are derived from client state and update instantly after each set-tipo-gestione call — no reload roundtrip needed. Good.",
+    "Minor: SottoScortaCard/EsauritiCard only show top 6 items with no 'vedi tutti'. If lists commonly exceed 6, add a link to /inventario with filter. Non-blocking."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (53/53, 1 skipped by design)", "frontend": "100% (all F5 scenarios + regression)"},
+  "test_credentials": "Admin password: admin123",
+  "seed_data_creation": "None. The only Notion write was a Tipo Gestione flip (a_quantita → a_seriale → a_quantita) on page_id 3b8a9b09-6783-806d-9044-e46bd262075b, fully restored inside the same test run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "F5 verde. Notion Select 'Tipo gestione' è la SSOT. Per testare il blocco 'TIPO DI GESTIONE NON CONFIGURATO' senza alterare Notion realmente, considerare l'aggiunta di un test con monkeypatch di notion_service.get_items() che inietti un item con tipo_gestione=None; l'endpoint è già coperto dal codice ma non da un test attivo perché tutti i 42 prodotti sono configurati. Il roundtrip target usato è '3b8a9b09-6783-806d-9044-e46bd262075b' (Cavo Molex, a_quantita).",
+  "rca of the issue": "N/A"
+}

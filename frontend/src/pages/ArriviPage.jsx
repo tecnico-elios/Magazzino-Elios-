@@ -139,6 +139,15 @@ export default function ArriviPage() {
 
     // (1) LOCAL SKU pre-check — instantaneo, senza API
     const local = lookupLocalBySku(code);
+    if (local && !local.configured) {
+      setLastScan({
+        type: "error",
+        title: "🔴 TIPO GESTIONE NON CONFIGURATO",
+        subtitle: `${local.name} — configurarlo da Admin › Gestione Prodotti`,
+        code,
+      });
+      return;
+    }
     if (local && !local.serialized) {
       setPending(null);
       setQtyDialog({ item: local, initial: 1 });
