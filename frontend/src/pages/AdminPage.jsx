@@ -25,7 +25,6 @@ import {
   ClockCounterClockwise,
   Package,
   ArrowsClockwise,
-  FilePdf,
 } from "@phosphor-icons/react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -93,7 +92,7 @@ function LoginScreen({ onLogin }) {
               to="/"
               className="block text-center text-sm text-slate-500 hover:text-slate-900"
             >
-              ← Torna alla checklist
+              ← Torna al magazzino
             </Link>
           </form>
         </CardContent>
@@ -328,7 +327,7 @@ function RecipientsTab() {
   return (
     <div className="space-y-4 max-w-2xl">
       <div className="text-sm text-slate-600">
-        Email a cui verrà inviata ogni checklist spedita dal magazzino.
+        Email a cui verrà inviata ogni spedizione registrata dal magazzino.
       </div>
       <div className="flex gap-2">
         <Input
@@ -395,24 +394,21 @@ function HistoryTab() {
   const [loading, setLoading] = useState(true);
   const [loadingNotion, setLoadingNotion] = useState(false);
   const [expanded, setExpanded] = useState(null);
-  const [downloadingId, setDownloadingId] = useState(null);
 
   // Filters
   const [fCliente, setFCliente] = useState("");
   const [fMateriale, setFMateriale] = useState("");
-  const [fDdt, setFDdt] = useState("");
   const [fFrom, setFFrom] = useState("");
   const [fTo, setFTo] = useState("");
   const [showNotion, setShowNotion] = useState(true);
 
   const loadLocal = async (override) => {
-    const f = override || { c: fCliente, m: fMateriale, d: fDdt, from: fFrom, to: fTo };
+    const f = override || { c: fCliente, m: fMateriale, from: fFrom, to: fTo };
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if ((f.c || "").trim()) params.set("cliente", f.c.trim());
       if ((f.m || "").trim()) params.set("materiale", f.m.trim());
-      if ((f.d || "").trim()) params.set("ddt", f.d.trim());
       if (f.from) params.set("date_from", f.from);
       if (f.to) params.set("date_to", f.to);
       const { data } = await axios.get(
@@ -465,38 +461,11 @@ function HistoryTab() {
   const clearFilters = () => {
     setFCliente("");
     setFMateriale("");
-    setFDdt("");
     setFFrom("");
     setFTo("");
-    const empty = { c: "", m: "", d: "", from: "", to: "" };
+    const empty = { c: "", m: "", from: "", to: "" };
     loadLocal(empty);
     loadNotion(empty);
-  };
-
-  const downloadPdf = async (checklistId, ddt) => {
-    setDownloadingId(checklistId);
-    try {
-      const resp = await axios.get(
-        `${API}/admin/history/${checklistId}/pdf`,
-        { headers: authHeaders(), responseType: "blob" }
-      );
-      const blob = new Blob([resp.data], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `DDT-${(ddt || checklistId).replace(/[\/ ]/g, "_")}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      toast.success("PDF generato");
-    } catch (e) {
-      toast.error("Errore generazione PDF", {
-        description: e?.response?.data?.detail || e?.message,
-      });
-    } finally {
-      setDownloadingId(null);
-    }
   };
 
   const fmtDateTime = (iso) => {
@@ -534,16 +503,6 @@ function HistoryTab() {
               placeholder="Nome materiale…"
               className="h-10 mt-1"
               data-testid="filter-materiale"
-            />
-          </div>
-          <div>
-            <Label className="text-xs font-semibold text-slate-600">Numero DDT</Label>
-            <Input
-              value={fDdt}
-              onChange={(e) => setFDdt(e.target.value)}
-              placeholder="DDT-2026-…"
-              className="h-10 mt-1 font-mono-tight"
-              data-testid="filter-ddt"
             />
           </div>
           <div>
@@ -631,11 +590,6 @@ function HistoryTab() {
                   >
                     <div className="font-semibold text-slate-900 truncate">
                       Cliente: {it.structure} — {it.shipping_date}
-                      {it.ddt_number && (
-                        <span className="ml-2 font-mono-tight text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-0.5">
-                          DDT {it.ddt_number}
-                        </span>
-                      )}
                     </div>
                     <div className="text-xs text-slate-500 mt-0.5 truncate">
                       Operatore: {it.operator} • Inviato il {fmtDateTime(it.created_at)}
@@ -644,18 +598,6 @@ function HistoryTab() {
                   <Badge variant="outline" className="border-slate-300 shrink-0">
                     <Package size={14} className="mr-1" /> {totalUnits} pz
                   </Badge>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => downloadPdf(it.id, it.ddt_number)}
-                    disabled={downloadingId === it.id}
-                    className="h-9 shrink-0"
-                    data-testid={`pdf-${it.id}`}
-                    title="Scarica PDF DDT"
-                  >
-                    <FilePdf size={16} className="mr-1" />
-                    {downloadingId === it.id ? "…" : "PDF"}
-                  </Button>
                 </div>
                 {isOpen && (
                   <div className="border-t border-slate-200 px-4 py-3 space-y-3 bg-slate-50">
@@ -781,7 +723,7 @@ export default function AdminPage() {
               to="/"
               className="h-10 inline-flex items-center px-3 border border-slate-200 rounded-md text-slate-600 hover:text-slate-900 hover:border-slate-300 text-sm"
             >
-              <ArrowLeft size={16} className="mr-1" /> Checklist
+              <ArrowLeft size={16} className="mr-1" /> Magazzino
             </Link>
             <div>
               <div className="text-[11px] tracking-[0.2em] uppercase text-slate-500 font-semibold">

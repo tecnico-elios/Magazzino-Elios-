@@ -111,10 +111,10 @@ class ProductItem(BaseModel):
 
 
 class ChecklistPayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     operator: str
     shipping_date: str  # ISO date YYYY-MM-DD
     structure: str      # Cliente / Destinazione
-    ddt_number: Optional[str] = None
     items: List[ProductItem]
     notes: Optional[str] = None
 
@@ -125,7 +125,6 @@ class ChecklistRecord(BaseModel):
     operator: str
     shipping_date: str
     structure: str
-    ddt_number: Optional[str] = None
     items: List[ProductItem]
     notes: Optional[str] = None
     recipients: List[str] = Field(default_factory=list)
@@ -233,17 +232,13 @@ def build_html_email(payload: ChecklistPayload, movements: List[dict]) -> str:
   <tr><td align="center">
     <table role="presentation" width="720" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e2e8f0;">
       <tr><td style="background:#0f172a;padding:24px;">
-        <div style="font-family:Arial,sans-serif;color:#94a3b8;font-size:11px;letter-spacing:.2em;text-transform:uppercase;">Checklist Spedizione</div>
+        <div style="font-family:Arial,sans-serif;color:#94a3b8;font-size:11px;letter-spacing:.2em;text-transform:uppercase;">Magazzino Elios Tech</div>
         <div style="font-family:Arial,sans-serif;color:#ffffff;font-size:22px;font-weight:700;margin-top:6px;">Spedizione confermata — magazzino aggiornato</div>
       </td></tr>
       <tr><td style="padding:24px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;">
           <tr>
-            <td style="padding:12px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;width:35%;border-bottom:1px solid #e2e8f0;">Numero DDT</td>
-            <td style="padding:12px 14px;font-family:Arial,sans-serif;font-size:15px;color:#0f172a;font-weight:700;border-bottom:1px solid #e2e8f0;">{esc((payload.ddt_number or '—').strip() or '—')}</td>
-          </tr>
-          <tr>
-            <td style="padding:12px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;border-bottom:1px solid #e2e8f0;">Cliente / Destinazione</td>
+            <td style="padding:12px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;width:35%;border-bottom:1px solid #e2e8f0;">Cliente / Destinazione</td>
             <td style="padding:12px 14px;font-family:Arial,sans-serif;font-size:15px;color:#0f172a;font-weight:600;border-bottom:1px solid #e2e8f0;">{esc(payload.structure)}</td>
           </tr>
           <tr>
@@ -270,7 +265,7 @@ def build_html_email(payload: ChecklistPayload, movements: List[dict]) -> str:
         </table>
         {notes_block}
         <div style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;margin-top:24px;border-top:1px solid #e2e8f0;padding-top:14px;">
-          Magazzino Notion aggiornato automaticamente. Email generata dall'app Checklist Elios Tech.
+          Magazzino Notion aggiornato automaticamente. Email generata da Magazzino Elios Tech.
         </div>
       </td></tr>
     </table>
@@ -310,7 +305,7 @@ api_router = APIRouter(prefix="/api")
 
 @api_router.get("/")
 async def root():
-    return {"status": "ok", "service": "Checklist Magazzino", "notion_configured": notion_service.is_configured()}
+    return {"status": "ok", "service": "Magazzino Elios Tech", "notion_configured": notion_service.is_configured()}
 
 
 @api_router.get("/inventory")
@@ -430,9 +425,15 @@ async def submit_checklist(payload: ChecklistPayload):
         except Exception as e:
             raise HTTPException(502, f"Impossibile aggiornare il magazzino. Riprova. ({it.name}: {e})")
 
-    # 2) Re-check every serial against Inventory Tracker to prevent double-shipping
-    #    (concurrency: two operators may both have marked the same SN as available).
-    serial_conflicts = []
+    # 2) STRICT SERIAL VALIDATION for serialized items:
+    #    A serial can only be shipped if:
+    #      (a) it exists in Inventory Receipts (Entrate) — SERIALE NON PRESENTE IN MAGAZZINO
+    #      (b) it does NOT exist in Inventory Tracker  (Uscite) — SERIALE GIÀ SPEDITO
+    #      (c) it is not duplicated in the current shipment — SERIALE GIÀ INSERITO
+    #    Notion is the single source of truth: we re-check LIVE at submit time
+    #    to protect against concurrent operators.
+    serial_errors: List[str] = []
+    seen_serials: set = set()
     for it in filled:
         if not it.serialized:
             continue
@@ -440,20 +441,32 @@ async def submit_checklist(payload: ChecklistPayload):
             sn_c = (sn or "").strip()
             if not sn_c:
                 continue
+            sn_key = sn_c.lower()
+            if sn_key in seen_serials:
+                serial_errors.append(f"{it.name} — SN {sn_c} inserito più volte nella stessa spedizione")
+                continue
+            seen_serials.add(sn_key)
             try:
-                hit = await notion_service.lookup_tracker_sn(sn_c)
+                r_hit = await notion_service.lookup_receipts_sn(sn_c)
             except Exception as e:
-                raise HTTPException(502, f"Errore verifica seriale: {e}")
-            if hit:
-                serial_conflicts.append(
+                raise HTTPException(502, f"Errore verifica entrate: {e}")
+            if not r_hit:
+                serial_errors.append(f"{it.name} — SN {sn_c} non risulta presente in magazzino (mai entrato)")
+                continue
+            try:
+                t_hit = await notion_service.lookup_tracker_sn(sn_c)
+            except Exception as e:
+                raise HTTPException(502, f"Errore verifica uscite: {e}")
+            if t_hit:
+                serial_errors.append(
                     f"{it.name} — SN {sn_c} risulta già uscito"
-                    + (f" (cliente {hit.get('cliente')})" if hit.get("cliente") else "")
-                    + (f" il {hit.get('date')}" if hit.get("date") else "")
+                    + (f" (cliente {t_hit.get('cliente')})" if t_hit.get("cliente") else "")
+                    + (f" il {t_hit.get('date')}" if t_hit.get("date") else "")
                 )
-    if serial_conflicts:
+    if serial_errors:
         raise HTTPException(
             409,
-            "Uno o più seriali risultano già usciti. " + " • ".join(serial_conflicts),
+            "Impossibile confermare la spedizione. " + " • ".join(serial_errors),
         )
 
     # 3) Verify availability
@@ -511,7 +524,7 @@ async def submit_checklist(payload: ChecklistPayload):
     # 4) Send email(s) — email failure does not invalidate the shipment
     recipients = await get_recipients()
     html_content = build_html_email(payload, movements)
-    subject = f"Checklist Spedizione — {payload.structure} — {payload.shipping_date}"
+    subject = f"Spedizione — {payload.structure} — {payload.shipping_date}"
     sent = []
     errors = []
     for r in recipients:
@@ -527,7 +540,6 @@ async def submit_checklist(payload: ChecklistPayload):
         operator=payload.operator,
         shipping_date=payload.shipping_date,
         structure=payload.structure,
-        ddt_number=(payload.ddt_number or "").strip() or None,
         items=filled,
         notes=payload.notes,
         recipients=[s["recipient"] for s in sent],
@@ -601,13 +613,10 @@ async def admin_history(
     materiale: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
-    ddt: Optional[str] = None,
 ):
     q: Dict[str, Any] = {}
     if cliente and cliente.strip():
         q["structure"] = {"$regex": cliente.strip(), "$options": "i"}
-    if ddt and ddt.strip():
-        q["ddt_number"] = {"$regex": ddt.strip(), "$options": "i"}
     if materiale and materiale.strip():
         q["items"] = {"$elemMatch": {"name": {"$regex": materiale.strip(), "$options": "i"}}}
     if date_from or date_to:
@@ -662,22 +671,6 @@ async def admin_notion_exits(
 
     filtered = [e for e in exits if _match(e)]
     return {"items": filtered, "count": len(filtered)}
-
-
-@api_router.get("/admin/history/{checklist_id}/pdf", dependencies=[Depends(require_admin)])
-async def admin_history_pdf(checklist_id: str):
-    from fastapi.responses import StreamingResponse
-    import pdf_service
-    doc = await db.checklists.find_one({"id": checklist_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(404, "Spedizione non trovata")
-    pdf_buf = pdf_service.generate_ddt_pdf(doc)
-    fname_key = (doc.get("ddt_number") or checklist_id).replace("/", "-").replace(" ", "_")
-    return StreamingResponse(
-        pdf_buf,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="DDT-{fname_key}.pdf"'},
-    )
 
 
 app.include_router(api_router)

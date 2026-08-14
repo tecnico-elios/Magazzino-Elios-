@@ -1,55 +1,89 @@
-# PRD — Checklist Magazzino Spedizioni (Elios Tech)
+# PRD — Magazzino Elios Tech
 
 ## Original Problem Statement
-Applicazione web/mobile responsive per gestione magazzino e controllo checklist spedizioni. Integrata con Notion (DB INVENTARIO) come single-source-of-truth per le quantità disponibili.
+Applicazione web/mobile responsive per gestione magazzino, controllo checklist di spedizioni e (roadmap) arrivi. Notion è la **UNICA fonte di verità** per prodotti, giacenze e cronologia di seriali (Entrate + Uscite). L'app deve integrarsi in tempo reale con Notion, permettere scansione rapida QR/Barcode/seriali, generare e-mail automatiche via Emergent Resend, e supportare più operatori.
 
-## User Choices
-- Servizio email: **Resend gestito da Emergent** → `tecnico@eliostech.org`
-- Notion Database: **INVENTARIO**, data source `Inventario` (materiali con formula `QTA in magazzino`) + `Inventory Tracker` (uscite/picks)
-- Password admin: `admin123` (env `ADMIN_PASSWORD`)
-- Campo shipment: **"Cliente / Destinazione"** + **"Numero DDT"** (opzionale)
-- Nessuna autenticazione operatore
+## Fasi concordate con l'utente
+- **F0 — Fix + Rebrand** ✅ (14/02/2026)
+- F1 — Navigazione (Dashboard/Inventario/Arrivi/Spedizioni/Movimenti/Anomalie/Admin) + cache in-memory + focus scanner persistente
+- F2 — Schermata Arrivi (nuovo)
+- F3 — Schermata Spedizioni (rework)
+- F4 — Multi-utente + Anomalie + Movimenti
+- F5 — Dashboard + Admin (gestione prodotti / tipo gestione)
+- F6 — Test completo e regressioni
 
-## Architecture
-- **Backend**: FastAPI + Motor (Mongo) + httpx (Resend + Notion) + reportlab (PDF)
-- **Frontend**: React + Shadcn UI + Sonner + html5-qrcode + @phosphor-icons/react
-- **Notion**: API v2025-09-03, endpoint data-source
-- **DB Mongo**: `checklists` (storico app), `settings.recipients` (destinatari email), `settings.serial_overrides` (override "serializzato" per page_id)
+## Regole assolute (dall'utente)
+1. **Notion = unica fonte di verità.** Nessun DB interno di prodotti/giacenze. Solo cache temporanea in memoria per velocità.
+2. **NON aggiungere Barcode/QR/Seriali all'Inventario Notion.** L'Inventario gestisce solo stock/giacenza. I seriali vivono in Consegne/Entrate + Spedizioni/Uscite.
+3. **Regola SN:** Un seriale è **disponibile** solo se `presente in Entrate` **AND** `assente in Uscite`.
+4. **Nessun beep/suono/vibrazione** generato dall'app.
+5. Fornitore/Mittente in Arrivi: **solo per l'email**, NON salvato su Notion.
+6. Spedizioni: `Cliente` e `Da chi è stato preso` sono campi separati (F3).
+7. Multi-utente: architettura pronta, verifica live su Notion prima di ogni conferma.
+
+## Architettura
+- **Backend**: FastAPI + Motor (Mongo) + httpx (Notion + Emergent Resend). Serializzazione strict via Pydantic.
+- **Frontend**: React 19 + Shadcn UI + Sonner + html5-qrcode + @phosphor-icons/react.
+- **Notion**: API v2025-09-03, endpoint `data_sources/*/query`.
+- **DB Mongo**: `checklists` (storico spedizioni app), `settings.recipients` (email destinatari), `settings.serial_overrides` (override "serializzato" locale per page_id — temporaneo finché F5 non introduce `Tipo Gestione` su Notion).
 
 ## Env vars (backend/.env)
-- `EMERGENT_EMAIL_KEY`, `EMAIL_FROM_NAME`, `CHECKLIST_RECIPIENTS`
-- `ADMIN_PASSWORD`
-- `NOTION_TOKEN`, `NOTION_INVENTARIO_DS_ID`, `NOTION_TRACKER_DS_ID`, `NOTION_VERSION`
+- Notion: `NOTION_TOKEN`, `NOTION_INVENTARIO_DS_ID`, `NOTION_TRACKER_DS_ID`, `NOTION_RECEIPTS_DS_ID`, `NOTION_VERSION`
+- Email: `EMERGENT_EMAIL_KEY`, `EMAIL_FROM_NAME`, `CHECKLIST_RECIPIENTS`
+- Admin: `ADMIN_PASSWORD`
 
-## Implementation Timeline
+## Property mapping Notion (attuale)
+- **Inventario**: `Nome prodotto`/`Materiale`, `Codice prodotto`/`Codice`, `QTA in magazzino` (formula), `Unità`, `Categoria`, `Serializzato` (checkbox opzionale)
+- **Inventory Tracker** (uscite): `SN`, `Quantità`, `Item in uscita` (relation), `Preso per`, `Data Uscita`
+- **Inventory Receipts** (entrate): `Item`/`Aa item` (titolo, può contenere più SN separati da `,` `.` `;` spazi/newline), `Item in entrata`, `Data Consegna`/`Data`
 
-### v1 — MVP checklist (12/02/2026)
-Form spedizione responsive, 3 categorie hardcoded, quantità + seriali, scanner QR/barcode, invio email Resend.
+## Changelog
 
-### v2 — Pannello admin (12/02/2026)
-`/admin` con password, tab Catalogo (edit), Destinatari, Storico. Catalogo su MongoDB.
+### F0 — Fix + Rebrand (14/02/2026) ✅
+**Rebrand**
+- Titolo app: `Magazzino Elios Tech`
+- Header pagina spedizione: "Spedizione" (kicker: "Magazzino Elios Tech")
+- Root `GET /api/` ora restituisce `service: "Magazzino Elios Tech"`
+- Email header, subject e footer aggiornati
+- Admin: "Torna al magazzino" invece di "Torna alla checklist"
 
-### v3 — Integrazione Notion (12/02/2026)
-`GET /api/inventory` live da Notion, `POST /api/checklist/send` re-legge + verifica + crea pick in Tracker + email + storico. Rollback su errore. Frontend: filtri per categoria, badge S/N, bottone Aggiorna. Admin: Catalogo → Inventario Notion (read-only + toggle Serializzato locale).
+**Rimozione DDT (feature deprecata)**
+- Rimosso input "Numero DDT" dalla schermata Spedizione
+- Rimosso filtro DDT dal Pannello Admin
+- Rimosso badge `DDT XXX` dallo storico
+- Rimosso pulsante download PDF DDT
+- Rimosso endpoint `GET /api/admin/history/{id}/pdf`
+- Eliminato file `/app/backend/pdf_service.py`
+- Rimosso campo `ddt_number` da modelli Pydantic (`ChecklistPayload`, `ChecklistRecord`)
+- Rimosso parametro `ddt` da `GET /api/admin/history`
+- `ChecklistPayload` ha `extra="ignore"` per compatibilità con vecchie chiamate residue
 
-### v4 — DDT, Storico completo, Filtri, PDF, Fix QR (12/02/2026)
-- **Numero DDT**: nuovo campo opzionale nel form spedizione, mostrato in badge nello storico + prominente nel PDF
-- **Storico Uscite Notion**: `GET /api/admin/notion-exits` legge live Inventory Tracker, risolve nomi materiali via inventario map, filtra righe vuote (475 righe reali). Sezione dedicata nel tab Storico admin (con toggle on/off)
-- **Filtri Storico**: Cliente, Materiale, Numero DDT, Data da/a. Applicati sia a spedizioni app (query MongoDB) sia a uscite Notion (filtro post-fetch)
-- **PDF DDT**: `GET /api/admin/history/{id}/pdf` genera PDF professionale con reportlab: header con DDT number, info block (Cliente/Data/Operatore), tabella materiali (Codice, Q.tà, Unità, Seriali), note, area firma operatore + firma cliente. Download via axios blob
-- **Fix BarcodeScanner**: refactor per fixare `sconosciuto` error causato da Radix Dialog portal mount timing. Ora usa `requestAnimationFrame` loop fino a 60 frames per attendere il div nel DOM prima di costruire Html5Qrcode. Callback ref pattern per onDetected. Guard su start/stop concurrent calls. Messaggi errore specifici (permission/https/notfound/inuse)
-- **Fix clearFilters**: passa override object direttamente a loadLocal/loadNotion (no più stale closure via setTimeout)
+**BUG FIX critico — Validazione strict seriali su submit**
+Prima: `POST /api/checklist/send` verificava solo se il SN fosse già in Uscite (Tracker). Un seriale mai entrato veniva accettato.
+Ora la validazione allineata alla regola assoluta:
+- (a) SN deve essere presente in **Consegne/Entrate** → altrimenti `SN non risulta presente in magazzino (mai entrato)`
+- (b) SN NON deve essere presente in **Spedizioni/Uscite** → altrimenti `SN risulta già uscito`
+- (c) SN NON deve essere duplicato nella spedizione corrente → altrimenti `SN inserito più volte`
+Tutti i controlli sono LIVE su Notion al momento del submit (multi-utente safe).
 
-## Test Coverage — v4
-- **Backend**: 15/15 pytest passed (iteration_2). Filtri storico, notion-exits, PDF 200 con Content-Disposition, PDF 404 su id inesistente, magic bytes PDF verificati
-- **Frontend**: 100% (iteration_4). ClearFilters ripristina baseline count, BarcodeScanner 3 cicli open/close puliti, PDF download DDT-*.pdf, filtri riducono correttamente, Notion exits toggle
-- **PDF visivo verificato**: layout professionale, testo leggibile, aree firma con linee, DDT number prominente
+**Pulizia**
+- Rimosso `FilePdf` icon import, `downloadingId` state, `downloadPdf` func in AdminPage
+- Rimosso trailing garbage in ChecklistPage.jsx (parse error fixato)
+- Rows Notion Tracker create durante test (`ELIOSTEST_UNKNOWN_SN_9999999`, `CLI_TEST`, `TEST_CLIENTE_F0_*`) archiviate
 
-## Prioritized Backlog
-- P1 **Modifica/annulla spedizione**: dallo storico ripristinare quantità Notion se una spedizione è stata registrata per errore
-- P1 **Aggiungi colonne Notion**: opzionalmente aggiungere `Serializzato` (checkbox) e `Unità` (select) direttamente in Notion per dismettere override locale
-- P2 **PWA installabile**: manifest + service worker per icona home + funzionamento offline base
-- P2 **Multi-utente**: login operatore con tracciamento "Preso da" (people) su Notion Tracker
-- P2 **Export CSV storico**: bulk download di tutti i record filtrati
-- P3 **Notifiche in tempo reale**: dashboard che mostra soglie sotto stock minimo (QTA Minima in Stock esiste già in Notion)
-- P3 **Split file server.py**: refactoring in moduli (admin_routes.py, notion_routes.py) — attualmente ~600 righe
+**Test**
+- 14/14 pytest passed
+- Test aggiunti: `test_submit_rejects_unknown_serial`, `test_submit_rejects_duplicate_serial_in_same_shipment`, `test_admin_history_pdf_endpoint_removed`
+
+## Prioritized Backlog (post F0)
+- **F1 (Next)**: Nuova navigazione 7 sezioni; ScannerBar con focus persistente; precaricamento in-memory cache per SKU/Barcode/QR/SN → prodotto
+- **F2**: Schermata ARRIVI. Campo Fornitore/Mittente (solo email, no Notion). Scrittura riga in Consegne/Entrate. Controllo duplicati SN. Email di arrivo (usa stessa lista destinatari).
+- **F3**: Rework SPEDIZIONI. Scan sequenziale rapido. Popup quantità per prodotti a quantità. Campo "Da chi è stato preso" separato da "Cliente".
+- **F4**: Multi-utente (login operatore, `Preso da` come property Notion). Anomalie (log locale MongoDB o Notion tbd). Movimenti (view aggregata Arrivi+Spedizioni).
+- **F5**: Dashboard (KPI, sotto scorta, ultimi movimenti). Admin: modifica `Tipo Gestione` (A Quantità / A Seriale) — property Notion tbd dall'utente.
+- **F6**: Test completo E2E + regressioni.
+
+## Info in attesa dall'utente (per F1+)
+- Proprietà Notion `Tipo Gestione` (nome esatto quando la creerà)
+- Proprietà Notion `Fornitore` in Consegne/Entrate (o conferma che non serve)
+- Proprietà Notion `Da chi è stato preso` in Spedizioni/Uscite (o conferma che va aggiunta con quel nome)

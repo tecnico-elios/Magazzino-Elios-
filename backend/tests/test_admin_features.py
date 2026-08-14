@@ -1,12 +1,10 @@
-"""Backend tests for new admin features: history filters, notion-exits, PDF DDT."""
+"""Backend tests for Magazzino Elios Tech admin features."""
 import os
-import re
 import requests
 import pytest
 
 BASE_URL = os.environ['REACT_APP_BACKEND_URL'].rstrip('/') if os.environ.get('REACT_APP_BACKEND_URL') else None
 if not BASE_URL:
-    # Fallback: read from frontend .env
     with open('/app/frontend/.env') as f:
         for line in f:
             if line.startswith('REACT_APP_BACKEND_URL='):
@@ -23,12 +21,14 @@ def api():
     return s
 
 
-# ---- Health ----
+# ---- Health / rebrand ----
 def test_root(api):
     r = api.get(f"{BASE_URL}/api/")
     assert r.status_code == 200
     j = r.json()
     assert j.get("status") == "ok"
+    # Rebrand check
+    assert j.get("service") == "Magazzino Elios Tech"
     assert j.get("notion_configured") is True
 
 
@@ -65,7 +65,6 @@ def test_admin_history_cliente_filter(api):
     sample = all_r["items"][0].get("structure", "")
     if not sample:
         pytest.skip("empty structure")
-    # use first 4 chars
     frag = sample[:4]
     r = api.get(f"{BASE_URL}/api/admin/history", headers=ADMIN_HEADERS, params={"cliente": frag})
     assert r.status_code == 200
@@ -73,12 +72,6 @@ def test_admin_history_cliente_filter(api):
     assert j["count"] <= all_r["count"]
     for it in j["items"]:
         assert frag.lower() in (it.get("structure") or "").lower()
-
-
-def test_admin_history_ddt_filter(api):
-    r = api.get(f"{BASE_URL}/api/admin/history", headers=ADMIN_HEADERS, params={"ddt": "NONEXISTENT_DDT_XYZ_12345"})
-    assert r.status_code == 200
-    assert r.json()["count"] == 0
 
 
 def test_admin_history_date_filter(api):
@@ -95,6 +88,13 @@ def test_admin_history_materiale_filter(api):
     assert r.json()["count"] == 0
 
 
+def test_admin_history_ddt_param_ignored(api):
+    """Legacy `ddt` query param should be silently ignored (no 422) after F0 cleanup."""
+    r = api.get(f"{BASE_URL}/api/admin/history", headers=ADMIN_HEADERS,
+                params={"ddt": "IGNORED_LEGACY"})
+    assert r.status_code == 200
+
+
 # ---- Notion exits ----
 def test_admin_notion_exits(api):
     r = api.get(f"{BASE_URL}/api/admin/notion-exits", headers=ADMIN_HEADERS, timeout=60)
@@ -104,33 +104,10 @@ def test_admin_notion_exits(api):
     assert isinstance(j["items"], list)
     if j["count"] > 0:
         sample = j["items"][0]
-        # Expected fields per review request
         for f in ("id", "sn", "cliente", "quantity", "date"):
             assert f in sample, f"missing field {f}"
-        # item_name should be present (may be None but key exists)
         assert "item_name" in sample
         assert "unit" in sample
-
-
-def test_admin_notion_exits_cliente_filter(api):
-    r_all = api.get(f"{BASE_URL}/api/admin/notion-exits", headers=ADMIN_HEADERS, timeout=60).json()
-    if r_all["count"] == 0:
-        pytest.skip("no exits")
-    # find a cliente that exists
-    cli = None
-    for it in r_all["items"]:
-        if it.get("cliente"):
-            cli = it["cliente"][:5]
-            break
-    if not cli:
-        pytest.skip("no cliente present")
-    r = api.get(f"{BASE_URL}/api/admin/notion-exits", headers=ADMIN_HEADERS,
-                params={"cliente": cli}, timeout=60)
-    assert r.status_code == 200
-    j = r.json()
-    assert j["count"] <= r_all["count"]
-    for it in j["items"]:
-        assert cli.lower() in (it.get("cliente") or "").lower()
 
 
 def test_admin_notion_exits_requires_auth(api):
@@ -138,27 +115,65 @@ def test_admin_notion_exits_requires_auth(api):
     assert r.status_code == 401
 
 
-# ---- PDF DDT ----
-def test_admin_history_pdf_404(api):
-    r = api.get(f"{BASE_URL}/api/admin/history/nonexistent-id-xyz/pdf", headers=ADMIN_HEADERS)
+# ---- PDF endpoint removed in F0 ----
+def test_admin_history_pdf_endpoint_removed(api):
+    """PDF/DDT endpoint should no longer exist."""
+    r = api.get(f"{BASE_URL}/api/admin/history/anyid/pdf", headers=ADMIN_HEADERS)
     assert r.status_code == 404
 
 
-def test_admin_history_pdf_ok(api):
-    hist = api.get(f"{BASE_URL}/api/admin/history", headers=ADMIN_HEADERS).json()
-    if not hist["items"]:
-        pytest.skip("No history to generate PDF")
-    cid = hist["items"][0]["id"]
-    r = api.get(f"{BASE_URL}/api/admin/history/{cid}/pdf", headers=ADMIN_HEADERS)
-    assert r.status_code == 200
-    assert r.headers.get("content-type", "").startswith("application/pdf")
-    disp = r.headers.get("content-disposition", "")
-    assert "DDT-" in disp
-    # basic PDF magic bytes
-    assert r.content[:4] == b"%PDF"
-    assert len(r.content) > 500
+# ---- F0 strict-serial submit validation ----
+def test_submit_rejects_unknown_serial(api):
+    """A serialized item with a serial that is NOT in Inventory Receipts must be rejected."""
+    inv = api.get(f"{BASE_URL}/api/inventory").json().get("items", [])
+    serialized = next((it for it in inv if it.get("serialized") and (it.get("quantity") or 0) >= 1), None)
+    if not serialized:
+        pytest.skip("no serialized item available")
+    fake_sn = "ELIOSTEST_UNKNOWN_SN_9999999"
+    payload = {
+        "operator": "Test F0",
+        "shipping_date": "2026-02-14",
+        "structure": "TEST_CLIENTE_F0_STRICT",
+        "items": [{
+            "page_id": serialized["id"],
+            "name": serialized["name"],
+            "category": serialized.get("category"),
+            "unit": serialized.get("unit") or "pz",
+            "serialized": True,
+            "quantity": 1,
+            "serials": [fake_sn],
+        }],
+    }
+    r = api.post(f"{BASE_URL}/api/checklist/send", json=payload, timeout=90)
+    assert r.status_code == 409, f"Expected 409, got {r.status_code}: {r.text[:200]}"
+    detail = (r.json().get("detail") or "").lower()
+    assert "non risulta presente" in detail or "mai entrato" in detail, detail
 
 
-def test_admin_history_pdf_requires_auth(api):
-    r = api.get(f"{BASE_URL}/api/admin/history/some-id/pdf")
-    assert r.status_code == 401
+def test_submit_rejects_duplicate_serial_in_same_shipment(api):
+    """Two identical serials in one shipment must be rejected."""
+    inv = api.get(f"{BASE_URL}/api/inventory").json().get("items", [])
+    serialized = next((it for it in inv if it.get("serialized") and (it.get("quantity") or 0) >= 2), None)
+    if not serialized:
+        pytest.skip("need a serialized item with qty>=2")
+    fake_sn = "DUP_TEST_SN_00001"
+    payload = {
+        "operator": "Test F0",
+        "shipping_date": "2026-02-14",
+        "structure": "TEST_CLIENTE_F0_DUP",
+        "items": [{
+            "page_id": serialized["id"],
+            "name": serialized["name"],
+            "category": serialized.get("category"),
+            "unit": serialized.get("unit") or "pz",
+            "serialized": True,
+            "quantity": 2,
+            "serials": [fake_sn, fake_sn],
+        }],
+    }
+    r = api.post(f"{BASE_URL}/api/checklist/send", json=payload, timeout=90)
+    assert r.status_code == 409, r.text[:300]
+    detail = (r.json().get("detail") or "").lower()
+    # Either duplicate-in-shipment error OR unknown-serial error triggers first;
+    # both are acceptable rejections.
+    assert ("inserito più volte" in detail) or ("non risulta presente" in detail), detail
