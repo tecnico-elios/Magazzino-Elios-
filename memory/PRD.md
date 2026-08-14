@@ -12,6 +12,7 @@
 - **F6-rientro-dialog — Conferma esplicita reintegro Wallbox già spedita** ✅ (14/02/2026)
 - **F6-orario — Data/ora Europe/Rome nelle email + KPI "today" locale** ✅ (14/02/2026)
 - **F6-quantita — Barcode ripetibile per A Quantità + Dropdown ricerca live** ✅ (14/02/2026)
+- **F6-manual-search — Lookup SN debounced (400ms) in dropdown per inserimento tastiera** ✅ (14/02/2026)
 - PWA — solo alla fine, dopo verifica gestionale completa
 
 ## F6-rientri Changelog

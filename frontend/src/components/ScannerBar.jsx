@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import axios from "axios";
 import {
   Barcode,
   Camera,
@@ -10,17 +11,26 @@ import {
 import { useInventoryCtx } from "../lib/InventoryContext";
 import BarcodeScanner from "./BarcodeScanner";
 
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const SERVER_DEBOUNCE_MS = 400;
+
 /**
  * ScannerBar — fast scan-first input with a live product picker dropdown
  * over the local inventory cache. Notion is not called on every keystroke.
  * On Enter (from scanner gun or keyboard) submits the current buffer through
  * `onScanned`, which triggers the full lookup pipeline.
+ *
+ * When the buffer looks like a full code (no whitespace, ≥4 chars) and no local
+ * SKU matches exactly, a DEBOUNCED (400ms) server lookup is fired to resolve
+ * SNs known to Notion (Entrate/Uscite). The result is shown as a top row in the
+ * dropdown so operators can click it OR press Enter and get the same flow.
  */
 export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint }) {
   const [buffer, setBuffer] = useState("");
   const [cameraOpen, setCameraOpen] = useState(false);
   const [open, setOpen] = useState(false); // dropdown visibility
   const [hoverIdx, setHoverIdx] = useState(-1);
+  const [serverHit, setServerHit] = useState(null); // {item, status, ...} for SN/barcode found on Notion
   const inputRef = useRef(null);
   const containerRef = useRef(null);
   const { searchLocal } = useInventoryCtx();
@@ -46,11 +56,46 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
     return () => document.removeEventListener("mousedown", onDown);
   }, []);
 
-  const suggestions = useMemo(() => {
+  const localSuggestions = useMemo(() => {
     const q = buffer.trim();
     if (q.length < 2) return [];
     return searchLocal(q, 8);
   }, [buffer, searchLocal]);
+
+  // Debounced server-side lookup for potential SNs / barcodes not in local SKU cache
+  useEffect(() => {
+    const q = buffer.trim();
+    setServerHit(null);
+    if (q.length < 4 || /\s/.test(q)) return undefined;
+    // Skip if local exact-code match exists — it's already the top suggestion
+    const localExact = localSuggestions.find(
+      (i) => (i.code || "").toLowerCase() === q.toLowerCase()
+    );
+    if (localExact) return undefined;
+    const t = setTimeout(async () => {
+      try {
+        const { data } = await axios.get(`${API}/inventory/lookup`, {
+          params: { code: q },
+        });
+        if (data.status !== "not_found" && data.item) {
+          setServerHit({ ...data, query: q });
+        }
+      } catch (_) {
+        // silent — dropdown stays local-only
+      }
+    }, SERVER_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [buffer, localSuggestions]);
+
+  const suggestions = useMemo(() => {
+    if (!serverHit) return localSuggestions;
+    // Prepend serverHit if it's a fresh SN/barcode NOT already in the local list
+    const alreadyLocal = localSuggestions.find(
+      (i) => i.id === serverHit.item?.id
+    );
+    if (alreadyLocal) return localSuggestions;
+    return [{ __server: true, ...serverHit }, ...localSuggestions];
+  }, [localSuggestions, serverHit]);
 
   useEffect(() => {
     setHoverIdx(-1);
@@ -62,14 +107,19 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
     if (!value) return;
     onScanned(value);
     setBuffer("");
+    setServerHit(null);
     setOpen(false);
     setHoverIdx(-1);
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
-  const selectItem = (item) => {
-    // Send the product's SKU/code — treated as SKU match by lookup.
-    if (item?.code) commit(item.code);
+  const selectSuggestion = (s) => {
+    if (s.__server) {
+      // Server hit: send the exact query so backend re-runs same lookup and downstream flow decides.
+      commit(s.query);
+      return;
+    }
+    if (s?.code) commit(s.code);
   };
 
   const onKeyDown = (e) => {
@@ -91,7 +141,7 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
     if (e.key === "Enter") {
       e.preventDefault();
       if (open && hoverIdx >= 0 && suggestions[hoverIdx]) {
-        selectItem(suggestions[hoverIdx]);
+        selectSuggestion(suggestions[hoverIdx]);
       } else {
         commit(buffer);
       }
@@ -149,36 +199,66 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
               data-testid="scanner-suggestions"
               role="listbox"
             >
-              {suggestions.map((it, idx) => {
+              {suggestions.map((s, idx) => {
                 const isHover = idx === hoverIdx;
-                const tg = it.tipo_gestione;
+                const isServer = !!s.__server;
+                const it = isServer ? s.item : s;
+                const tg = it?.tipo_gestione;
+                let stateBadge = null;
+                if (isServer) {
+                  if (s.status === "in_warehouse")
+                    stateBadge = (
+                      <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
+                        In magazzino
+                      </span>
+                    );
+                  else if (s.status === "out")
+                    stateBadge = (
+                      <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded bg-red-50 text-red-800 border border-red-200">
+                        Uscito · {s.shipped_to || "cliente"}
+                      </span>
+                    );
+                }
                 return (
                   <li
-                    key={it.id}
+                    key={isServer ? `srv-${s.query}` : it.id}
                     role="option"
                     aria-selected={isHover}
                     onMouseDown={(e) => {
                       e.preventDefault();
-                      selectItem(it);
+                      selectSuggestion(s);
                     }}
                     onMouseEnter={() => setHoverIdx(idx)}
                     className={`px-3 py-2 cursor-pointer flex items-center justify-between gap-2 text-sm ${
                       isHover ? "bg-slate-100" : "hover:bg-slate-50"
                     }`}
-                    data-testid={`scanner-suggestion-${idx}`}
+                    data-testid={
+                      isServer
+                        ? `scanner-server-suggestion-${idx}`
+                        : `scanner-suggestion-${idx}`
+                    }
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="font-semibold text-slate-900 truncate">
-                        {it.name}
+                      <div className="font-semibold text-slate-900 truncate flex items-center gap-1">
+                        {isServer && (
+                          <MagnifyingGlass
+                            size={12}
+                            className="text-slate-400 shrink-0"
+                          />
+                        )}
+                        {it?.name || "—"}
                       </div>
                       <div className="text-xs text-slate-500 font-mono-tight truncate">
-                        {it.code || "—"}
-                        {it.category && (
+                        {isServer
+                          ? `SN: ${s.query}`
+                          : it.code || "—"}
+                        {!isServer && it.category && (
                           <span className="text-slate-400"> · {it.category}</span>
                         )}
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
+                      {stateBadge}
                       {tg === "a_seriale" ? (
                         <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
                           A Seriale
@@ -192,9 +272,11 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
                           NON CONFIG.
                         </span>
                       )}
-                      <span className="text-xs font-mono-tight font-semibold text-slate-700">
-                        {it.quantity} {it.unit}
-                      </span>
+                      {!isServer && (
+                        <span className="text-xs font-mono-tight font-semibold text-slate-700">
+                          {it.quantity} {it.unit}
+                        </span>
+                      )}
                     </div>
                   </li>
                 );
