@@ -1,41 +1,777 @@
-import { Link } from "react-router-dom";
-import { ArrowSquareIn, ArrowRight } from "@phosphor-icons/react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import axios from "axios";
+import { toast } from "sonner";
+import { useInventoryCtx } from "../lib/InventoryContext";
+import ScannerBar from "../components/ScannerBar";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Button } from "../components/ui/button";
+import { Textarea } from "../components/ui/textarea";
+import { Badge } from "../components/ui/badge";
+import {
+  ArrowSquareIn,
+  Trash,
+  MagnifyingGlass,
+  Package,
+  CircleNotch,
+  X,
+  Truck,
+  User,
+  CalendarBlank,
+  Barcode,
+  Plus,
+  Minus,
+} from "@phosphor-icons/react";
+
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const todayISO = () => new Date().toISOString().slice(0, 10);
 
 /**
- * ArriviPage — placeholder until F2.
- * We keep the route reachable so navigation feels complete; the real screen
- * will be built in F2 with scan-driven flow and Notion writes to Consegne/Entrate.
+ * ArriviPage — F2
+ * Registrazione ingressi materiali (Consegne Wallbox / Entrate).
+ * Fornitore / Mittente è ESCLUSIVAMENTE per l'email — NON viene scritto su Notion.
  */
 export default function ArriviPage() {
+  const { items, lookupLocalBySku, refresh } = useInventoryCtx();
+
+  const [fornitore, setFornitore] = useState("");
+  const [operator, setOperator] = useState("");
+  const [arrivalDate, setArrivalDate] = useState(todayISO());
+  const [notes, setNotes] = useState("");
+
+  const [list, setList] = useState([]); // {id, name, serialized, unit, quantity, serials[]}
+  const [lastScan, setLastScan] = useState(null);
+  const [qtyDialog, setQtyDialog] = useState(null); // {item}
+  const [picker, setPicker] = useState(null); // {filter, pendingSn}
+  const [pending, setPending] = useState(null); // {id, name} — modello selezionato per SN successivi
+  const [submitting, setSubmitting] = useState(false);
+
+  const focusScanner = () => {
+    setTimeout(() => document.getElementById("scanner-input")?.focus(), 0);
+  };
+
+  useEffect(() => {
+    if (!qtyDialog && !picker) focusScanner();
+  }, [qtyDialog, picker]);
+
+  const totalUnits = list.reduce((a, li) => a + (li.quantity || 0), 0);
+
+  const snAlreadyInList = (sn) =>
+    list.some(
+      (li) =>
+        li.serialized &&
+        (li.serials || []).some((s) => (s || "").toLowerCase() === sn.toLowerCase())
+    );
+
+  const addSerialToList = (product, sn) => {
+    setList((prev) => {
+      const exist = prev.find((li) => li.id === product.id);
+      if (exist) {
+        return prev.map((li) =>
+          li.id === product.id
+            ? { ...li, quantity: li.quantity + 1, serials: [...li.serials, sn] }
+            : li
+        );
+      }
+      const invIt = items.find((i) => i.id === product.id);
+      return [
+        ...prev,
+        {
+          id: product.id,
+          name: product.name,
+          serialized: true,
+          unit: invIt?.unit || "pz",
+          quantity: 1,
+          serials: [sn],
+        },
+      ];
+    });
+  };
+
+  const addQtyToList = (product, qty) => {
+    setList((prev) => {
+      const exist = prev.find((li) => li.id === product.id);
+      if (exist) {
+        return prev.map((li) =>
+          li.id === product.id ? { ...li, quantity: li.quantity + qty } : li
+        );
+      }
+      return [
+        ...prev,
+        {
+          id: product.id,
+          name: product.name,
+          serialized: false,
+          unit: product.unit || "pz",
+          quantity: qty,
+          serials: [],
+        },
+      ];
+    });
+  };
+
+  const removeRow = (id) => setList((prev) => prev.filter((li) => li.id !== id));
+
+  const removeSerial = (id, snIdx) => {
+    setList((prev) =>
+      prev
+        .map((li) => {
+          if (li.id !== id) return li;
+          const s2 = li.serials.filter((_, i) => i !== snIdx);
+          return s2.length === 0 ? null : { ...li, serials: s2, quantity: s2.length };
+        })
+        .filter(Boolean)
+    );
+  };
+
+  const handleScannedCode = async (rawCode) => {
+    const code = (rawCode || "").trim();
+    if (!code) return;
+
+    // (1) LOCAL SKU pre-check — instantaneo, senza API
+    const local = lookupLocalBySku(code);
+    if (local && !local.serialized) {
+      setPending(null);
+      setQtyDialog({ item: local, initial: 1 });
+      setLastScan({ type: "ok", title: "PRODOTTO RICONOSCIUTO", subtitle: `${local.name} — inserisci quantità`, code });
+      return;
+    }
+    if (local && local.serialized) {
+      setPending({ id: local.id, name: local.name });
+      setLastScan({ type: "ok", title: "MODELLO SELEZIONATO", subtitle: `${local.name} — scansiona i seriali`, code });
+      return;
+    }
+
+    // (2) Duplicato nella sessione corrente
+    if (snAlreadyInList(code)) {
+      setLastScan({ type: "error", title: "🔴 SERIALE GIÀ INSERITO", subtitle: `SN ${code} è già nella lista corrente`, code });
+      return;
+    }
+
+    // (3) Server-side check: SN non deve essere in Entrate né in Uscite
+    try {
+      const { data } = await axios.get(`${API}/inventory/lookup`, { params: { code } });
+      if (data.status === "already_shipped") {
+        setLastScan({ type: "error", title: "🔴 SERIALE GIÀ SPEDITO", subtitle: `SN ${code} risulta in Uscite`, code });
+        return;
+      }
+      if (data.status === "ok" && data.matched_by === "sn_receipt") {
+        setLastScan({ type: "error", title: "🔴 SERIALE GIÀ IN ENTRATE", subtitle: `SN ${code} già registrato`, code });
+        return;
+      }
+      if (data.status === "ok" && data.matched_by === "sku" && data.item) {
+        if (data.item.serialized) {
+          setPending({ id: data.item.id, name: data.item.name });
+          setLastScan({ type: "ok", title: "MODELLO SELEZIONATO", subtitle: `${data.item.name}`, code });
+        } else {
+          setQtyDialog({ item: data.item, initial: 1 });
+          setLastScan({ type: "ok", title: "PRODOTTO RICONOSCIUTO", subtitle: `${data.item.name}`, code });
+        }
+        return;
+      }
+      // status === "not_found" → SN nuovo (OK per arrivi!)
+      if (pending) {
+        addSerialToList(pending, code);
+        setLastScan({ type: "ok", title: "🟢 SERIALE AGGIUNTO", subtitle: `${pending.name} — SN ${code}`, code });
+      } else {
+        setPicker({ filter: "serialized", pendingSn: code });
+        setLastScan({ type: "warn", title: "🟠 SELEZIONA IL MODELLO", subtitle: `SN ${code} — indica il prodotto`, code });
+      }
+    } catch (e) {
+      setLastScan({ type: "error", title: "Errore ricerca Notion", subtitle: e?.response?.data?.detail || e?.message || "" });
+    }
+  };
+
+  const submit = async () => {
+    if (!fornitore.trim()) {
+      toast.error("Fornitore / Mittente obbligatorio");
+      return;
+    }
+    if (!operator.trim()) {
+      toast.error("Nome operatore obbligatorio");
+      return;
+    }
+    if (!arrivalDate) {
+      toast.error("Data arrivo obbligatoria");
+      return;
+    }
+    if (list.length === 0) {
+      toast.error("Aggiungi almeno un prodotto");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const payload = {
+        operator: operator.trim(),
+        arrival_date: arrivalDate,
+        fornitore: fornitore.trim(),
+        notes: notes.trim() || null,
+        items: list.map((li) => ({
+          page_id: li.id,
+          name: li.name,
+          unit: li.unit || "pz",
+          serialized: !!li.serialized,
+          quantity: li.quantity,
+          serials: li.serialized ? li.serials : [],
+        })),
+      };
+      const { data } = await axios.post(`${API}/arrivi/send`, payload);
+      toast.success("Arrivo confermato", { description: data.message, duration: 6000 });
+      setList([]);
+      setFornitore("");
+      setNotes("");
+      setPending(null);
+      setLastScan(null);
+      await refresh();
+    } catch (e) {
+      const msg = e?.response?.data?.detail || e?.message || "Errore invio";
+      toast.error("Errore", { description: msg, duration: 8000 });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="pb-32" data-testid="arrivi-page">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6 pb-2 flex items-end justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-emerald-700">
+            <ArrowSquareIn size={22} weight="bold" />
+            <span className="text-[11px] tracking-[0.2em] uppercase font-semibold">Ingressi</span>
+          </div>
+          <h1 className="font-display text-3xl sm:text-4xl font-bold text-slate-900 mt-1">Arrivi</h1>
+          <p className="text-slate-500 mt-1 text-sm">
+            Registra ingressi in Consegne Wallbox / Entrate. Il Fornitore è solo per l'email.
+          </p>
+        </div>
+        <div
+          className="hidden sm:flex items-center gap-2 border border-slate-200 bg-white px-3 py-2 rounded-md shrink-0"
+          data-testid="total-arrivi-badge"
+        >
+          <Package size={18} className="text-slate-500" />
+          <span className="font-mono-tight text-sm text-slate-900">
+            {totalUnits} pz in arrivo
+          </span>
+        </div>
+      </div>
+
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-4 space-y-6">
+        {/* Dati generali */}
+        <section className="bg-white border border-slate-200 rounded-md p-4 sm:p-6">
+          <div className="text-xs tracking-[0.1em] uppercase text-slate-500 font-semibold mb-4">
+            Dati Generali
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <Label htmlFor="fornitore" className="text-slate-700 text-sm font-semibold">
+                <Truck size={14} className="inline mr-1" /> Fornitore / Mittente
+              </Label>
+              <Input
+                id="fornitore"
+                data-testid="input-fornitore"
+                value={fornitore}
+                onChange={(e) => setFornitore(e.target.value)}
+                placeholder="Es. ABB Italia"
+                className="h-12 mt-1 text-base"
+              />
+              <div className="text-[11px] text-slate-400 mt-1">Solo per l'email — non salvato su Notion.</div>
+            </div>
+            <div>
+              <Label htmlFor="operator" className="text-slate-700 text-sm font-semibold">
+                <User size={14} className="inline mr-1" /> Nome Operatore
+              </Label>
+              <Input
+                id="operator"
+                data-testid="input-operator"
+                value={operator}
+                onChange={(e) => setOperator(e.target.value)}
+                placeholder="Es. Mario Rossi"
+                className="h-12 mt-1 text-base"
+              />
+            </div>
+            <div>
+              <Label htmlFor="date" className="text-slate-700 text-sm font-semibold">
+                <CalendarBlank size={14} className="inline mr-1" /> Data Arrivo
+              </Label>
+              <Input
+                id="date"
+                data-testid="input-date"
+                type="date"
+                value={arrivalDate}
+                onChange={(e) => setArrivalDate(e.target.value)}
+                className="h-12 mt-1 text-base"
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* Scanner */}
+        <ScannerBar
+          onScanned={handleScannedCode}
+          lastScan={lastScan}
+          onClearLastScan={() => setLastScan(null)}
+          hint={
+            pending
+              ? `In attesa dei seriali per: ${pending.name}`
+              : "Scansiona un codice prodotto o un seriale — o seleziona manualmente qui sotto"
+          }
+        />
+
+        {/* Contesto: modello serializzato selezionato + selettore prodotto manuale */}
+        <section className="bg-white border border-slate-200 rounded-md p-4">
+          <div className="flex flex-wrap items-center gap-2 justify-between">
+            <div className="min-w-0 flex-1">
+              {pending ? (
+                <div
+                  className="flex items-center gap-2 flex-wrap"
+                  data-testid="pending-serialized-banner"
+                >
+                  <Badge className="bg-emerald-600 hover:bg-emerald-700">
+                    🎯 Modello: {pending.name}
+                  </Badge>
+                  <span className="text-xs text-slate-500">
+                    Ora scansiona i seriali uno alla volta.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPending(null)}
+                    className="text-xs text-red-600 hover:underline"
+                    data-testid="clear-pending-btn"
+                  >
+                    Rimuovi selezione
+                  </button>
+                </div>
+              ) : (
+                <div className="text-sm text-slate-500">
+                  Nessun modello selezionato. Scansiona un barcode o seleziona il prodotto manualmente.
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setPicker({ filter: "serialized" })}
+                className="h-10"
+                data-testid="pick-serialized-btn"
+              >
+                <MagnifyingGlass size={16} className="mr-1" /> Prodotto a Seriale
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setPicker({ filter: "quantity" })}
+                className="h-10"
+                data-testid="pick-quantity-btn"
+              >
+                <MagnifyingGlass size={16} className="mr-1" /> Prodotto a Quantità
+              </Button>
+            </div>
+          </div>
+        </section>
+
+        {/* Lista temporanea */}
+        <section
+          className="bg-white border border-slate-200 rounded-md overflow-hidden"
+          data-testid="arrivi-list"
+        >
+          <div className="px-4 py-3 border-b border-slate-200 bg-slate-900 text-white flex items-center justify-between">
+            <h2 className="font-display text-base font-bold">Lista temporanea</h2>
+            <span className="text-xs text-slate-300">
+              {list.length} riga{list.length === 1 ? "" : "he"} · {totalUnits} pz
+            </span>
+          </div>
+          {list.length === 0 ? (
+            <div className="px-4 py-10 text-center text-slate-400 text-sm">
+              Ancora nessun prodotto. Scansiona o seleziona per iniziare.
+            </div>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {list.map((li) => (
+                <li key={li.id} className="px-4 py-3" data-testid={`arrivi-row-${li.id}`}>
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-slate-900 flex items-center gap-2 flex-wrap">
+                        {li.name}
+                        {li.serialized ? (
+                          <Badge
+                            variant="outline"
+                            className="border-amber-300 text-amber-800 bg-amber-50"
+                          >
+                            A Seriale
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="outline"
+                            className="border-slate-300 text-slate-600"
+                          >
+                            A Quantità
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono-tight font-semibold text-slate-900">
+                        {li.quantity} {li.unit || "pz"}
+                      </span>
+                      {!li.serialized && (
+                        <>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() =>
+                              setList((prev) =>
+                                prev
+                                  .map((x) =>
+                                    x.id === li.id
+                                      ? { ...x, quantity: Math.max(0, x.quantity - 1) }
+                                      : x
+                                  )
+                                  .filter((x) => x.quantity > 0)
+                              )
+                            }
+                            className="h-8 w-8"
+                            aria-label="Decrementa"
+                          >
+                            <Minus size={16} weight="bold" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() =>
+                              setList((prev) =>
+                                prev.map((x) =>
+                                  x.id === li.id ? { ...x, quantity: x.quantity + 1 } : x
+                                )
+                              )
+                            }
+                            className="h-8 w-8"
+                            aria-label="Incrementa"
+                          >
+                            <Plus size={16} weight="bold" />
+                          </Button>
+                        </>
+                      )}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        onClick={() => removeRow(li.id)}
+                        className="h-8 w-8 border-red-300 text-red-600 hover:bg-red-50"
+                        aria-label="Rimuovi"
+                        data-testid={`arrivi-remove-${li.id}`}
+                      >
+                        <Trash size={16} />
+                      </Button>
+                    </div>
+                  </div>
+                  {li.serialized && li.serials.length > 0 && (
+                    <ul className="mt-2 ml-4 space-y-1">
+                      {li.serials.map((sn, idx) => (
+                        <li
+                          key={`${li.id}-${idx}`}
+                          className="flex items-center gap-2 text-sm font-mono-tight text-slate-700"
+                        >
+                          <Barcode size={14} className="text-slate-400" />
+                          <span>SN {sn}</span>
+                          <button
+                            type="button"
+                            onClick={() => removeSerial(li.id, idx)}
+                            className="text-red-500 hover:text-red-700 ml-auto"
+                            aria-label="Rimuovi seriale"
+                            data-testid={`arrivi-remove-sn-${li.id}-${idx}`}
+                          >
+                            <X size={14} />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* Note */}
+        <section className="bg-white border border-slate-200 rounded-md p-4 sm:p-6">
+          <Label htmlFor="notes" className="text-slate-700 text-sm font-semibold">
+            Note aggiuntive (opzionale)
+          </Label>
+          <Textarea
+            id="notes"
+            data-testid="input-notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Eventuali note per questo arrivo…"
+            className="mt-2 min-h-[90px]"
+          />
+        </section>
+      </main>
+
+      <footer className="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 z-40">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
+          <div className="text-sm text-slate-600">
+            <span className="font-mono-tight font-semibold text-slate-900">{totalUnits}</span>{" "}
+            pz in arrivo · {list.length} prodotti
+          </div>
+          <Button
+            type="button"
+            onClick={submit}
+            disabled={submitting || list.length === 0}
+            className="h-12 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-base"
+            data-testid="submit-arrivo-btn"
+          >
+            {submitting ? (
+              <>
+                <CircleNotch size={20} className="mr-2 animate-spin" /> Conferma in corso…
+              </>
+            ) : (
+              <>
+                <ArrowSquareIn size={20} weight="bold" className="mr-2" /> CONFERMA ARRIVO
+              </>
+            )}
+          </Button>
+        </div>
+      </footer>
+
+      {qtyDialog && (
+        <QtyDialog
+          item={qtyDialog.item}
+          initial={qtyDialog.initial}
+          onClose={() => setQtyDialog(null)}
+          onConfirm={(qty) => {
+            addQtyToList(qtyDialog.item, qty);
+            setLastScan({
+              type: "ok",
+              title: "🟢 AGGIUNTO ALLA LISTA",
+              subtitle: `${qtyDialog.item.name} — ${qty} ${qtyDialog.item.unit || "pz"}`,
+            });
+            setQtyDialog(null);
+          }}
+        />
+      )}
+
+      {picker && (
+        <ProductPicker
+          items={items}
+          filter={picker.filter}
+          onClose={() => setPicker(null)}
+          onSelect={(product) => {
+            if (picker.filter === "serialized") {
+              if (picker.pendingSn) {
+                // We had an SN waiting for a model — add now
+                addSerialToList(product, picker.pendingSn);
+                setLastScan({
+                  type: "ok",
+                  title: "🟢 SERIALE AGGIUNTO",
+                  subtitle: `${product.name} — SN ${picker.pendingSn}`,
+                });
+                setPending({ id: product.id, name: product.name });
+              } else {
+                setPending({ id: product.id, name: product.name });
+                setLastScan({
+                  type: "ok",
+                  title: "MODELLO SELEZIONATO",
+                  subtitle: `${product.name} — scansiona i seriali`,
+                });
+              }
+              setPicker(null);
+            } else {
+              // filter === quantity
+              setPicker(null);
+              setQtyDialog({ item: product, initial: 1 });
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* -------- QtyDialog -------- */
+function QtyDialog({ item, initial, onClose, onConfirm }) {
+  const [qty, setQty] = useState(String(initial ?? 1));
+  const inputRef = useRef(null);
+  useEffect(() => {
+    setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }, 0);
+  }, []);
+  const confirm = () => {
+    const n = parseFloat(qty);
+    if (!isFinite(n) || n <= 0) {
+      toast.error("Quantità non valida");
+      return;
+    }
+    onConfirm(n);
+  };
   return (
     <div
-      className="max-w-2xl mx-auto px-6 py-16 text-center"
-      data-testid="arrivi-page"
+      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      data-testid="qty-dialog"
     >
-      <div className="inline-flex w-20 h-20 rounded-full bg-emerald-100 items-center justify-center mb-4">
-        <ArrowSquareIn size={40} weight="bold" className="text-emerald-700" />
-      </div>
-      <h1 className="font-display text-3xl font-bold text-slate-900">
-        Arrivi
-      </h1>
-      <p className="text-slate-500 mt-2">
-        Registrazione ingressi materiali su Consegne Wallbox / Entrate.
-      </p>
-      <div className="mt-6 bg-emerald-50 border border-emerald-200 rounded-md p-5 text-left text-emerald-900 text-sm">
-        <div className="font-semibold uppercase tracking-wider text-xs text-emerald-800 mb-2">
-          In arrivo con la fase F2
-        </div>
-        Scansione rapida barcode / QR / seriale, campo Fornitore o Mittente
-        (usato solo per l'email — non salvato su Notion), controllo duplicati
-        seriali, conferma live su Notion e email automatica ai destinatari.
-      </div>
-      <Link
-        to="/spedizioni"
-        data-testid="arrivi-goto-spedizioni"
-        className="inline-flex items-center gap-1 mt-6 h-11 px-5 border border-slate-300 rounded-md text-slate-700 hover:text-slate-900 hover:border-slate-400 font-semibold"
+      <div
+        className="bg-white rounded-lg w-full max-w-md p-6 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
       >
-        Vai a Spedizioni <ArrowRight size={16} />
-      </Link>
+        <div className="text-[10px] tracking-[0.2em] uppercase text-slate-500 font-semibold">
+          Quantità in arrivo
+        </div>
+        <div className="font-display text-2xl font-bold text-slate-900 mt-1">
+          {item.name}
+        </div>
+        <div className="text-sm text-slate-500 mt-1">
+          Stock attuale:{" "}
+          <span className="font-mono-tight font-semibold text-slate-700">
+            {item.quantity ?? 0} {item.unit || "pz"}
+          </span>
+        </div>
+        <div className="mt-5">
+          <Label htmlFor="qty-input" className="text-slate-700 text-sm font-semibold">
+            Quantità in arrivo
+          </Label>
+          <Input
+            id="qty-input"
+            ref={inputRef}
+            type="number"
+            min={1}
+            step="1"
+            value={qty}
+            onChange={(e) => setQty(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                confirm();
+              }
+            }}
+            className="h-14 mt-2 text-2xl font-mono-tight font-bold text-center"
+            data-testid="qty-input"
+          />
+        </div>
+        <div className="mt-5 flex gap-2 justify-end">
+          <Button variant="outline" onClick={onClose} className="h-11" data-testid="qty-cancel">
+            Annulla
+          </Button>
+          <Button
+            onClick={confirm}
+            className="h-11 bg-emerald-600 hover:bg-emerald-700"
+            data-testid="qty-confirm"
+          >
+            Aggiungi
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -------- ProductPicker -------- */
+function ProductPicker({ items, filter, onClose, onSelect }) {
+  const [q, setQ] = useState("");
+  const inputRef = useRef(null);
+  useEffect(() => {
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }, []);
+  const filtered = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    return items.filter((it) => {
+      if (filter === "serialized" && !it.serialized) return false;
+      if (filter === "quantity" && it.serialized) return false;
+      if (!query) return true;
+      return (
+        (it.name || "").toLowerCase().includes(query) ||
+        (it.code || "").toLowerCase().includes(query) ||
+        (it.category || "").toLowerCase().includes(query)
+      );
+    });
+  }, [items, filter, q]);
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      data-testid="product-picker"
+    >
+      <div
+        className="bg-white rounded-lg w-full max-w-2xl mt-16 max-h-[70vh] flex flex-col shadow-xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-4 border-b border-slate-200 flex items-center gap-2">
+          <div className="text-[10px] tracking-[0.2em] uppercase text-slate-500 font-semibold flex-1">
+            Seleziona prodotto{" "}
+            {filter === "serialized"
+              ? "(A Seriale)"
+              : filter === "quantity"
+              ? "(A Quantità)"
+              : ""}
+          </div>
+          <button
+            onClick={onClose}
+            className="text-slate-500 hover:text-slate-900 p-1"
+            aria-label="Chiudi"
+            data-testid="picker-close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="p-4 border-b border-slate-100">
+          <div className="relative">
+            <MagnifyingGlass
+              size={18}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+            />
+            <Input
+              ref={inputRef}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Cerca per nome, codice o categoria…"
+              className="pl-10 h-11"
+              autoComplete="off"
+              data-testid="picker-search"
+            />
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+          {filtered.length === 0 ? (
+            <div className="p-8 text-center text-slate-400 text-sm">
+              Nessun prodotto{filter === "serialized" ? " a seriale" : filter === "quantity" ? " a quantità" : ""} trovato.
+            </div>
+          ) : (
+            filtered.map((it) => (
+              <button
+                key={it.id}
+                type="button"
+                onClick={() => onSelect(it)}
+                className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center justify-between"
+                data-testid={`picker-item-${it.id}`}
+              >
+                <div className="min-w-0">
+                  <div className="font-semibold text-slate-900">{it.name}</div>
+                  <div className="text-xs text-slate-500 font-mono-tight">
+                    {it.code || "—"} · {it.category || "—"}
+                  </div>
+                </div>
+                <div className="text-right shrink-0 ml-3">
+                  <div className="font-mono-tight font-semibold text-slate-900">
+                    {it.quantity ?? 0} {it.unit || "pz"}
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    {it.serialized ? "A Seriale" : "A Quantità"}
+                  </div>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 }

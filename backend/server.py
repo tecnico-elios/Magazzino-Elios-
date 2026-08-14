@@ -138,6 +138,39 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ArrivoItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    page_id: str
+    name: str
+    unit: Optional[str] = "pz"
+    serialized: bool = False
+    quantity: float = 0
+    serials: List[str] = Field(default_factory=list)
+
+
+class ArrivoPayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    operator: str
+    arrival_date: str   # ISO date
+    fornitore: str      # ONLY for email — NOT stored in Notion
+    items: List[ArrivoItem]
+    notes: Optional[str] = None
+
+
+class ArrivoRecord(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    operator: str
+    arrival_date: str
+    fornitore: str
+    items: List[ArrivoItem]
+    notes: Optional[str] = None
+    recipients: List[str] = Field(default_factory=list)
+    receipts_page_ids: List[str] = Field(default_factory=list)
+    status: str = "completed"
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
 class RecipientsUpdate(BaseModel):
     emails: List[EmailStr]
 
@@ -563,6 +596,205 @@ async def submit_checklist(payload: ChecklistPayload):
 async def history(limit: int = 20):
     docs = await db.checklists.find({}, {"_id": 0}).sort("created_at", -1).to_list(limit)
     return {"items": docs}
+
+
+# ---------- Arrivi (F2) ----------
+def build_arrivo_email(payload: ArrivoPayload) -> str:
+    esc = html_lib.escape
+    filled = [i for i in payload.items if i.quantity > 0]
+    rows_html = []
+    for it in filled:
+        serials_html = (
+            "<ul style='margin:6px 0 0 18px;padding:0;font-family:Consolas,monospace;font-size:13px;color:#0f172a;'>"
+            + "".join(f"<li>{esc(s)}</li>" for s in it.serials)
+            + "</ul>"
+            if it.serialized and it.serials
+            else '<span style="color:#64748b;font-size:13px;">—</span>'
+        )
+        unit = it.unit or "pz"
+        rows_html.append(
+            f"<tr>"
+            f'<td style="padding:12px 14px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:14px;color:#0f172a;vertical-align:top;">{esc(it.name)}</td>'
+            f'<td style="padding:12px 14px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:14px;color:#0f172a;text-align:center;font-weight:700;vertical-align:top;width:110px;">{esc(str(_qty_fmt(it.quantity)))} {esc(unit)}</td>'
+            f'<td style="padding:12px 14px;border-bottom:1px solid #e2e8f0;vertical-align:top;">{serials_html}</td>'
+            f"</tr>"
+        )
+    table_body = "".join(rows_html) or (
+        '<tr><td colspan="3" style="padding:20px;text-align:center;color:#64748b;">Nessun prodotto</td></tr>'
+    )
+    notes_block = (
+        f'<div style="margin-top:20px;padding:14px;background:#dcfce7;border-left:4px solid #16a34a;'
+        f'font-family:Arial,sans-serif;font-size:14px;color:#166534;">'
+        f'<strong>Note:</strong> {esc(payload.notes)}</div>'
+        if payload.notes and payload.notes.strip()
+        else ""
+    )
+    now_it = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:24px 0;">
+  <tr><td align="center">
+    <table role="presentation" width="720" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e2e8f0;">
+      <tr><td style="background:#065f46;padding:24px;">
+        <div style="font-family:Arial,sans-serif;color:#a7f3d0;font-size:11px;letter-spacing:.2em;text-transform:uppercase;">Magazzino Elios Tech</div>
+        <div style="font-family:Arial,sans-serif;color:#ffffff;font-size:22px;font-weight:700;margin-top:6px;">Arrivo registrato — magazzino aggiornato</div>
+      </td></tr>
+      <tr><td style="padding:24px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;">
+          <tr><td style="padding:12px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;width:35%;border-bottom:1px solid #e2e8f0;">Fornitore / Mittente</td>
+              <td style="padding:12px 14px;font-family:Arial,sans-serif;font-size:15px;color:#0f172a;font-weight:700;border-bottom:1px solid #e2e8f0;">{esc(payload.fornitore)}</td></tr>
+          <tr><td style="padding:12px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;border-bottom:1px solid #e2e8f0;">Data Arrivo</td>
+              <td style="padding:12px 14px;font-family:Arial,sans-serif;font-size:15px;color:#0f172a;font-weight:600;border-bottom:1px solid #e2e8f0;">{esc(payload.arrival_date)}</td></tr>
+          <tr><td style="padding:12px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;border-bottom:1px solid #e2e8f0;">Ora Registrazione</td>
+              <td style="padding:12px 14px;font-family:Arial,sans-serif;font-size:15px;color:#0f172a;font-weight:600;border-bottom:1px solid #e2e8f0;">{esc(now_it)}</td></tr>
+          <tr><td style="padding:12px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;">Operatore</td>
+              <td style="padding:12px 14px;font-family:Arial,sans-serif;font-size:15px;color:#0f172a;font-weight:600;">{esc(payload.operator)}</td></tr>
+        </table>
+        <div style="font-family:Arial,sans-serif;font-size:13px;color:#64748b;text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin:24px 0 10px;">Materiali in Ingresso</div>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;">
+          <thead><tr>
+            <th align="left" style="padding:10px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid #e2e8f0;">Materiale</th>
+            <th align="center" style="padding:10px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid #e2e8f0;">Q.tà</th>
+            <th align="left" style="padding:10px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid #e2e8f0;">Seriali S/N</th>
+          </tr></thead>
+          <tbody>{table_body}</tbody>
+        </table>
+        {notes_block}
+        <div style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;margin-top:24px;border-top:1px solid #e2e8f0;padding-top:14px;">
+          Magazzino Notion aggiornato automaticamente. Email generata da Magazzino Elios Tech.
+        </div>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>"""
+
+
+def validate_arrivo_basic(payload: ArrivoPayload) -> None:
+    if not payload.operator.strip():
+        raise HTTPException(400, "Nome operatore obbligatorio")
+    if not payload.fornitore.strip():
+        raise HTTPException(400, "Fornitore / Mittente obbligatorio")
+    if not payload.arrival_date.strip():
+        raise HTTPException(400, "Data arrivo obbligatoria")
+    filled = [i for i in payload.items if i.quantity > 0]
+    if not filled:
+        raise HTTPException(400, "Aggiungi almeno un prodotto")
+    for item in filled:
+        if item.serialized:
+            expected = int(item.quantity)
+            serials = [s.strip() for s in item.serials]
+            if len(serials) != expected or any(not s for s in serials):
+                raise HTTPException(400, f"Seriali mancanti per {item.name}")
+
+
+@api_router.post("/arrivi/send")
+async def submit_arrivo(payload: ArrivoPayload):
+    validate_arrivo_basic(payload)
+    if not notion_service.is_configured():
+        raise HTTPException(503, "Integrazione Notion non configurata")
+
+    filled = [i for i in payload.items if i.quantity > 0]
+
+    # 1) STRICT SERIAL VALIDATION for serialized items (LIVE — multi-user safe):
+    #      (a) SN must NOT already exist in Receipts (else already registered)
+    #      (b) SN must NOT already exist in Tracker  (else somehow already shipped)
+    #      (c) SN must not be duplicated within this payload
+    serial_errors: List[str] = []
+    seen: set = set()
+    for it in filled:
+        if not it.serialized:
+            continue
+        for sn in (it.serials or []):
+            sn_c = (sn or "").strip()
+            if not sn_c:
+                continue
+            key = sn_c.lower()
+            if key in seen:
+                serial_errors.append(f"{it.name} — SN {sn_c} inserito più volte")
+                continue
+            seen.add(key)
+            try:
+                r_hit = await notion_service.lookup_receipts_sn(sn_c)
+            except Exception as e:
+                raise HTTPException(502, f"Errore verifica entrate: {e}")
+            if r_hit:
+                serial_errors.append(f"{it.name} — SN {sn_c} risulta già registrato in Entrate")
+                continue
+            try:
+                t_hit = await notion_service.lookup_tracker_sn(sn_c)
+            except Exception as e:
+                raise HTTPException(502, f"Errore verifica uscite: {e}")
+            if t_hit:
+                serial_errors.append(f"{it.name} — SN {sn_c} risulta in Uscite (impossibile: già spedito)")
+    if serial_errors:
+        raise HTTPException(409, "Impossibile confermare l'arrivo. " + " • ".join(serial_errors))
+
+    # 2) Create Receipts rows. Notion rollup on Inventario updates stock automatically.
+    receipts_ids: List[str] = []
+    try:
+        for it in filled:
+            if it.serialized and it.serials:
+                for s in it.serials:
+                    pid = await notion_service.create_receipt(
+                        item_page_id=it.page_id,
+                        sn_title=s.strip(),
+                        quantity=1,
+                        data_consegna=payload.arrival_date,
+                    )
+                    receipts_ids.append(pid)
+            else:
+                title = f"{it.name} — {payload.arrival_date}"
+                pid = await notion_service.create_receipt(
+                    item_page_id=it.page_id,
+                    sn_title=title,
+                    quantity=it.quantity,
+                    data_consegna=payload.arrival_date,
+                )
+                receipts_ids.append(pid)
+    except Exception as e:
+        for pid in receipts_ids:
+            await notion_service.archive_page(pid)
+        raise HTTPException(502, f"Impossibile registrare l'arrivo. Riprova. ({e})")
+
+    # 3) Invalidate cached inventory so subsequent reads show updated stock
+    notion_service.invalidate_inventory_cache()
+
+    # 4) Email
+    recipients = await get_recipients()
+    html_content = build_arrivo_email(payload)
+    subject = f"Arrivo — {payload.fornitore} — {payload.arrival_date}"
+    sent = []
+    errors = []
+    for r in recipients:
+        try:
+            eid = await send_email(r, subject, html_content)
+            sent.append({"recipient": r, "id": eid})
+        except Exception as e:
+            logging.error(f"Email send error for {r}: {e}")
+            errors.append({"recipient": r, "error": str(e)})
+
+    # 5) Persist to Mongo history
+    record = ArrivoRecord(
+        operator=payload.operator,
+        arrival_date=payload.arrival_date,
+        fornitore=payload.fornitore,
+        items=filled,
+        notes=payload.notes,
+        recipients=[s["recipient"] for s in sent],
+        receipts_page_ids=receipts_ids,
+        status="completed",
+    )
+    await db.arrivi.insert_one(record.model_dump())
+
+    return {
+        "status": "success",
+        "message": f"Arrivo registrato. Magazzino aggiornato ({len(filled)} prodotti, {int(sum(i.quantity for i in filled))} pz).",
+        "sent": sent,
+        "errors": errors,
+        "arrivo_id": record.id,
+    }
 
 
 # ---------- Admin ----------

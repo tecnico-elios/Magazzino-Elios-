@@ -213,6 +213,42 @@ async def archive_page(page_id: str) -> None:
             logger.warning(f"Rollback archive failed for {page_id}: {e}")
 
 
+async def create_receipt(
+    item_page_id: str,
+    sn_title: str,
+    quantity: float,
+    data_consegna: str,
+) -> str:
+    """Create a new row in the Inventory Receipts (Consegne/Entrate) data source.
+    Returns the new page id. Notion's rollup formula on the Inventario item's
+    QTA auto-updates via the 'Item in entrata' relation.
+
+    Property names match the actual Notion schema:
+      - Item (title)            — SN string or product name (for non-serialized)
+      - Item in entrata (relation) — link to Inventario item
+      - Quantità (number)
+      - Data Consegna (date)
+    """
+    if not NOTION_TOKEN or not NOTION_RECEIPTS_DS_ID:
+        raise RuntimeError("Receipts data source non configurato")
+    url = f"{NOTION_BASE}/pages"
+    body = {
+        "parent": {"type": "data_source_id", "data_source_id": NOTION_RECEIPTS_DS_ID},
+        "properties": {
+            "Item": {"title": [{"type": "text", "text": {"content": (sn_title or "—")[:200]}}]},
+            "Quantità": {"number": quantity},
+            "Item in entrata": {"relation": [{"id": item_page_id}]},
+            "Data Consegna": {"date": {"start": data_consegna}},
+        },
+    }
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.post(url, headers=_headers(), json=body)
+        if resp.status_code >= 400:
+            logger.error(f"Notion create_receipt failed: {resp.status_code} {resp.text[:300]}")
+            resp.raise_for_status()
+        return resp.json().get("id", "")
+
+
 async def lookup_tracker_sn(sn: str) -> Optional[Dict[str, Any]]:
     """Find an Inventory Tracker row whose SN (title) contains `sn` as one of
     the tokens separated by ',' '.' ';' whitespace or newlines.

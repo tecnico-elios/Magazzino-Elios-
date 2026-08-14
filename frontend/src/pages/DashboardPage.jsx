@@ -56,7 +56,7 @@ export default function DashboardPage() {
             Registra prodotti in entrata
           </div>
           <div className="absolute right-4 bottom-4 text-emerald-100/70 text-xs">
-            F2 →
+            Attivo →
           </div>
         </Link>
         <Link
