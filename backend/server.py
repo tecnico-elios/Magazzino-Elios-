@@ -640,13 +640,34 @@ async def list_anomalie(limit: int = 100):
 
 
 @api_router.get("/movimenti")
-async def list_movimenti(limit: int = 200):
-    """Unified movements view — LIVE da Notion Entrate + Uscite. Mongo NON è la fonte."""
+async def list_movimenti(
+    limit: int = 500,
+    month: Optional[str] = None,  # 'YYYY-MM' → filtra server-side su Notion
+):
+    """Unified movements view — LIVE da Notion Entrate + Uscite.
+    Se `month` è passato (YYYY-MM), il filtro avviene DIRETTAMENTE su Notion via
+    Data Consegna / Data Uscita — nessun download dello storico completo.
+    Mongo NON è la fonte."""
     if not notion_service.is_configured():
         raise HTTPException(503, "Integrazione Notion non configurata")
+
+    date_from = date_to = None
+    if month:
+        try:
+            y, m = month.split("-")
+            y_i, m_i = int(y), int(m)
+            if not (1 <= m_i <= 12):
+                raise ValueError("mese fuori range")
+            from calendar import monthrange
+            last = monthrange(y_i, m_i)[1]
+            date_from = f"{y_i:04d}-{m_i:02d}-01"
+            date_to = f"{y_i:04d}-{m_i:02d}-{last:02d}"
+        except Exception:
+            raise HTTPException(400, "Parametro 'month' non valido (formato atteso: YYYY-MM)")
+
     try:
-        entrate = await notion_service.list_receipts_all()
-        uscite = await notion_service.list_exits()
+        entrate = await notion_service.list_receipts_all(date_from=date_from, date_to=date_to)
+        uscite = await notion_service.list_exits(date_from=date_from, date_to=date_to)
     except Exception as e:
         raise HTTPException(502, f"Impossibile leggere Notion: {e}")
     items: List[Dict[str, Any]] = []
@@ -666,7 +687,13 @@ async def list_movimenti(limit: int = 200):
             "taken_by": u.get("taken_by"),
         })
     items.sort(key=lambda x: (x.get("date") or "", x.get("created_time") or ""), reverse=True)
-    return {"items": items[:limit], "count": min(len(items), limit)}
+    return {
+        "items": items[:limit],
+        "count": min(len(items), limit),
+        "month": month,
+        "date_from": date_from,
+        "date_to": date_to,
+    }
 
 
 @api_router.get("/dashboard/kpi")

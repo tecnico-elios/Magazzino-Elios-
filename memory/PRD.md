@@ -4,6 +4,8 @@
 - **F0/F1/F2/F3** ✅
 - **F4 — Multi-utente semplice + Anomalie + Movimenti** ✅ (14/02/2026)
 - **F5 — Dashboard KPI + Admin Gestione Prodotti (Tipo Gestione = Notion SSOT)** ✅ (14/02/2026)
+- **UI-op — Rimozione badge topbar + rename "Preso da" → "Operatore" in Spedizioni** ✅ (14/02/2026)
+- **Movimenti per mese — filtro server-side Notion + cache per-mese** ✅ (14/02/2026)
 - F6 — Test completo E2E (in attesa test reali con Wallbox)
 - PWA — solo alla fine, dopo verifica gestionale completa
 

@@ -247,10 +247,10 @@ async def create_pick(
         return resp.json().get("id", "")
 
 
-async def list_receipts_all() -> List[Dict[str, Any]]:
-    """Return all Inventory Receipts rows enriched with the related Inventario item name.
-    Used by /api/movimenti to build a unified movements view. Notion remains the source.
-    """
+async def list_receipts_all(date_from: Optional[str] = None, date_to: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Return Inventory Receipts rows (enriched with Inventario item name).
+    If `date_from`/`date_to` (ISO YYYY-MM-DD) are provided, filter server-side via
+    Notion API — avoids downloading the full history."""
     if not is_configured() or not NOTION_RECEIPTS_DS_ID:
         return []
     url = f"{NOTION_BASE}/data_sources/{NOTION_RECEIPTS_DS_ID}/query"
@@ -260,6 +260,13 @@ async def list_receipts_all() -> List[Dict[str, Any]]:
         "page_size": 100,
         "sorts": [{"property": "Data Consegna", "direction": "descending"}],
     }
+    if date_from or date_to:
+        conds: List[Dict[str, Any]] = []
+        if date_from:
+            conds.append({"property": "Data Consegna", "date": {"on_or_after": date_from}})
+        if date_to:
+            conds.append({"property": "Data Consegna", "date": {"on_or_before": date_to}})
+        body["filter"] = conds[0] if len(conds) == 1 else {"and": conds}
     out: List[Dict[str, Any]] = []
     async with httpx.AsyncClient(timeout=25) as client:
         while True:
@@ -466,10 +473,9 @@ async def lookup_receipts_sn(sn: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-async def list_exits() -> List[Dict[str, Any]]:
-    """Query the Inventory Tracker data source for ALL outgoing picks in Notion,
-    including those created outside this app.
-    Resolves the related Inventario item's name via a page_id -> name map."""
+async def list_exits(date_from: Optional[str] = None, date_to: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Query the Inventory Tracker data source for outgoing picks.
+    If `date_from`/`date_to` (ISO YYYY-MM-DD) are provided, filter server-side."""
     if not NOTION_TOKEN or not NOTION_TRACKER_DS_ID:
         raise RuntimeError("Tracker non configurato")
 
@@ -481,6 +487,13 @@ async def list_exits() -> List[Dict[str, Any]]:
 
     url = f"{NOTION_BASE}/data_sources/{NOTION_TRACKER_DS_ID}/query"
     body: Dict[str, Any] = {"page_size": 100}
+    if date_from or date_to:
+        conds: List[Dict[str, Any]] = []
+        if date_from:
+            conds.append({"property": "Data Uscita", "date": {"on_or_after": date_from}})
+        if date_to:
+            conds.append({"property": "Data Uscita", "date": {"on_or_before": date_to}})
+        body["filter"] = conds[0] if len(conds) == 1 else {"and": conds}
     out: List[Dict[str, Any]] = []
     async with httpx.AsyncClient(timeout=30) as client:
         while True:
