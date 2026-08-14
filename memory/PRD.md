@@ -14,6 +14,7 @@
 - **F6-quantita — Barcode ripetibile per A Quantità + Dropdown ricerca live** ✅ (14/02/2026)
 - **F6-manual-search — Lookup SN debounced (400ms) in dropdown per inserimento tastiera** ✅ (14/02/2026)
 - **F6-conferma-finale — Popup riepilogo prima di scrittura Notion+email in Arrivi e Spedizioni** ✅ (14/02/2026)
+- **F6-e2e-tiebreaker — Fix `latest_serial_status` tie sui minuti Notion + `taken_by` esposto in movimenti** ✅ (14/08/2026)
 - PWA — solo alla fine, dopo verifica gestionale completa
 
 ## F6-rientri Changelog

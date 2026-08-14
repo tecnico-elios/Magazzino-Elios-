@@ -513,8 +513,10 @@ async def latest_serial_status(sn: str) -> Dict[str, Any]:
         return {"status": "in_warehouse", "last": r, "receipt": r, "exit": None}
     if t and not r:
         return {"status": "out", "last": t, "receipt": None, "exit": t}
-    # both present — the newer one wins
-    if _key(r) >= _key(t):
+    # both present — the newer one wins. On exact tie (Notion created_time is
+    # rounded to the minute), prefer OUT because a shipment physically can only
+    # occur after its receipt was created.
+    if _key(r) > _key(t):
         return {"status": "in_warehouse", "last": r, "receipt": r, "exit": t}
     return {"status": "out", "last": t, "receipt": r, "exit": t}
 
@@ -552,6 +554,7 @@ async def list_exits(date_from: Optional[str] = None, date_to: Optional[str] = N
                 props = p.get("properties", {})
                 sn = _plain_text(_get_prop(props, "SN"))
                 cliente = _plain_text(_get_prop(props, "Preso per"))
+                taken_by = _plain_text(_get_prop(props, "Preso da"))
                 qty_prop = _get_prop(props, "Quantità", "Quantita", "Quantity")
                 qty = qty_prop.get("number") if qty_prop and qty_prop.get("type") == "number" else None
                 date_prop = _get_prop(props, "Data Uscita", "Data")
@@ -570,6 +573,7 @@ async def list_exits(date_from: Optional[str] = None, date_to: Optional[str] = N
                     "id": p["id"],
                     "sn": sn,
                     "cliente": cliente,
+                    "taken_by": taken_by,
                     "quantity": qty,
                     "date": d,
                     "item_ids": item_ids,

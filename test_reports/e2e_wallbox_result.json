@@ -1,0 +1,267 @@
+{
+  "base_url": "https://stock-dispatch-12.preview.emergentagent.com",
+  "steps": {
+    "1_arrivo_iniziale": {
+      "status": 200,
+      "body": {
+        "status": "success",
+        "message": "Arrivo registrato. Magazzino aggiornato (1 prodotti, 1 pz).",
+        "sent": [
+          {
+            "recipient": "tecnico@eliostech.org",
+            "id": "a33074c9-7e0d-41dd-979b-a27921b66a78"
+          },
+          {
+            "recipient": "camilla.zito@eliostech.org",
+            "id": "713f4717-ee83-4129-813f-f18abf7d31bd"
+          },
+          {
+            "recipient": "f.bussatori@eliostech.org",
+            "id": "3dedfe57-f7c8-47ee-ae1f-3f499163da46"
+          }
+        ],
+        "errors": [],
+        "arrivo_id": "6c97b8da-2b91-497f-8cef-46b1da26f329"
+      }
+    },
+    "2_lookup_post_arrivo": {
+      "status": "in_warehouse",
+      "matched_by": "sn",
+      "code": "F6E2ETEST_1786718968",
+      "serial": "F6E2ETEST_1786718968",
+      "item": {
+        "id": "382a9b09-6783-8018-9325-e961617086b0",
+        "name": "DazeBox T Home",
+        "code": "DT01IT32T5",
+        "quantity": 2,
+        "unit": "pz",
+        "category": "Wallbox",
+        "tipo_gestione": "a_seriale",
+        "url": "https://app.notion.com/p/DazeBox-T-Home-382a9b09678380189325e961617086b0",
+        "serialized": true,
+        "configured": true
+      },
+      "receipt_date": "2026-08-14",
+      "receipt_url": "https://app.notion.com/p/F6E2ETEST_1786718968-3bca9b0967838145bfc9f97ea33fe607"
+    },
+    "3_prima_spedizione": {
+      "status": 200,
+      "body": {
+        "status": "success",
+        "message": "Spedizione confermata. Magazzino Notion aggiornato (1 articoli).",
+        "movements": [
+          {
+            "page_id": "382a9b09-6783-8018-9325-e961617086b0",
+            "name": "DazeBox T Home",
+            "unit": "pz",
+            "before": 2,
+            "shipped": 1.0,
+            "after": 1.0,
+            "serials": [
+              "F6E2ETEST_1786718968"
+            ]
+          }
+        ],
+        "sent": [
+          {
+            "recipient": "tecnico@eliostech.org",
+            "id": "b3814d4d-d813-4cef-8d65-9c55cf18b967"
+          }
+        ],
+        "errors": [
+          {
+            "recipient": "camilla.zito@eliostech.org",
+            "error": "Client error '429 Too Many Requests' for url 'https://integrations.emergentagent.com/api/v1/email/send'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429"
+          },
+          {
+            "recipient": "f.bussatori@eliostech.org",
+            "error": "Client error '429 Too Many Requests' for url 'https://integrations.emergentagent.com/api/v1/email/send'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429"
+          }
+        ],
+        "checklist_id": "610c354c-6b61-4254-a72f-ea5a7bdb439e"
+      }
+    },
+    "4_lookup_post_spedizione": {
+      "status": "out",
+      "matched_by": "sn",
+      "code": "F6E2ETEST_1786718968",
+      "serial": "F6E2ETEST_1786718968",
+      "item": {
+        "id": "382a9b09-6783-8018-9325-e961617086b0",
+        "name": "DazeBox T Home",
+        "code": "DT01IT32T5",
+        "quantity": 1,
+        "unit": "pz",
+        "category": "Wallbox",
+        "tipo_gestione": "a_seriale",
+        "url": "https://app.notion.com/p/DazeBox-T-Home-382a9b09678380189325e961617086b0",
+        "serialized": true,
+        "configured": true
+      },
+      "shipped_to": "F6 E2E CLIENTE 1",
+      "shipped_date": "2026-08-14",
+      "tracker_url": "https://app.notion.com/p/F6E2ETEST_1786718968-3bca9b09678381bc9d1ac6f962f10016"
+    },
+    "5_rientro": {
+      "status": 200,
+      "body": {
+        "status": "success",
+        "message": "Arrivo registrato. Magazzino aggiornato (1 prodotti, 1 pz).",
+        "sent": [],
+        "errors": [
+          {
+            "recipient": "tecnico@eliostech.org",
+            "error": "Client error '429 Too Many Requests' for url 'https://integrations.emergentagent.com/api/v1/email/send'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429"
+          },
+          {
+            "recipient": "camilla.zito@eliostech.org",
+            "error": "Client error '429 Too Many Requests' for url 'https://integrations.emergentagent.com/api/v1/email/send'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429"
+          },
+          {
+            "recipient": "f.bussatori@eliostech.org",
+            "error": "Client error '429 Too Many Requests' for url 'https://integrations.emergentagent.com/api/v1/email/send'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429"
+          }
+        ],
+        "arrivo_id": "9c333dbf-ae74-4b9a-9c5d-3f051c95eebd"
+      }
+    },
+    "6_lookup_post_rientro": {
+      "status": "in_warehouse",
+      "matched_by": "sn",
+      "code": "F6E2ETEST_1786718968",
+      "serial": "F6E2ETEST_1786718968",
+      "item": {
+        "id": "382a9b09-6783-8018-9325-e961617086b0",
+        "name": "DazeBox T Home",
+        "code": "DT01IT32T5",
+        "quantity": 2,
+        "unit": "pz",
+        "category": "Wallbox",
+        "tipo_gestione": "a_seriale",
+        "url": "https://app.notion.com/p/DazeBox-T-Home-382a9b09678380189325e961617086b0",
+        "serialized": true,
+        "configured": true
+      },
+      "receipt_date": "2026-08-14",
+      "receipt_url": "https://app.notion.com/p/F6E2ETEST_1786718968-3bca9b096783819dbab2ecedd7f878ac"
+    },
+    "7_seconda_spedizione": {
+      "status": 200,
+      "body": {
+        "status": "success",
+        "message": "Spedizione confermata. Magazzino Notion aggiornato (1 articoli).",
+        "movements": [
+          {
+            "page_id": "382a9b09-6783-8018-9325-e961617086b0",
+            "name": "DazeBox T Home",
+            "unit": "pz",
+            "before": 2,
+            "shipped": 1.0,
+            "after": 1.0,
+            "serials": [
+              "F6E2ETEST_1786718968"
+            ]
+          }
+        ],
+        "sent": [],
+        "errors": [
+          {
+            "recipient": "tecnico@eliostech.org",
+            "error": "Client error '429 Too Many Requests' for url 'https://integrations.emergentagent.com/api/v1/email/send'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429"
+          },
+          {
+            "recipient": "camilla.zito@eliostech.org",
+            "error": "Client error '429 Too Many Requests' for url 'https://integrations.emergentagent.com/api/v1/email/send'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429"
+          },
+          {
+            "recipient": "f.bussatori@eliostech.org",
+            "error": "Client error '429 Too Many Requests' for url 'https://integrations.emergentagent.com/api/v1/email/send'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429"
+          }
+        ],
+        "checklist_id": "2f4653e2-ea31-4c96-99f9-72cf7281cdd8"
+      }
+    },
+    "8_lookup_finale": {
+      "status": "out",
+      "matched_by": "sn",
+      "code": "F6E2ETEST_1786718968",
+      "serial": "F6E2ETEST_1786718968",
+      "item": {
+        "id": "382a9b09-6783-8018-9325-e961617086b0",
+        "name": "DazeBox T Home",
+        "code": "DT01IT32T5",
+        "quantity": 1,
+        "unit": "pz",
+        "category": "Wallbox",
+        "tipo_gestione": "a_seriale",
+        "url": "https://app.notion.com/p/DazeBox-T-Home-382a9b09678380189325e961617086b0",
+        "serialized": true,
+        "configured": true
+      },
+      "shipped_to": "F6 E2E CLIENTE 2",
+      "shipped_date": "2026-08-14",
+      "tracker_url": "https://app.notion.com/p/F6E2ETEST_1786718968-3bca9b0967838166850ffc72d5e150ae"
+    },
+    "9_movimenti": {
+      "total_month": 28,
+      "sn_occurrences": [
+        {
+          "tipo": "spedizione",
+          "data": "2026-08-14",
+          "fornitore_o_cliente": "F6 E2E CLIENTE 2"
+        },
+        {
+          "tipo": "arrivo",
+          "data": "2026-08-14",
+          "fornitore_o_cliente": null
+        },
+        {
+          "tipo": "spedizione",
+          "data": "2026-08-14",
+          "fornitore_o_cliente": "F6 E2E CLIENTE 1"
+        },
+        {
+          "tipo": "arrivo",
+          "data": "2026-08-14",
+          "fornitore_o_cliente": null
+        }
+      ]
+    },
+    "10a_helper_rientro2": {
+      "status": 200,
+      "body": {
+        "status": "success",
+        "message": "Arrivo registrato. Magazzino aggiornato (1 prodotti, 1 pz).",
+        "sent": [],
+        "errors": [
+          {
+            "recipient": "tecnico@eliostech.org",
+            "error": "Client error '429 Too Many Requests' for url 'https://integrations.emergentagent.com/api/v1/email/send'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429"
+          },
+          {
+            "recipient": "camilla.zito@eliostech.org",
+            "error": "Client error '429 Too Many Requests' for url 'https://integrations.emergentagent.com/api/v1/email/send'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429"
+          },
+          {
+            "recipient": "f.bussatori@eliostech.org",
+            "error": "Client error '429 Too Many Requests' for url 'https://integrations.emergentagent.com/api/v1/email/send'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429"
+          }
+        ],
+        "arrivo_id": "73717e00-f3d7-44e8-bf64-565be6c04823"
+      }
+    },
+    "10_duplicato": {
+      "status": 409,
+      "body": {
+        "detail": "Impossibile confermare l'arrivo. DazeBox T Home — SN F6E2ETEST_1786718968 già presente in magazzino (entrato il 2026-08-14)"
+      }
+    }
+  },
+  "sn": "F6E2ETEST_1786718968",
+  "product": {
+    "page_id": "382a9b09-6783-8018-9325-e961617086b0",
+    "name": "DazeBox T Home",
+    "unit": "pz",
+    "categoria": "Wallbox"
+  }
+}
