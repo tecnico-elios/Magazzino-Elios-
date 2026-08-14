@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { useInventoryCtx } from "../lib/InventoryContext";
+import { useOperator } from "../lib/useOperator";
 import ScannerBar from "../components/ScannerBar";
 import QtyDialog from "../components/QtyDialog";
 import ProductPicker from "../components/ProductPicker";
@@ -35,9 +36,10 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
  */
 export default function ArriviPage() {
   const { items, lookupLocalBySku, refresh } = useInventoryCtx();
+  const { operator: opCtx, setOperator: setOpCtx } = useOperator();
 
   const [fornitore, setFornitore] = useState("");
-  const [operator, setOperator] = useState("");
+  const [operator, setOperator] = useState(opCtx || "");
   const [arrivalDate, setArrivalDate] = useState(todayISO());
   const [notes, setNotes] = useState("");
 
@@ -55,6 +57,11 @@ export default function ArriviPage() {
   useEffect(() => {
     if (!qtyDialog && !picker) focusScanner();
   }, [qtyDialog, picker]);
+
+  useEffect(() => {
+    // Se cambia l'operatore in AppLayout mentre siamo qui, riflette
+    if (opCtx && !operator) setOperator(opCtx);
+  }, [opCtx, operator]);
 
   const totalUnits = list.reduce((a, li) => a + (li.quantity || 0), 0);
 
@@ -219,6 +226,7 @@ export default function ArriviPage() {
       };
       const { data } = await axios.post(`${API}/arrivi/send`, payload);
       toast.success("Arrivo confermato", { description: data.message, duration: 6000 });
+      setOpCtx(operator.trim()); // F4: persist operator across sessions
       setList([]);
       setFornitore("");
       setNotes("");

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { useInventoryCtx } from "../lib/InventoryContext";
+import { useOperator } from "../lib/useOperator";
 import ScannerBar from "../components/ScannerBar";
 import QtyDialog from "../components/QtyDialog";
 import ProductPicker from "../components/ProductPicker";
@@ -37,10 +38,11 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
  */
 export default function ChecklistPage() {
   const { items, lookupLocalBySku, refresh } = useInventoryCtx();
+  const { operator: opCtx, setOperator: setOpCtx } = useOperator();
 
   const [cliente, setCliente] = useState("");
   const [takenBy, setTakenBy] = useState("");
-  const [operator, setOperator] = useState("");
+  const [operator, setOperator] = useState(opCtx || "");
   const [shippingDate, setShippingDate] = useState(todayISO());
   const [notes, setNotes] = useState("");
 
@@ -57,6 +59,10 @@ export default function ChecklistPage() {
   useEffect(() => {
     if (!qtyDialog && !picker) focusScanner();
   }, [qtyDialog, picker]);
+
+  useEffect(() => {
+    if (opCtx && !operator) setOperator(opCtx);
+  }, [opCtx, operator]);
 
   const totalUnits = list.reduce((a, li) => a + (li.quantity || 0), 0);
 
@@ -274,6 +280,7 @@ export default function ChecklistPage() {
       };
       const { data } = await axios.post(`${API}/checklist/send`, payload);
       toast.success("Spedizione confermata", { description: data.message, duration: 6000 });
+      setOpCtx(operator.trim()); // F4: persist operator across sessions
       setList([]);
       setCliente("");
       setTakenBy("");

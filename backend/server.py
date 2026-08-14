@@ -505,6 +505,15 @@ async def submit_checklist(payload: ChecklistPayload):
                     + (f" il {t_hit.get('date')}" if t_hit.get("date") else "")
                 )
     if serial_errors:
+        # F4: log anomaly for auditability
+        await log_anomaly(
+            kind="submit_blocked_serials",
+            description=" • ".join(serial_errors),
+            operator=payload.operator,
+            product=", ".join({i.name for i in filled if i.serialized}) or None,
+            serial_or_code=", ".join({s for i in filled if i.serialized for s in (i.serials or [])})[:400] or None,
+            source="spedizione",
+        )
         raise HTTPException(
             409,
             "Impossibile confermare la spedizione. " + " • ".join(serial_errors),
@@ -518,6 +527,13 @@ async def submit_checklist(payload: ChecklistPayload):
             unit = it.unit or "pz"
             shortages.append(f"{it.name}: disponibili {_qty_fmt(avail)} {unit} — richiesti {_qty_fmt(it.quantity)} {unit}")
     if shortages:
+        await log_anomaly(
+            kind="shipment_shortage",
+            description=" • ".join(shortages),
+            operator=payload.operator,
+            product=", ".join({i.name for i in filled}) or None,
+            source="spedizione",
+        )
         raise HTTPException(409, "Quantità non disponibile. " + " • ".join(shortages))
 
     # 3) Create Inventory Tracker rows in Notion (one per SN for serialized, one aggregated otherwise)
@@ -599,6 +615,57 @@ async def submit_checklist(payload: ChecklistPayload):
         "errors": errors,
         "checklist_id": record.id,
     }
+
+
+async def log_anomaly(kind: str, description: str, operator: Optional[str] = None,
+                      product: Optional[str] = None, serial_or_code: Optional[str] = None,
+                      source: Optional[str] = None) -> None:
+    """F4: Register an operational anomaly in Mongo. Best-effort, non-blocking failure."""
+    try:
+        await db.anomalies.insert_one({
+            "id": str(uuid.uuid4()),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "kind": kind, "description": description, "operator": operator,
+            "product": product, "serial_or_code": serial_or_code, "source": source,
+        })
+    except Exception as e:
+        logging.error(f"log_anomaly failed: {e}")
+
+
+@api_router.get("/anomalie")
+async def list_anomalie(limit: int = 100):
+    docs = await db.anomalies.find({}, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    return {"items": docs, "count": len(docs)}
+
+
+@api_router.get("/movimenti")
+async def list_movimenti(limit: int = 200):
+    """Unified movements view — LIVE da Notion Entrate + Uscite. Mongo NON è la fonte."""
+    if not notion_service.is_configured():
+        raise HTTPException(503, "Integrazione Notion non configurata")
+    try:
+        entrate = await notion_service.list_receipts_all()
+        uscite = await notion_service.list_exits()
+    except Exception as e:
+        raise HTTPException(502, f"Impossibile leggere Notion: {e}")
+    items: List[Dict[str, Any]] = []
+    for r in entrate:
+        items.append({
+            "id": r.get("id"), "type": "arrivo", "date": r.get("date"),
+            "created_time": r.get("created_time"), "product": r.get("item_name"),
+            "quantity": r.get("quantity"), "unit": r.get("unit") or "pz",
+            "serial_or_code": r.get("sn") or "", "cliente": None, "taken_by": None,
+        })
+    for u in uscite:
+        items.append({
+            "id": u.get("id"), "type": "spedizione", "date": u.get("date"),
+            "created_time": u.get("created_time"), "product": u.get("item_name"),
+            "quantity": u.get("quantity"), "unit": u.get("unit") or "pz",
+            "serial_or_code": u.get("sn") or "", "cliente": u.get("cliente"),
+            "taken_by": u.get("taken_by"),
+        })
+    items.sort(key=lambda x: (x.get("date") or "", x.get("created_time") or ""), reverse=True)
+    return {"items": items[:limit], "count": min(len(items), limit)}
 
 
 @api_router.get("/checklist/history")
@@ -738,6 +805,14 @@ async def submit_arrivo(payload: ArrivoPayload):
             if t_hit:
                 serial_errors.append(f"{it.name} — SN {sn_c} risulta in Uscite (impossibile: già spedito)")
     if serial_errors:
+        await log_anomaly(
+            kind="arrivo_blocked_serials",
+            description=" • ".join(serial_errors),
+            operator=payload.operator,
+            product=", ".join({i.name for i in filled if i.serialized}) or None,
+            serial_or_code=", ".join({s for i in filled if i.serialized for s in (i.serials or [])})[:400] or None,
+            source="arrivo",
+        )
         raise HTTPException(409, "Impossibile confermare l'arrivo. " + " • ".join(serial_errors))
 
     # 2) Create Receipts rows. Notion rollup on Inventario updates stock automatically.
@@ -934,3 +1009,4 @@ logger = logging.getLogger(__name__)
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+

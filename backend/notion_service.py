@@ -217,6 +217,67 @@ async def create_pick(
         return resp.json().get("id", "")
 
 
+async def list_receipts_all() -> List[Dict[str, Any]]:
+    """Return all Inventory Receipts rows enriched with the related Inventario item name.
+    Used by /api/movimenti to build a unified movements view. Notion remains the source.
+    """
+    if not is_configured() or not NOTION_RECEIPTS_DS_ID:
+        return []
+    url = f"{NOTION_BASE}/data_sources/{NOTION_RECEIPTS_DS_ID}/query"
+    inv = await list_inventory()
+    inv_map = {it["id"]: it for it in inv}
+    body: Dict[str, Any] = {
+        "page_size": 100,
+        "sorts": [{"property": "Data Consegna", "direction": "descending"}],
+    }
+    out: List[Dict[str, Any]] = []
+    async with httpx.AsyncClient(timeout=25) as client:
+        while True:
+            resp = await client.post(url, headers=_headers(), json=body)
+            if resp.status_code >= 400:
+                logger.error(f"Notion receipts list failed: {resp.status_code} {resp.text[:200]}")
+                resp.raise_for_status()
+            data = resp.json()
+            for p in data.get("results", []):
+                props = p.get("properties", {})
+                title = _plain_text(_get_prop(props, "Item", "Aa item", "Aa Item"))
+                qty_prop = _get_prop(props, "Quantità")
+                qty = qty_prop.get("number") if qty_prop else None
+                date_prop = _get_prop(props, "Data Consegna", "Data")
+                d = None
+                if date_prop and date_prop.get("type") == "date":
+                    dv = date_prop.get("date") or {}
+                    d = dv.get("start")
+                rel_prop = _get_prop(props, "Item in entrata", "Item in ingresso")
+                item_ids: List[str] = []
+                item_name = None
+                item_unit = "pz"
+                if rel_prop and rel_prop.get("type") == "relation":
+                    for r in (rel_prop.get("relation") or []):
+                        rid = r.get("id")
+                        if rid:
+                            item_ids.append(rid)
+                            it = inv_map.get(rid)
+                            if it:
+                                item_name = it.get("name")
+                                item_unit = it.get("unit") or "pz"
+                out.append({
+                    "id": p["id"],
+                    "sn": title,
+                    "quantity": qty,
+                    "date": d,
+                    "item_ids": item_ids,
+                    "item_name": item_name,
+                    "unit": item_unit,
+                    "created_time": p.get("created_time"),
+                })
+            if not data.get("has_more"):
+                break
+            body["start_cursor"] = data.get("next_cursor")
+    return out
+
+
+
 async def archive_page(page_id: str) -> None:
     """Archive a page — used to rollback a partially-created shipment."""
     if not NOTION_TOKEN or not page_id:
