@@ -1,0 +1,32 @@
+{
+  "summary": "F6 final regression sweep on 'Magazzino Elios Tech'. Full backend pytest suite: 75 passed + 1 skipped by design (pre-existing test_submit_arrivo_blocks_not_configured — cannot exercise without altering Notion since all 42 items are configured). Added /app/backend/tests/test_f6_regression.py (17 tests) covering every endpoint in scope: GET /api/inventory, /api/inventory/lookup (found/not_found), /api/movimenti (no-month, month=YYYY-MM, invalid, sorted desc), /api/dashboard/kpi (all keys), /api/anomalie, /api/checklist/history, /api/admin/inventory (auth+ok), /api/admin/recipients, /api/admin/notion-exits, plus 3 strict-serial validations on /api/checklist/send (unknown FAKE_SN → 409 'non risulta presente', duplicate FAKE_SN in payload → 409, over-stock A Quantità → 409). NO real writes to Notion. Frontend E2E via Playwright PASSED 8/8: Dashboard shows 4 KPI cards (Stock/Arrivi/Spedizioni/Sotto scorta), Inventario shows both 'A Seriale' (ambra) and 'A Quantità' (grigio) badges, 0 NON CONFIGURATO items (coherent with backend). Arrivi & Spedizioni: scanner-input has autofocus at mount AND regains focus after Enter of unknown code (no page reload). Spedizioni page shows 'Operatore' + 'Cliente' labels as required. Movimenti page loads with month filter (?month=2026-08) — correctly filtered server-side. Anomalie loads. Admin login (admin123) OK; Gestione Prodotti tab counts: Tutti(42) / A Seriale(13) / A Quantità(29) / Non configurati(0).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Movimenti mount", "issue": "Fires 2 identical GET /api/movimenti?month=YYYY-MM calls on first mount (likely React StrictMode double-invoke of useEffect in dev). Requirement said '1 sola chiamata'. In production build StrictMode double-invoke does not occur, so this is a dev-only observation. Non-blocking.", "affected_selectors": ["/movimenti"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_f6_regression.py",
+    "/app/test_reports/pytest/iteration_16_f6.xml",
+    "/app/test_reports/pytest/iteration_16_all.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Response envelope inconsistency across endpoints: /api/inventory returns {items, categories, refreshed_at}, /api/movimenti returns {items, count, month, date_from, date_to}, /api/anomalie returns {items, count}, /api/admin/inventory returns {items}, /api/inventory/lookup returns {status, matched_by, item, code}. All are self-consistent and used correctly by the frontend, but a shared response schema across list endpoints would ease client work. Non-blocking.",
+    "server.py is 1183 lines — consider splitting checklist/arrivi/admin/dashboard routers to keep <700 lines each (code quality rule).",
+    "F6 strict-serial validations behave correctly: unknown SN → 409 'non risulta presente', duplicate SN in same payload → 409 'inserito più volte', quantity over stock → 409 'Quantità non disponibile'. All three anomaly kinds are logged in /api/anomalie (verified: submit_blocked_serials, shipment_shortage, arrivo_blocked_serials all present).",
+    "Notion SSOT confirmed: no MongoDB collection duplicates inventory/stock/movements; PUT /api/admin/inventory/tipo-gestione writes through to Notion Select and invalidates 60s cache (already covered by test_admin_update_tipo_gestione_roundtrip in test_f5_tipo_gestione.py which passed again in this run).",
+    "Scanner autofocus is robust: verified via document.activeElement introspection on both /arrivi and /spedizioni; focus returns to data-testid=scanner-input after Enter of unknown SN, no page reload observed."
+  ],
+  "updated_files": ["/app/backend/tests/test_f6_regression.py"],
+  "success_rate": {"backend": "100% (75/75 passed, 1 skipped by design)", "frontend": "100% (8/8 F6 E2E flows)"},
+  "test_credentials": "Admin password: admin123 (X-Admin-Password header)",
+  "seed_data_creation": "None. Only READ operations on Notion; strict-validation tests used only FAKE_SN which are rejected before any Notion write.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "F6 regression fully green. Backend 75/75 passing. If further work needed on 'block if not configured' path, use monkeypatch of notion_service.get_items() to inject a configured=False item (currently skipped because all 42 real Notion items are configured). Roundtrip target for Tipo Gestione flips remains page_id 3b8a9b09-6783-806d-9044-e46bd262075b (Cavo Molex, a_quantita) — always restore in try/finally. Movimenti double-fetch on mount is likely React StrictMode; safe to ignore for prod but if you want to eliminate, wrap the effect with a ref-guard or check REACT_STRICT_MODE.",
+  "rca of the issue": "N/A — no critical bugs found in F6 sweep."
+}
