@@ -200,7 +200,8 @@ export default function ChecklistPage() {
         });
         return;
       }
-      if (data.status === "ok" && data.matched_by === "sku" && data.item) {
+      if (data.status === "ok" && data.item) {
+        // matched_by: "sku" | "barcode" — prodotto riconosciuto
         if (!data.item.configured) {
           setLastScan({
             type: "error",

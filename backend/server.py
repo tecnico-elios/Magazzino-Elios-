@@ -421,6 +421,17 @@ async def inventory_lookup(code: str):
                 matched_item = i
                 break
 
+    # F6-quantita: se il prodotto è A Quantità, il valore trovato nella colonna
+    # "Item"/"SN" è un BARCODE (non un seriale univoco). Trattalo come match SKU
+    # → nessuna validazione seriale, apri QtyDialog.
+    if matched_item and matched_item.get("tipo_gestione") == "a_quantita":
+        return {
+            "status": "ok",
+            "matched_by": "barcode",
+            "item": matched_item,
+            "code": code_clean,
+        }
+
     if st["status"] == "in_warehouse":
         return {
             "status": "in_warehouse",

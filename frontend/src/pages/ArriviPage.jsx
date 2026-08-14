@@ -182,7 +182,8 @@ export default function ArriviPage() {
         });
         return;
       }
-      if (data.status === "ok" && data.matched_by === "sku" && data.item) {
+      if (data.status === "ok" && data.item) {
+        // matched_by: "sku" | "barcode" — entrambi = prodotto riconosciuto
         if (!data.item.configured) {
           setLastScan({
             type: "error",

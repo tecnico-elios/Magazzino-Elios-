@@ -95,6 +95,34 @@ export function InventoryProvider({ children }) {
 
   const getById = useCallback((id) => indices.byId.get(id) || null, [indices]);
 
+  /**
+   * Substring search over local cache. Fast — no Notion call.
+   * Prioritises: exact SKU match > SKU-starts-with > name-starts-with > substring.
+   * Returns up to `limit` results.
+   */
+  const searchLocal = useCallback(
+    (query, limit = 8) => {
+      const q = (query || "").trim().toLowerCase();
+      if (!q || q.length < 1) return [];
+      const exact = [];
+      const startsCode = [];
+      const startsName = [];
+      const substr = [];
+      for (const it of items) {
+        const code = (it.code || "").toLowerCase();
+        const name = (it.name || "").toLowerCase();
+        const cat = (it.category || "").toLowerCase();
+        if (code === q) exact.push(it);
+        else if (code && code.startsWith(q)) startsCode.push(it);
+        else if (name.startsWith(q)) startsName.push(it);
+        else if (name.includes(q) || code.includes(q) || cat.includes(q))
+          substr.push(it);
+      }
+      return [...exact, ...startsCode, ...startsName, ...substr].slice(0, limit);
+    },
+    [items]
+  );
+
   const value = useMemo(
     () => ({
       items,
@@ -105,8 +133,9 @@ export function InventoryProvider({ children }) {
       refresh,
       lookupLocalBySku,
       getById,
+      searchLocal,
     }),
-    [items, categories, loading, error, refreshedAt, refresh, lookupLocalBySku, getById]
+    [items, categories, loading, error, refreshedAt, refresh, lookupLocalBySku, getById, searchLocal]
   );
 
   return (
