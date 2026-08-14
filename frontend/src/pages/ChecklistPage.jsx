@@ -19,7 +19,6 @@ import {
   CircleNotch,
   X,
   Buildings,
-  UserCircle,
   User,
   CalendarBlank,
   Barcode,
@@ -41,7 +40,6 @@ export default function ChecklistPage() {
   const { operator: opCtx, setOperator: setOpCtx } = useOperator();
 
   const [cliente, setCliente] = useState("");
-  const [takenBy, setTakenBy] = useState("");
   const [operator, setOperator] = useState(opCtx || "");
   const [shippingDate, setShippingDate] = useState(todayISO());
   const [notes, setNotes] = useState("");
@@ -254,12 +252,8 @@ export default function ChecklistPage() {
       toast.error("Cliente obbligatorio");
       return;
     }
-    if (!takenBy.trim()) {
-      toast.error("Preso da obbligatorio");
-      return;
-    }
     if (!operator.trim()) {
-      toast.error("Nome operatore obbligatorio");
+      toast.error("Operatore obbligatorio");
       return;
     }
     if (!shippingDate) {
@@ -276,7 +270,7 @@ export default function ChecklistPage() {
         operator: operator.trim(),
         shipping_date: shippingDate,
         structure: cliente.trim(),
-        taken_by: takenBy.trim(),
+        taken_by: operator.trim(), // UI "Operatore" → Notion "Preso da"
         notes: notes.trim() || null,
         items: list.map((li) => ({
           page_id: li.id,
@@ -292,7 +286,6 @@ export default function ChecklistPage() {
       setOpCtx(operator.trim()); // F4: persist operator across sessions
       setList([]);
       setCliente("");
-      setTakenBy("");
       setNotes("");
       setPending(null);
       setLastScan(null);
@@ -337,7 +330,7 @@ export default function ChecklistPage() {
           <div className="text-xs tracking-[0.1em] uppercase text-slate-500 font-semibold mb-4">
             Dati Generali
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <Label htmlFor="cliente" className="text-slate-700 text-sm font-semibold">
                 <Buildings size={14} className="inline mr-1" /> Cliente
@@ -352,19 +345,6 @@ export default function ChecklistPage() {
               />
             </div>
             <div>
-              <Label htmlFor="takenby" className="text-slate-700 text-sm font-semibold">
-                <UserCircle size={14} className="inline mr-1" /> Preso da
-              </Label>
-              <Input
-                id="takenby"
-                data-testid="input-taken-by"
-                value={takenBy}
-                onChange={(e) => setTakenBy(e.target.value)}
-                placeholder="Es. Mario Rossi"
-                className="h-12 mt-1 text-base"
-              />
-            </div>
-            <div>
               <Label htmlFor="operator" className="text-slate-700 text-sm font-semibold">
                 <User size={14} className="inline mr-1" /> Operatore
               </Label>
@@ -373,7 +353,7 @@ export default function ChecklistPage() {
                 data-testid="input-operator"
                 value={operator}
                 onChange={(e) => setOperator(e.target.value)}
-                placeholder="Es. chi registra"
+                placeholder="Es. Mario Rossi"
                 className="h-12 mt-1 text-base"
               />
             </div>
