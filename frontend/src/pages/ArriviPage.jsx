@@ -166,24 +166,49 @@ export default function ArriviPage() {
       return;
     }
 
-    // (3) Server-side check: SN non deve essere in Entrate né in Uscite
+    // (3) Server-side check: latest-movement status. Un rientro (out) è OK.
     try {
       const { data } = await axios.get(`${API}/inventory/lookup`, { params: { code } });
-      if (data.status === "already_shipped") {
-        setLastScan({ type: "error", title: "🔴 SERIALE GIÀ SPEDITO", subtitle: `SN ${code} risulta in Uscite`, code });
-        return;
-      }
-      if (data.status === "ok" && data.matched_by === "sn_receipt") {
-        setLastScan({ type: "error", title: "🔴 SERIALE GIÀ IN ENTRATE", subtitle: `SN ${code} già registrato`, code });
+      if (data.status === "in_warehouse") {
+        setLastScan({
+          type: "error",
+          title: "🔴 SERIALE GIÀ PRESENTE IN MAGAZZINO",
+          subtitle:
+            `SN ${code} risulta entrato` +
+            (data.receipt_date ? ` il ${data.receipt_date}` : "") +
+            " — nessun rientro possibile",
+          code,
+        });
         return;
       }
       if (data.status === "ok" && data.matched_by === "sku" && data.item) {
+        if (!data.item.configured) {
+          setLastScan({
+            type: "error",
+            title: "🔴 TIPO GESTIONE NON CONFIGURATO",
+            subtitle: `${data.item.name} — configurarlo da Admin › Gestione Prodotti`,
+            code,
+          });
+          return;
+        }
         if (data.item.serialized) {
           setPending({ id: data.item.id, name: data.item.name });
           setLastScan({ type: "ok", title: "MODELLO SELEZIONATO", subtitle: `${data.item.name}`, code });
         } else {
           setQtyDialog({ item: data.item, initial: 1 });
           setLastScan({ type: "ok", title: "PRODOTTO RICONOSCIUTO", subtitle: `${data.item.name}`, code });
+        }
+        return;
+      }
+      if (data.status === "out" && data.item) {
+        // Rientro valido — l'ultima movimentazione è un'uscita
+        if (pending && pending.id === data.item.id) {
+          addSerialToList(pending, code);
+          setLastScan({ type: "ok", title: "🟢 RIENTRO VALIDO", subtitle: `${pending.name} — SN ${code}`, code });
+        } else {
+          setPending({ id: data.item.id, name: data.item.name });
+          addSerialToList({ id: data.item.id, name: data.item.name }, code);
+          setLastScan({ type: "ok", title: "🟢 RIENTRO VALIDO", subtitle: `${data.item.name} — SN ${code}`, code });
         }
         return;
       }

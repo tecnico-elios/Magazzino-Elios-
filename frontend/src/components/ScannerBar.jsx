@@ -22,6 +22,14 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
     if (inputRef.current) inputRef.current.focus();
   }, []);
 
+  // F6-feedback: auto-clear lastScan after exactly 3s. New scans restart the
+  // timer because `lastScan` reference changes. Cleanup on unmount / new scan.
+  useEffect(() => {
+    if (!lastScan || !onClearLastScan) return undefined;
+    const id = setTimeout(() => onClearLastScan(), 3000);
+    return () => clearTimeout(id);
+  }, [lastScan, onClearLastScan]);
+
   const submit = (raw) => {
     const code = (raw ?? buffer).trim();
     if (!code) return;

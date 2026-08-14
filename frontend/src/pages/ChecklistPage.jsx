@@ -185,21 +185,31 @@ export default function ChecklistPage() {
       return;
     }
 
-    // (3) Server verify — Spedizioni richiede: SN in Entrate + non in Uscite
+    // (3) Server verify — Spedizioni richiede: ultima movimentazione = ENTRATA
     try {
       const { data } = await axios.get(`${API}/inventory/lookup`, { params: { code } });
-      if (data.status === "already_shipped") {
+      if (data.status === "out") {
         setLastScan({
           type: "error",
-          title: "🔴 SERIALE GIÀ SPEDITO",
+          title: "🔴 SERIALE NON DISPONIBILE IN MAGAZZINO",
           subtitle:
-            `SN ${code}` +
-            (data.match?.cliente ? ` — cliente precedente: ${data.match.cliente}` : ""),
+            `SN ${code} è stato spedito` +
+            (data.shipped_date ? ` il ${data.shipped_date}` : "") +
+            (data.shipped_to ? ` a ${data.shipped_to}` : ""),
           code,
         });
         return;
       }
       if (data.status === "ok" && data.matched_by === "sku" && data.item) {
+        if (!data.item.configured) {
+          setLastScan({
+            type: "error",
+            title: "🔴 TIPO GESTIONE NON CONFIGURATO",
+            subtitle: `${data.item.name} — configurarlo da Admin › Gestione Prodotti`,
+            code,
+          });
+          return;
+        }
         if (data.item.serialized) {
           setPending({ id: data.item.id, name: data.item.name });
           setLastScan({ type: "ok", title: "MODELLO SELEZIONATO", subtitle: `${data.item.name}`, code });
@@ -208,36 +218,26 @@ export default function ChecklistPage() {
         }
         return;
       }
-      if (data.status === "ok" && data.matched_by === "sn_receipt" && data.item) {
-        // SN valido: presente in Entrate e non in Uscite (già controllato)
+      if (data.status === "in_warehouse" && data.item) {
+        // Ultima movimentazione = entrata → seriale disponibile
         const product = { id: data.item.id, name: data.item.name };
         addSerialToList(product, code);
         setLastScan({
           type: "ok",
-          title: "🟢 SERIALE AGGIUNTO",
+          title: "🟢 SERIALE VALIDO",
           subtitle: `${product.name} — SN ${code}`,
           code,
         });
         setPending({ id: product.id, name: product.name });
         return;
       }
-      // status === "not_found" → non è né SKU né SN entrato → block
-      if (pending) {
-        // Utente ha un modello pending ma SN non è in Entrate → block
-        setLastScan({
-          type: "error",
-          title: "🔴 SERIALE NON PRESENTE IN MAGAZZINO",
-          subtitle: `SN ${code} non risulta in Consegne / Entrate`,
-          code,
-        });
-      } else {
-        setLastScan({
-          type: "error",
-          title: "🔴 CODICE NON RICONOSCIUTO",
-          subtitle: `${code} non è un codice prodotto valido né un SN entrato in magazzino`,
-          code,
-        });
-      }
+      // status === "not_found" → mai entrato
+      setLastScan({
+        type: "error",
+        title: "🔴 SERIALE NON RISULTA MAI ENTRATO IN MAGAZZINO",
+        subtitle: `${code}`,
+        code,
+      });
     } catch (e) {
       setLastScan({
         type: "error",

@@ -364,16 +364,20 @@ async def create_receipt(
 
 
 async def lookup_tracker_sn(sn: str) -> Optional[Dict[str, Any]]:
-    """Find an Inventory Tracker row whose SN (title) contains `sn` as one of
-    the tokens separated by ',' '.' ';' whitespace or newlines.
-    Externally-created Tracker rows may store multiple SNs in the same title cell
-    (same convention as Inventory Receipts). Rows created by this app store a single SN
-    per row, so both formats must be handled."""
+    """Find the LATEST Inventory Tracker row (by Data Uscita, tiebreaker created_time)
+    whose SN title contains `sn`. Returns None if never seen in Tracker.
+    Iterates ALL pages to find the most recent match — important for the
+    rientro-Wallbox flow where multiple exits of the same SN can coexist."""
     if not is_configured() or not NOTION_TRACKER_DS_ID:
         return None
     url = f"{NOTION_BASE}/data_sources/{NOTION_TRACKER_DS_ID}/query"
     body: Dict[str, Any] = {"page_size": 100}
     sn_norm = sn.strip().lower()
+    best: Optional[Dict[str, Any]] = None
+
+    def _key(hit: Dict[str, Any]) -> str:
+        return (hit.get("date") or "") + "|" + (hit.get("created_time") or "")
+
     async with httpx.AsyncClient(timeout=25) as client:
         while True:
             resp = await client.post(url, headers=_headers(), json=body)
@@ -404,29 +408,38 @@ async def lookup_tracker_sn(sn: str) -> Optional[Dict[str, Any]]:
                                 for r in (rel_prop.get("relation") or [])
                                 if r.get("id")
                             ]
-                        return {
+                        candidate = {
                             "id": p["id"],
                             "matched_serial": s,
                             "cliente": cliente,
                             "date": d,
+                            "created_time": p.get("created_time"),
                             "item_ids": item_ids,
                             "url": p.get("url"),
                         }
+                        if best is None or _key(candidate) > _key(best):
+                            best = candidate
+                        break
             if not data.get("has_more"):
                 break
             body["start_cursor"] = data.get("next_cursor")
-    return None
+    return best
 
 
 async def lookup_receipts_sn(sn: str) -> Optional[Dict[str, Any]]:
-    """Find an Inventory Receipts row whose 'Item' title contains `sn` as one of
-    the tokens separated by commas/dots/semicolons/whitespace/newlines.
-    Returns the matched serial + relation to the Inventario item."""
+    """Find the LATEST Inventory Receipts row (by Data Consegna, tiebreaker created_time)
+    whose 'Item' title contains `sn` as one of the tokens. Returns None if never seen.
+    Iterates ALL pages — required for the rientro-Wallbox flow."""
     if not is_configured() or not NOTION_RECEIPTS_DS_ID:
         return None
     url = f"{NOTION_BASE}/data_sources/{NOTION_RECEIPTS_DS_ID}/query"
     body: Dict[str, Any] = {"page_size": 100}
     sn_norm = sn.strip().lower()
+    best: Optional[Dict[str, Any]] = None
+
+    def _key(hit: Dict[str, Any]) -> str:
+        return (hit.get("date") or "") + "|" + (hit.get("created_time") or "")
+
     async with httpx.AsyncClient(timeout=25) as client:
         while True:
             resp = await client.post(url, headers=_headers(), json=body)
@@ -458,19 +471,52 @@ async def lookup_receipts_sn(sn: str) -> Optional[Dict[str, Any]]:
                         if date_prop and date_prop.get("type") == "date":
                             dv = date_prop.get("date") or {}
                             d = dv.get("start")
-                        return {
+                        candidate = {
                             "id": p["id"],
                             "matched_serial": s,
                             "all_serials": serials,
                             "date": d,
+                            "created_time": p.get("created_time"),
                             "item_ids": item_ids,
                             "url": p.get("url"),
                             "raw_title": title_text,
                         }
+                        if best is None or _key(candidate) > _key(best):
+                            best = candidate
+                        break
             if not data.get("has_more"):
                 break
             body["start_cursor"] = data.get("next_cursor")
-    return None
+    return best
+
+
+async def latest_serial_status(sn: str) -> Dict[str, Any]:
+    """F6-rientri: determine current status of a serial by comparing the
+    latest Receipts hit with the latest Tracker hit — Notion is SSOT.
+    Returns one of:
+      - {"status": "unseen"}                          — mai visto
+      - {"status": "in_warehouse", "last": {receipt}} — ultimo movimento = ENTRATA
+      - {"status": "out",          "last": {exit}}    — ultimo movimento = USCITA
+    Called LIVE on submit paths to prevent multi-operator races.
+    """
+    r = await lookup_receipts_sn(sn)
+    t = await lookup_tracker_sn(sn)
+    if not r and not t:
+        return {"status": "unseen"}
+
+    def _key(hit: Optional[Dict[str, Any]]) -> str:
+        if not hit:
+            return ""
+        return (hit.get("date") or "") + "|" + (hit.get("created_time") or "")
+
+    if r and not t:
+        return {"status": "in_warehouse", "last": r, "receipt": r, "exit": None}
+    if t and not r:
+        return {"status": "out", "last": t, "receipt": None, "exit": t}
+    # both present — the newer one wins
+    if _key(r) >= _key(t):
+        return {"status": "in_warehouse", "last": r, "receipt": r, "exit": t}
+    return {"status": "out", "last": t, "receipt": r, "exit": t}
 
 
 async def list_exits(date_from: Optional[str] = None, date_to: Optional[str] = None) -> List[Dict[str, Any]]:

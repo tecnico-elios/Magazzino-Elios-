@@ -68,7 +68,7 @@ def test_checklist_send_fake_serial_rejected():
     r = _post("/api/checklist/send", json=payload)
     assert r.status_code == 409, f"expected 409, got {r.status_code}: {r.text[:300]}"
     detail = (r.json().get("detail") or "").lower()
-    assert "non risulta presente in magazzino" in detail, f"unexpected detail: {detail}"
+    assert "mai entrato in magazzino" in detail or "non risulta presente in magazzino" in detail, f"unexpected detail: {detail}"
 
 
 def test_checklist_send_duplicate_serials_rejected():
@@ -94,7 +94,7 @@ def test_checklist_send_duplicate_serials_rejected():
     r = _post("/api/checklist/send", json=payload)
     assert r.status_code == 409, f"expected 409, got {r.status_code}: {r.text[:300]}"
     detail = (r.json().get("detail") or "").lower()
-    assert ("inserito più volte" in detail) or ("non risulta presente" in detail), f"unexpected detail: {detail}"
+    assert ("inserito più volte" in detail) or ("non risulta presente" in detail) or ("mai entrato" in detail), f"unexpected detail: {detail}"
 
 
 def test_admin_history_requires_password():

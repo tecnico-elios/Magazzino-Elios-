@@ -2,12 +2,49 @@
 
 ## Fasi
 - **F0/F1/F2/F3** ✅
-- **F4 — Multi-utente semplice + Anomalie + Movimenti** ✅ (14/02/2026)
-- **F5 — Dashboard KPI + Admin Gestione Prodotti (Tipo Gestione = Notion SSOT)** ✅ (14/02/2026)
-- **UI-op — Rimozione badge topbar + rename "Preso da" → "Operatore" in Spedizioni** ✅ (14/02/2026)
-- **Movimenti per mese — filtro server-side Notion + cache per-mese** ✅ (14/02/2026)
-- F6 — Test completo E2E (in attesa test reali con Wallbox)
+- **F4 — Multi-utente + Anomalie + Movimenti** ✅
+- **F5 — Dashboard KPI + Admin Gestione Prodotti (Tipo Gestione = Notion SSOT)** ✅
+- **UI-op — Rimozione badge topbar + rename "Preso da" → "Operatore" in Spedizioni** ✅
+- **Movimenti per mese — filtro server-side Notion + cache per-mese** ✅
+- **F6 — Regressione finale (75 test verdi)** ✅
+- **F6-feedback — Timer 3s auto-clear banner scanner** ✅ (14/02/2026)
+- **F6-rientri — Logica ULTIMO MOVIMENTO per prodotti A Seriale** ✅ (14/02/2026)
 - PWA — solo alla fine, dopo verifica gestionale completa
+
+## F6-rientri Changelog
+**Regola dell'ultimo movimento (Notion SSOT)**:
+- `notion_service.lookup_receipts_sn()` e `lookup_tracker_sn()` iterano TUTTE le pagine e ritornano il match più recente (per `date` + tiebreaker `created_time`)
+- Nuovo helper `notion_service.latest_serial_status(sn)`: ritorna `{status: "unseen"|"in_warehouse"|"out", last, receipt, exit}` confrontando date-latest di Receipts vs Tracker
+- `/api/inventory/lookup` ora ritorna `status` ∈ `ok` (SKU match) / `in_warehouse` / `out` / `not_found`
+
+**Arrivi (submit_arrivo)**:
+- unseen → OK (nuovo seriale)
+- last = uscita → OK ("rientro valido")
+- last = entrata → BLOCK 409 "già presente in magazzino"
+
+**Spedizioni (submit_checklist)**:
+- unseen → BLOCK 409 "non risulta mai entrato in magazzino"
+- last = uscita → BLOCK 409 "non disponibile in magazzino (uscito il ... — cliente ...)"
+- last = entrata → OK
+
+**Storico preservato**: ogni rientro crea una NUOVA riga in Consegne/Entrate. Nessuna sovrascrittura di righe passate.
+
+**Multi-operatore**: verifica LIVE via `latest_serial_status()` al submit — nessuna base cache per decisione finale.
+
+## F6-feedback Changelog
+**Timer 3s auto-clear** in `ScannerBar.jsx`: `useEffect` su `lastScan` avvia `setTimeout(onClearLastScan, 3000)` con cleanup automatico. Una nuova scansione cambia il riferimento di `lastScan` → l'effect si rigenera → il timer riparte da 3s. Vale per verde/giallo/rosso, qualsiasi prodotto (A Quantità, A Seriale, Wallbox, cavi, accessori).
+
+## Test F6-rientri + feedback
+- Backend pytest **80/80 verde**, 4 skipped by design (non riproducibili senza modificare Notion reale)
+- Nuovi test in `test_f6_rientri.py`: unseen lookup, SKU regression, known-SN → in_warehouse|out, arrivo blocca in_warehouse SN, duplicati payload, spedizione blocca unseen SN, helper diretto
+- E2E screenshot: banner appare, scompare dopo 3.4s, sostituito immediatamente da nuova scansione
+- Verificato via curl: unseen → not_found, SKU CH02 → ok+sku, submit spedizione unseen SN → 409 "mai entrato", submit arrivo in_warehouse SN → 409 "già presente"
+
+## Regole invariate
+- Notion = Single Source of Truth (Inventario + Consegne + Spedizioni)
+- MongoDB solo per: history, anomalies, settings
+- Nessun beep, focus scanner persistente, no page-reload
+- Nessuna scrittura reale di movimenti su Notion durante i test
 
 ## F5 Changelog
 **Tipo Gestione = Single Source of Truth su Notion**

@@ -50,19 +50,35 @@ def test_arrivi_validation_empty_items(api):
     assert r.status_code == 400
 
 
-def test_arrivi_rejects_serial_already_shipped(api):
-    """SN 1384516 è già uscito storicamente — deve essere rifiutato all'arrivo."""
+def test_arrivi_rejects_serial_currently_in_warehouse(api):
+    """F6-rientri: se un SN ha come ULTIMO movimento un'Entrata (in magazzino),
+    un nuovo Arrivo dello stesso SN deve essere bloccato con 'già presente in magazzino'.
+    Se invece l'ultimo è un'Uscita, sarebbe consentito come rientro — non testato qui."""
     s = _get_first_serialized(api)
     if not s:
         pytest.skip("no serialized item")
+    # Cerca un SN attualmente in_warehouse (dinamicamente via /api/inventory/lookup)
+    mov = api.get(f"{BASE_URL}/api/movimenti", timeout=60).json()["items"]
+    in_wh_sn = None
+    for m in mov:
+        if m.get("type") != "arrivo":
+            continue
+        sn = (m.get("serial_or_code") or "").strip()
+        if not sn or " " in sn or "," in sn or "." in sn or ";" in sn:
+            continue
+        lk = api.get(f"{BASE_URL}/api/inventory/lookup", params={"code": sn}, timeout=30).json()
+        if lk.get("status") == "in_warehouse":
+            in_wh_sn = sn
+            break
+    if not in_wh_sn:
+        pytest.skip("no in_warehouse SN found")
     r = api.post(f"{BASE_URL}/api/arrivi/send", json={
         "operator": "Tester", "arrival_date": "2026-02-14", "fornitore": "TestSup",
-        "items": [{"page_id": s["id"], "name": s["name"], "serialized": True, "quantity": 1, "serials": ["1384516"]}]
+        "items": [{"page_id": s["id"], "name": s["name"], "serialized": True, "quantity": 1, "serials": [in_wh_sn]}]
     }, timeout=90)
     assert r.status_code == 409, r.text[:300]
     detail = r.json()["detail"].lower()
-    # o già in entrate o in uscite: entrambi validi rifiuti
-    assert ("entrate" in detail) or ("uscite" in detail)
+    assert "già presente" in detail or "gia presente" in detail, detail
 
 
 def test_arrivi_rejects_duplicate_serial_in_payload(api):

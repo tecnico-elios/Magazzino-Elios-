@@ -65,7 +65,7 @@ def test_spedizione_strict_serial_not_in_receipts(api):
                    "serials": ["NEVER_F3_SN_XYZ"]}],
     }, timeout=90)
     assert r.status_code == 409, r.text[:300]
-    assert "non risulta presente" in r.json()["detail"].lower()
+    assert "non risulta presente" in r.json()["detail"].lower() or "mai entrato" in r.json()["detail"].lower()
 
 
 def test_spedizione_duplicate_serial(api):
@@ -81,7 +81,7 @@ def test_spedizione_duplicate_serial(api):
     }, timeout=90)
     assert r.status_code == 409
     d = r.json()["detail"].lower()
-    assert ("inserito più volte" in d) or ("non risulta presente" in d)
+    assert ("inserito più volte" in d) or ("non risulta presente" in d) or ("mai entrato" in d)
 
 
 def test_spedizione_quantity_over_stock(api):

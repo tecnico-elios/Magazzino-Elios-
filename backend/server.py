@@ -467,13 +467,9 @@ async def submit_checklist(payload: ChecklistPayload):
             + ". Configurarlo dall'Admin prima di procedere.",
         )
 
-    # 2) STRICT SERIAL VALIDATION for serialized items:
-    #    A serial can only be shipped if:
-    #      (a) it exists in Inventory Receipts (Entrate) — SERIALE NON PRESENTE IN MAGAZZINO
-    #      (b) it does NOT exist in Inventory Tracker  (Uscite) — SERIALE GIÀ SPEDITO
-    #      (c) it is not duplicated in the current shipment — SERIALE GIÀ INSERITO
-    #    Notion is the single source of truth: we re-check LIVE at submit time
-    #    to protect against concurrent operators.
+    # 2) STRICT SERIAL VALIDATION for serialized items — LATEST-MOVEMENT rule.
+    #    Un seriale è spedibile SOLO se il suo ultimo movimento è ENTRATA.
+    #    Il check è LIVE al submit per proteggere da race multi-operatore.
     serial_errors: List[str] = []
     seen_serials: set = set()
     for it in filled:
@@ -489,21 +485,18 @@ async def submit_checklist(payload: ChecklistPayload):
                 continue
             seen_serials.add(sn_key)
             try:
-                r_hit = await notion_service.lookup_receipts_sn(sn_c)
+                st = await notion_service.latest_serial_status(sn_c)
             except Exception as e:
-                raise HTTPException(502, f"Errore verifica entrate: {e}")
-            if not r_hit:
-                serial_errors.append(f"{it.name} — SN {sn_c} non risulta presente in magazzino (mai entrato)")
+                raise HTTPException(502, f"Errore verifica stato seriale: {e}")
+            if st["status"] == "unseen":
+                serial_errors.append(f"{it.name} — SN {sn_c} non risulta mai entrato in magazzino")
                 continue
-            try:
-                t_hit = await notion_service.lookup_tracker_sn(sn_c)
-            except Exception as e:
-                raise HTTPException(502, f"Errore verifica uscite: {e}")
-            if t_hit:
+            if st["status"] == "out":
+                last = st.get("last") or {}
                 serial_errors.append(
-                    f"{it.name} — SN {sn_c} risulta già uscito"
-                    + (f" (cliente {t_hit.get('cliente')})" if t_hit.get("cliente") else "")
-                    + (f" il {t_hit.get('date')}" if t_hit.get("date") else "")
+                    f"{it.name} — SN {sn_c} non disponibile in magazzino"
+                    + (f" (uscito il {last.get('date')}" if last.get("date") else "")
+                    + (f" — cliente {last.get('cliente')})" if last.get("cliente") else (")" if last.get("date") else ""))
                 )
     if serial_errors:
         # F4: log anomaly for auditability
@@ -921,10 +914,11 @@ async def submit_arrivo(payload: ArrivoPayload):
             + ". Configurarlo dall'Admin prima di procedere.",
         )
 
-    # 1) STRICT SERIAL VALIDATION for serialized items (LIVE — multi-user safe):
-    #      (a) SN must NOT already exist in Receipts (else already registered)
-    #      (b) SN must NOT already exist in Tracker  (else somehow already shipped)
-    #      (c) SN must not be duplicated within this payload
+    # 1) STRICT SERIAL VALIDATION for serialized items (LIVE — LATEST-MOVEMENT rule):
+    #      unseen         → OK (nuovo seriale)
+    #      last = uscita  → OK (rientro valido)
+    #      last = entrata → BLOCK (già in magazzino)
+    #      duplicate in payload → BLOCK
     serial_errors: List[str] = []
     seen: set = set()
     for it in filled:
@@ -940,18 +934,15 @@ async def submit_arrivo(payload: ArrivoPayload):
                 continue
             seen.add(key)
             try:
-                r_hit = await notion_service.lookup_receipts_sn(sn_c)
+                st = await notion_service.latest_serial_status(sn_c)
             except Exception as e:
-                raise HTTPException(502, f"Errore verifica entrate: {e}")
-            if r_hit:
-                serial_errors.append(f"{it.name} — SN {sn_c} risulta già registrato in Entrate")
-                continue
-            try:
-                t_hit = await notion_service.lookup_tracker_sn(sn_c)
-            except Exception as e:
-                raise HTTPException(502, f"Errore verifica uscite: {e}")
-            if t_hit:
-                serial_errors.append(f"{it.name} — SN {sn_c} risulta in Uscite (impossibile: già spedito)")
+                raise HTTPException(502, f"Errore verifica stato seriale: {e}")
+            if st["status"] == "in_warehouse":
+                last = st.get("last") or {}
+                serial_errors.append(
+                    f"{it.name} — SN {sn_c} già presente in magazzino"
+                    + (f" (entrato il {last.get('date')})" if last.get("date") else "")
+                )
     if serial_errors:
         await log_anomaly(
             kind="arrivo_blocked_serials",
@@ -1179,4 +1170,3 @@ logger = logging.getLogger(__name__)
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
-
