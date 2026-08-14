@@ -10,6 +10,7 @@ we NEVER write to it directly. Instead, we create a new Inventory Tracker row pe
 shipment, and Notion recomputes the available quantity automatically.
 """
 import os
+import time
 import logging
 import re
 import httpx
@@ -26,6 +27,17 @@ NOTION_BASE = "https://api.notion.com/v1"
 
 # Serials in Inventory Receipts titles can be separated by any of: , . ; whitespace, newlines
 _SN_SEP_RE = re.compile(r"[,.;\s]+")
+
+# Short-lived in-memory cache for inventory list. TEMPORARY — Notion remains the source
+# of truth. Every write path (submit_checklist) calls get_item()/lookup_* which do NOT
+# use this cache, so authoritative checks are always live.
+_INVENTORY_CACHE_TTL = 60  # seconds
+_inv_cache: Dict[str, Any] = {"data": None, "at": 0.0}
+
+
+def invalidate_inventory_cache() -> None:
+    _inv_cache["data"] = None
+    _inv_cache["at"] = 0.0
 
 
 def _parse_serials(text: str) -> List[str]:
@@ -117,9 +129,16 @@ def parse_item(page: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-async def list_inventory() -> List[Dict[str, Any]]:
+async def list_inventory(force_refresh: bool = False) -> List[Dict[str, Any]]:
     if not is_configured():
         raise RuntimeError("Notion non configurato")
+    now = time.time()
+    if (
+        not force_refresh
+        and _inv_cache["data"] is not None
+        and (now - _inv_cache["at"]) < _INVENTORY_CACHE_TTL
+    ):
+        return _inv_cache["data"]
     url = f"{NOTION_BASE}/data_sources/{NOTION_INVENTARIO_DS_ID}/query"
     body: Dict[str, Any] = {"page_size": 100}
     out: List[Dict[str, Any]] = []
@@ -135,6 +154,8 @@ async def list_inventory() -> List[Dict[str, Any]]:
             if not data.get("has_more"):
                 break
             body["start_cursor"] = data.get("next_cursor")
+    _inv_cache["data"] = out
+    _inv_cache["at"] = time.time()
     return out
 
 

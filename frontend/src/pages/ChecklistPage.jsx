@@ -1,8 +1,7 @@
 import { useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Link } from "react-router-dom";
-import { useInventory } from "../lib/inventory";
+import { useInventoryCtx } from "../lib/InventoryContext";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Button } from "../components/ui/button";
@@ -20,8 +19,6 @@ import {
   Buildings,
   Package,
   CircleNotch,
-  Gear,
-  ArrowsClockwise,
   Warning,
 } from "@phosphor-icons/react";
 
@@ -31,7 +28,14 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 const CAT_ALL = "__ALL__";
 
 export default function ChecklistPage() {
-  const { items, categories, loading, error, refreshedAt, refresh } = useInventory();
+  const {
+    items,
+    categories,
+    loading,
+    error,
+    refresh,
+    lookupLocalBySku,
+  } = useInventoryCtx();
   const [operator, setOperator] = useState("");
   const [shippingDate, setShippingDate] = useState(todayISO());
   const [structure, setStructure] = useState("");
@@ -261,10 +265,7 @@ export default function ChecklistPage() {
     }
   };
 
-  const doRefresh = async () => {
-    await refresh();
-    toast.success("Magazzino aggiornato");
-  };
+
 
   const buildPayload = () => {
     const itemsPayload = [];
@@ -345,58 +346,29 @@ export default function ChecklistPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-32" data-testid="checklist-page">
-      {/* Header */}
-      <header className="sticky top-0 z-30 bg-white border-b border-slate-200">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[11px] tracking-[0.2em] uppercase text-slate-500 font-semibold">
-              Magazzino Elios Tech
-            </div>
-            <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900">
-              Spedizione
-            </h1>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <div
-              className="hidden sm:flex items-center gap-2 border border-slate-200 px-3 py-2 rounded-md"
-              data-testid="total-units-badge"
-            >
-              <Package size={18} className="text-slate-500" />
-              <span className="font-mono-tight text-sm text-slate-900">
-                {totalUnits} pz totali
-              </span>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={doRefresh}
-              disabled={loading}
-              className="h-10"
-              data-testid="refresh-inventory-btn"
-              title="Rileggi le quantità da Notion"
-            >
-              <ArrowsClockwise size={16} className={loading ? "animate-spin" : ""} />
-              <span className="hidden sm:inline ml-1">Aggiorna</span>
-            </Button>
-            <Link
-              to="/admin"
-              className="h-10 inline-flex items-center gap-1 px-3 border border-slate-200 rounded-md text-slate-600 hover:text-slate-900 hover:border-slate-300 text-sm"
-              data-testid="admin-link"
-            >
-              <Gear size={16} />
-              <span className="hidden sm:inline">Admin</span>
-            </Link>
-          </div>
+    <div className="pb-32" data-testid="checklist-page">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6 pb-2 flex items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="font-display text-3xl sm:text-4xl font-bold text-slate-900">
+            Spedizione
+          </h1>
+          <p className="text-slate-500 mt-1 text-sm">
+            Registra un'uscita: scansiona seriali o codici, verifica seriali
+            live su Notion alla conferma.
+          </p>
         </div>
-        {refreshedAt && (
-          <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-3 -mt-1 text-xs text-slate-500">
-            Ultimo sync Notion: {refreshedAt.toLocaleTimeString("it-IT")}
-          </div>
-        )}
-      </header>
+        <div
+          className="hidden sm:flex items-center gap-2 border border-slate-200 bg-white px-3 py-2 rounded-md shrink-0"
+          data-testid="total-units-badge"
+        >
+          <Package size={18} className="text-slate-500" />
+          <span className="font-mono-tight text-sm text-slate-900">
+            {totalUnits} pz totali
+          </span>
+        </div>
+      </div>
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-4 space-y-6">
         {/* General product scanner (USB/Bluetooth keyboard + camera) */}
         <ScannerBar
           onScanned={handleScannedCode}
@@ -467,7 +439,7 @@ export default function ChecklistPage() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={doRefresh}
+                onClick={async () => { await refresh(); toast.success("Magazzino aggiornato"); }}
                 className="mt-3 h-10 border-red-300 text-red-700"
               >
                 Riprova

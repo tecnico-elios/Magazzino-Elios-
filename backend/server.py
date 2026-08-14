@@ -310,11 +310,11 @@ async def root():
 
 @api_router.get("/inventory")
 async def inventory():
-    """Fresh read of Notion Inventario, augmented with local overrides."""
+    """Fresh read of Notion Inventario (bypasses backend cache), augmented with local overrides."""
     if not notion_service.is_configured():
         raise HTTPException(503, "Integrazione Notion non configurata")
     try:
-        items = await notion_service.list_inventory()
+        items = await notion_service.list_inventory(force_refresh=True)
     except httpx.HTTPStatusError as e:
         raise HTTPException(502, f"Notion HTTP {e.response.status_code}: {e.response.text[:200]}")
     except Exception as e:

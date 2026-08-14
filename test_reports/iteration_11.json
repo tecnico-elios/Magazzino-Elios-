@@ -1,0 +1,48 @@
+{
+  "summary": "F1 (nuova navigazione + cache) — backend 100% verde (8/8 pytest). Frontend: Dashboard, Inventario (search filter OK, 42 righe), Arrivi placeholder, Movimenti placeholder, Anomalie placeholder, Admin login screen — tutti OK con AppLayout e 7 tab nav funzionanti. BLOCKER: /spedizioni CRASHA con ReferenceError perché ChecklistPage.jsx non è stata ripulita in F1 — il vecchio header interno (Aggiorna/Admin) è ancora nel JSX ma i simboli Link/Gear/ArrowsClockwise/refreshedAt non sono importati/destrutturati → uncaught runtime error, pagina completamente inutilizzabile. Questa è una REGRESSIONE che blocca la Spedizione, cioè l'unico flusso operativo attualmente attivo.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "ChecklistPage (/spedizioni)",
+        "issue": "ReferenceError: ArrowsClockwise is not defined — la pagina crasha in render. Il blocco <header> interno (linee ~356-403 di ChecklistPage.jsx) usa Link, Gear, ArrowsClockwise e refreshedAt che non sono importati / destrutturati. Il task F1 richiedeva la rimozione di questo header interno (AppLayout ora fornisce topbar+Aggiorna). Rimuovendo l'intero <header>...</header> più il ternario refreshedAt, la pagina torna a funzionare. Nessun checklist-page, scanner-input, input-operator/date/structure, ScannerBar è raggiungibile finché non si sistema.",
+        "selector": "[data-testid=\"checklist-page\"] (mai renderizzato)",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Spedizione (POST /api/checklist/send da UI)",
+        "issue": "Impossibile da testare via UI perché la pagina crasha prima del mount. L'API backend è comunque OK (testata direttamente, 409 su seriale falso e duplicato).",
+        "affected_selectors": ["scanner-input", "input-operator", "input-date", "input-structure", "submit-checklist-btn"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_navigation_f1.py",
+    "/app/test_reports/pytest/f1_nav_results.xml"
+  ],
+  "action_items": [
+    "URGENTE — In /app/frontend/src/pages/ChecklistPage.jsx rimuovere l'intero blocco <header className=\"sticky top-0 z-30 bg-white border-b border-slate-200\"> … </header> (righe ~356-403) incluso il ternario `{refreshedAt && …}` sottostante. AppLayout fornisce già topbar, Aggiorna e nav. Dopo la rimozione la pagina torna a caricare senza toccare la logica di submit. In alternativa (peggio) importare Link da react-router-dom, Gear/ArrowsClockwise da @phosphor-icons/react e destrutturare refreshedAt da useInventoryCtx() — ma questo lascia UI duplicata rispetto a F1.",
+    "Verificare che dopo la fix il focus autofocus di scanner-input funzioni ancora (document.activeElement === scanner-input al mount di /spedizioni)."
+  ],
+  "critical_code_review_comments": [
+    "ChecklistPage.jsx: header interno duplica AppLayout topbar — va rimosso come da specifica F1; attualmente usa 4 simboli non definiti e fa crashare l'app.",
+    "Il test manuale del preview URL avrebbe subito rivelato il crash: consigliato eseguire un `yarn build` in CI o almeno uno smoke test su ciascuna route dopo modifiche a routing/layout.",
+    "AppLayout / Dashboard / Inventario / Arrivi / Movimenti / Anomalie / Admin: puliti e coerenti, buon uso dei data-testid."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_navigation_f1.py (nuovo test regressione F1)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "86% (6/7 route: /spedizioni crash)"},
+  "test_credentials": "Admin password: admin123",
+  "seed_data_creation": "Nessun dato creato su Notion — tutti i test spedizione hanno usato seriali falsi che sono stati correttamente rifiutati dal backend con 409.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Dopo la fix di ChecklistPage.jsx (rimozione header interno), rieseguire: (1) navigazione a /spedizioni deve mostrare data-testid=checklist-page + app-layout co-presenti, (2) scanner-input deve avere autoFocus al mount, (3) presenza di scanner-bar, input-operator/date/structure, (4) assenza di refresh-inventory-btn e admin-link interni alla pagina, (5) assenza di ex input DDT (già F0). Il test file /app/backend/tests/test_navigation_f1.py è la baseline backend F1.",
+  "rca of the issue": "In F1 il developer ha spostato Aggiorna/Admin nel nuovo AppLayout ma NON ha rimosso il blocco <header> interno di ChecklistPage.jsx. Al tempo stesso ha rimosso gli import di Link, Gear, ArrowsClockwise e la destructuring di refreshedAt (probabilmente pensando di aver rimosso anche il JSX che li usava). Risultato: JSX referenzia simboli non definiti → ReferenceError al primo render di /spedizioni. Riproduzione: aprire https://stock-dispatch-12.preview.emergentagent.com/spedizioni → overlay 'Uncaught runtime errors: ArrowsClockwise is not defined at ChecklistPage'. Fix: cancellare il blocco header interno (~50 righe) da ChecklistPage.jsx."
+}
