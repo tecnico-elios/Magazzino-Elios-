@@ -115,6 +115,7 @@ class ChecklistPayload(BaseModel):
     operator: str
     shipping_date: str  # ISO date YYYY-MM-DD
     structure: str      # Cliente / Destinazione
+    taken_by: str = ""  # F3: "Da chi è stato preso" — testo libero (Notion rich_text)
     items: List[ProductItem]
     notes: Optional[str] = None
 
@@ -125,6 +126,7 @@ class ChecklistRecord(BaseModel):
     operator: str
     shipping_date: str
     structure: str
+    taken_by: str = ""
     items: List[ProductItem]
     notes: Optional[str] = None
     recipients: List[str] = Field(default_factory=list)
@@ -186,6 +188,8 @@ def validate_checklist_basic(payload: ChecklistPayload) -> None:
         raise HTTPException(400, "Nome operatore obbligatorio")
     if not payload.structure.strip():
         raise HTTPException(400, "Cliente / Destinazione obbligatorio")
+    if not (payload.taken_by or "").strip():
+        raise HTTPException(400, "Preso da obbligatorio")
     if not payload.shipping_date.strip():
         raise HTTPException(400, "Data spedizione obbligatoria")
 
@@ -273,6 +277,10 @@ def build_html_email(payload: ChecklistPayload, movements: List[dict]) -> str:
           <tr>
             <td style="padding:12px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;width:35%;border-bottom:1px solid #e2e8f0;">Cliente / Destinazione</td>
             <td style="padding:12px 14px;font-family:Arial,sans-serif;font-size:15px;color:#0f172a;font-weight:600;border-bottom:1px solid #e2e8f0;">{esc(payload.structure)}</td>
+          </tr>
+          <tr>
+            <td style="padding:12px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;border-bottom:1px solid #e2e8f0;">Preso da</td>
+            <td style="padding:12px 14px;font-family:Arial,sans-serif;font-size:15px;color:#0f172a;font-weight:600;border-bottom:1px solid #e2e8f0;">{esc(payload.taken_by or "—")}</td>
           </tr>
           <tr>
             <td style="padding:12px 14px;background:#f8fafc;font-family:Arial,sans-serif;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;border-bottom:1px solid #e2e8f0;">Data Spedizione</td>
@@ -573,6 +581,7 @@ async def submit_checklist(payload: ChecklistPayload):
         operator=payload.operator,
         shipping_date=payload.shipping_date,
         structure=payload.structure,
+        taken_by=payload.taken_by,
         items=filled,
         notes=payload.notes,
         recipients=[s["recipient"] for s in sent],

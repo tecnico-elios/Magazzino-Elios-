@@ -1,0 +1,34 @@
+{
+  "summary": "F3 Spedizioni end-to-end verified. Backend pytest 43/43 verde (test_spedizioni_f3.py: 5/5 nuovi test — missing taken_by, missing cliente, strict SN not in receipts, duplicate SN, quantity over stock). Frontend /spedizioni: tutti i testid presenti (checklist-page, input-structure=Cliente, input-taken-by, input-operator, input-date, scanner-input con autofocus iniziale, pick-serialized-btn, pick-quantity-btn, submit-checklist-btn, spedizioni-list, total-units-badge, input-notes). Flow Prodotto A Quantità (Cavo Molex, stock 4): product-picker apre → qty-dialog mostra 'Max: 4' → inserendo 999999 appare qty-over-max (rosso) e qty-confirm è DISABLED → inserendo 1 aggiunge sped-row-* e il badge totali passa a '1 pz'. Flow Prodotto A Seriale (DazeBox T Home): picker → selezione → pending-serialized-banner appare 'Modello: DazeBox T Home'. Autofocus scanner-input verificato dopo chiusura QtyDialog E ProductPicker (activeElement=scanner-input). Rifiuto strict: SN 1384516 → banner '🔴 SERIALE GIÀ SPEDITO SN 1384516' (già in Uscite Notion), NON aggiunto alla lista. Submit-button disabled quando list.length===0 (previene chiamate API a vuoto senza toast — vedi nota sotto). Nessuna row creata su Notion durante tutto il test (nessun submit finale eseguito).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_spedizioni_f3.py",
+    "/app/backend/tests/test_arrivi.py",
+    "/app/backend/tests/test_admin_features.py",
+    "/app/backend/tests/test_scanner_lookup.py",
+    "/app/backend/tests/test_receipts_lookup.py",
+    "/app/backend/tests/test_navigation_f1.py",
+    "/app/test_reports/pytest/iteration_14.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ChecklistPage.jsx (~606 righe): sotto la soglia di 700 righe grazie all'estrazione di QtyDialog e ProductPicker in components/ — buon refactor coerente con la raccomandazione dell'iterazione 13.",
+    "QtyDialog.jsx (140 righe) e ProductPicker.jsx (124 righe): ora riusabili tra Arrivi e Spedizioni con variant/filter/maxAvailable — buona separazione di concerns.",
+    "Nota UX minore (non bloccante): il pulsante submit-checklist-btn è DISABLED quando list.length===0. Questo è corretto per prevenire chiamate API a vuoto, ma significa che l'utente che clicca su una lista vuota non riceve toast di feedback ('Aggiungi almeno un prodotto'). Le altre validazioni (cliente/takenBy/operator/date) però non partono perché il pulsante è già disabled quando list è vuota. Suggerimento opzionale: mostrare hint testuale sotto il footer quando disabled invece del silenzio, oppure permettere click con toast di guida. Non è un bug F3.",
+    "handleScannedCode gestisce correttamente tutti i branch: local sku ok, local sn (pending), duplicato-in-sessione, already_shipped, sn_receipt ok, not_found (con differenziazione se pending era set). Ottima copertura.",
+    "Nota per proprietà Notion 'Preso da': come da context dell'user, se lo schema Notion Tracker ha 'Preso da' come property di tipo 'people' invece che 'rich_text', il write reale fallirà con 400 Notion → il backend restituirà 502. NON TESTATO in questo giro (nessun submit reale eseguito) come da istruzioni. Main agent dovrebbe verificare che l'utente abbia cambiato il tipo di property a rich_text prima di test end-to-end reali."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (43/43)", "frontend": "100% (13/13 scenari)"},
+  "test_credentials": "Admin password: admin123",
+  "seed_data_creation": "Nessuna row creata su Notion. Test ha usato SN 1384516 (già in Uscite → rifiutato dal lookup lato server con status already_shipped) e SN falsi (NEVER_F3_XYZ_TEST) + qty=999999. Submit finale mai eseguito.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "F3 Spedizioni verde. QtyDialog e ProductPicker estratti in components/ funzionano identici su Arrivi e Spedizioni. Pattern testing valido: SN 1384516 restituisce 'already_shipped' su /api/inventory/lookup (utile per test rifiuto client-side su Spedizioni); usare SN falsi + qty overflow per triggerare 409 senza creare rows Notion. Se serve testare il flow 🟢 SERIALE AGGIUNTO, occorre un SN che sia in Entrate MA NON in Uscite — impossibile trovarne uno a colpo sicuro senza esplorazione manuale del DB Notion, come previsto dal problem statement.",
+  "rca of the issue": "N/A — nessun bug F3 identificato."
+}

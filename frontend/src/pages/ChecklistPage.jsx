@@ -1,256 +1,227 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { useInventoryCtx } from "../lib/InventoryContext";
+import ScannerBar from "../components/ScannerBar";
+import QtyDialog from "../components/QtyDialog";
+import ProductPicker from "../components/ProductPicker";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import { Badge } from "../components/ui/badge";
-import BarcodeScanner from "../components/BarcodeScanner";
-import ScannerBar from "../components/ScannerBar";
 import {
-  Minus,
-  Plus,
-  QrCode,
-  PaperPlaneTilt,
-  User,
-  CalendarBlank,
-  Buildings,
+  ArrowSquareOut,
+  Trash,
+  MagnifyingGlass,
   Package,
   CircleNotch,
-  Warning,
+  X,
+  Buildings,
+  UserCircle,
+  User,
+  CalendarBlank,
+  Barcode,
 } from "@phosphor-icons/react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-const CAT_ALL = "__ALL__";
-
+/**
+ * ChecklistPage (Spedizioni) — F3
+ * Registrazione uscite verso Spedizioni / Uscite. UX identica ad Arrivi
+ * (scanner-first, cache locale, focus persistente) con differenze:
+ *  - Cliente (Preso per) + "Preso da" (rich_text) — entrambi testo libero
+ *  - Prodotti A Quantità: popup con MAX = stock disponibile → blocca overflow
+ *  - Seriali: devono essere in Entrate AND non in Uscite AND non duplicati sessione
+ */
 export default function ChecklistPage() {
-  const {
-    items,
-    categories,
-    loading,
-    error,
-    refresh,
-    lookupLocalBySku,
-  } = useInventoryCtx();
+  const { items, lookupLocalBySku, refresh } = useInventoryCtx();
+
+  const [cliente, setCliente] = useState("");
+  const [takenBy, setTakenBy] = useState("");
   const [operator, setOperator] = useState("");
   const [shippingDate, setShippingDate] = useState(todayISO());
-  const [structure, setStructure] = useState("");
   const [notes, setNotes] = useState("");
-  const [selections, setSelections] = useState({}); // { page_id: { quantity, serials: [] } }
-  const [submitting, setSubmitting] = useState(false);
-  const [scanTarget, setScanTarget] = useState(null); // { page_id, index, label }
-  const [filter, setFilter] = useState(CAT_ALL);
+
+  const [list, setList] = useState([]); // {id, name, serialized, unit, quantity, serials[]}
   const [lastScan, setLastScan] = useState(null);
-  const [pendingSerializedItem, setPendingSerializedItem] = useState(null);
+  const [qtyDialog, setQtyDialog] = useState(null); // {item, maxAvailable}
+  const [picker, setPicker] = useState(null); // {filter, pendingSn}
+  const [pending, setPending] = useState(null); // {id, name}
+  const [submitting, setSubmitting] = useState(false);
 
-  const totalUnits = useMemo(
-    () => Object.values(selections).reduce((a, s) => a + (Number(s.quantity) || 0), 0),
-    [selections]
-  );
+  const focusScanner = () =>
+    setTimeout(() => document.getElementById("scanner-input")?.focus(), 0);
 
-  const filteredItems = useMemo(() => {
-    if (filter === CAT_ALL) return items;
-    return items.filter((it) => (it.category || "Senza categoria") === filter);
-  }, [items, filter]);
+  useEffect(() => {
+    if (!qtyDialog && !picker) focusScanner();
+  }, [qtyDialog, picker]);
 
-  const grouped = useMemo(() => {
-    const g = {};
-    filteredItems.forEach((it) => {
-      const k = it.category || "Senza categoria";
-      (g[k] = g[k] || []).push(it);
+  const totalUnits = list.reduce((a, li) => a + (li.quantity || 0), 0);
+
+  // Somma già in lista per un prodotto A Quantità (impatta max scaricabile)
+  const alreadyReservedQty = (pageId) => {
+    const row = list.find((li) => li.id === pageId && !li.serialized);
+    return row ? row.quantity : 0;
+  };
+
+  const snAlreadyInList = (sn) =>
+    list.some(
+      (li) =>
+        li.serialized &&
+        (li.serials || []).some((s) => (s || "").toLowerCase() === sn.toLowerCase())
+    );
+
+  const addSerialToList = (product, sn) => {
+    setList((prev) => {
+      const exist = prev.find((li) => li.id === product.id);
+      if (exist) {
+        return prev.map((li) =>
+          li.id === product.id
+            ? { ...li, quantity: li.quantity + 1, serials: [...li.serials, sn] }
+            : li
+        );
+      }
+      const invIt = items.find((i) => i.id === product.id);
+      return [
+        ...prev,
+        {
+          id: product.id,
+          name: product.name,
+          serialized: true,
+          unit: invIt?.unit || "pz",
+          quantity: 1,
+          serials: [sn],
+        },
+      ];
     });
-    return g;
-  }, [filteredItems]);
+  };
 
-  const setQuantity = (item, nextQty) => {
+  const addQtyToList = (product, qty) => {
+    setList((prev) => {
+      const exist = prev.find((li) => li.id === product.id);
+      if (exist) {
+        return prev.map((li) =>
+          li.id === product.id ? { ...li, quantity: li.quantity + qty } : li
+        );
+      }
+      return [
+        ...prev,
+        {
+          id: product.id,
+          name: product.name,
+          serialized: false,
+          unit: product.unit || "pz",
+          quantity: qty,
+          serials: [],
+        },
+      ];
+    });
+  };
+
+  const removeRow = (id) => setList((prev) => prev.filter((li) => li.id !== id));
+  const removeSerial = (id, snIdx) => {
+    setList((prev) =>
+      prev
+        .map((li) => {
+          if (li.id !== id) return li;
+          const s2 = li.serials.filter((_, i) => i !== snIdx);
+          return s2.length === 0 ? null : { ...li, serials: s2, quantity: s2.length };
+        })
+        .filter(Boolean)
+    );
+  };
+
+  const openQtyForItem = (item) => {
     const avail = Number(item.quantity) || 0;
-    const q = Math.max(0, Math.min(avail, nextQty));
-    setSelections((prev) => {
-      const cur = prev[item.id] || { quantity: 0, serials: [] };
-      let serials = item.serialized ? [...cur.serials] : [];
-      if (item.serialized) {
-        const nInt = Math.floor(q);
-        if (nInt > serials.length) {
-          while (serials.length < nInt) serials.push("");
-        } else if (nInt < serials.length) {
-          serials = serials.slice(0, nInt);
-        }
-      }
-      if (q === 0) {
-        // eslint-disable-next-line no-unused-vars
-        const { [item.id]: _drop, ...rest } = prev;
-        return rest;
-      }
-      return { ...prev, [item.id]: { quantity: q, serials } };
-    });
-  };
-
-  const bump = (item, delta) => {
-    const cur = selections[item.id]?.quantity || 0;
-    setQuantity(item, cur + delta);
-  };
-
-  const setSerial = (pageId, idx, val) => {
-    setSelections((prev) => {
-      const cur = prev[pageId];
-      if (!cur) return prev;
-      const serials = [...cur.serials];
-      serials[idx] = val;
-      return { ...prev, [pageId]: { ...cur, serials } };
-    });
-  };
-
-  const openScanner = (pageId, idx, label) => setScanTarget({ page_id: pageId, index: idx, label });
-  const closeScanner = () => setScanTarget(null);
-  const onScanned = (val) => {
-    if (scanTarget) {
-      setSerial(scanTarget.page_id, scanTarget.index, val);
-      toast.success("Seriale acquisito", { description: val });
-      setScanTarget(null);
+    const reserved = alreadyReservedQty(item.id);
+    const maxAvailable = Math.max(0, avail - reserved);
+    if (maxAvailable <= 0) {
+      setLastScan({
+        type: "error",
+        title: "🔴 GIACENZA INSUFFICIENTE",
+        subtitle: `${item.name} — stock 0${reserved > 0 ? ` (${reserved} già in lista)` : ""}`,
+      });
+      return;
     }
-  };
-
-  const resetForm = () => {
-    setOperator("");
-    setShippingDate(todayISO());
-    setStructure("");
-    setNotes("");
-    setSelections({});
-    setPendingSerializedItem(null);
-    setLastScan(null);
+    setQtyDialog({ item, initial: 1, maxAvailable });
   };
 
   const handleScannedCode = async (rawCode) => {
     const code = (rawCode || "").trim();
     if (!code) return;
-    try {
-      const { data } = await axios.get(`${API}/inventory/lookup`, {
-        params: { code },
-      });
 
-      // Case A: Notion tells us this exact SN is already in the Tracker
+    // (1) LOCAL SKU pre-check — instant
+    const local = lookupLocalBySku(code);
+    if (local && !local.serialized) {
+      setPending(null);
+      openQtyForItem(local);
+      setLastScan({ type: "ok", title: "PRODOTTO RICONOSCIUTO", subtitle: local.name, code });
+      return;
+    }
+    if (local && local.serialized) {
+      setPending({ id: local.id, name: local.name });
+      setLastScan({ type: "ok", title: "MODELLO SELEZIONATO", subtitle: `${local.name} — scansiona i seriali`, code });
+      return;
+    }
+
+    // (2) Duplicato nella sessione
+    if (snAlreadyInList(code)) {
+      setLastScan({ type: "error", title: "🔴 SERIALE GIÀ INSERITO NELLA SPEDIZIONE", subtitle: `SN ${code}`, code });
+      return;
+    }
+
+    // (3) Server verify — Spedizioni richiede: SN in Entrate + non in Uscite
+    try {
+      const { data } = await axios.get(`${API}/inventory/lookup`, { params: { code } });
       if (data.status === "already_shipped") {
         setLastScan({
-          type: "warn",
-          title: "PRODOTTO GIÀ ASSEGNATO",
-          subtitle: data.item
-            ? `${data.item.name} — SN ${data.serial}${
-                data.shipped_to ? ` → ${data.shipped_to}` : ""
-              }${data.shipped_date ? ` (${data.shipped_date})` : ""}`
-            : `SN ${data.serial} già spedito`,
-          code,
-        });
-        return;
-      }
-
-      // Case B: Not found — a scanned serial that is NOT in Receipts.
-      // Per specification, an arbitrary SN can NEVER be added: it must be
-      // present in the Entrate database. Block with a clear message.
-      if (data.status === "not_found") {
-        setLastScan({
           type: "error",
-          title: "SERIALE NON TROVATO",
+          title: "🔴 SERIALE GIÀ SPEDITO",
           subtitle:
-            "Il codice non risulta né tra le entrate né come codice prodotto. Non può essere aggiunto.",
+            `SN ${code}` +
+            (data.match?.cliente ? ` — cliente precedente: ${data.match.cliente}` : ""),
           code,
         });
         return;
       }
-
-      // Case C: Matched SKU (Codice prodotto) OR direct SN match on Receipts
-      if (data.status === "ok" && data.item) {
-        const item = data.item;
-        const scannedSerial = data.serial || null; // present when matched_by === "sn_receipt"
-        const avail = Number(item.quantity) || 0;
-        if (avail <= 0) {
-          setLastScan({
-            type: "warn",
-            title: "PRODOTTO NON DISPONIBILE",
-            subtitle: `${item.name} — stock 0`,
-            code,
-          });
-          return;
+      if (data.status === "ok" && data.matched_by === "sku" && data.item) {
+        if (data.item.serialized) {
+          setPending({ id: data.item.id, name: data.item.name });
+          setLastScan({ type: "ok", title: "MODELLO SELEZIONATO", subtitle: `${data.item.name}`, code });
+        } else {
+          openQtyForItem(data.item);
         }
-        const cur = selections[item.id] || { quantity: 0, serials: [] };
-
-        // Direct serial hit from Receipts: auto-add qty +1 with the matched SN
-        if (scannedSerial && data.matched_by === "sn_receipt") {
-          if (cur.serials.some((s) => (s || "").trim() === scannedSerial)) {
-            setLastScan({
-              type: "warn",
-              title: "SERIALE GIÀ INSERITO",
-              subtitle: `${item.name} — SN ${scannedSerial}`,
-              code,
-            });
-            return;
-          }
-          if (cur.quantity + 1 > avail) {
-            setLastScan({
-              type: "warn",
-              title: "PRODOTTO NON DISPONIBILE",
-              subtitle: `${item.name} — disponibili ${avail}`,
-              code,
-            });
-            return;
-          }
-          setSelections((prev) => {
-            const c = prev[item.id] || { quantity: 0, serials: [] };
-            return {
-              ...prev,
-              [item.id]: {
-                quantity: c.quantity + 1,
-                serials: [...c.serials, scannedSerial],
-              },
-            };
-          });
-          setPendingSerializedItem(null);
-          setLastScan({
-            type: "ok",
-            title: "SERIALE RICONOSCIUTO",
-            subtitle: `${item.name} — SN ${scannedSerial}`,
-            code,
-          });
-          return;
-        }
-
-        if (item.serialized) {
-          // Do NOT increment yet: wait for the SN scan to arrive
-          setPendingSerializedItem({ id: item.id, name: item.name });
-          setLastScan({
-            type: "ok",
-            title: "PRODOTTO DISPONIBILE — Scansiona il seriale",
-            subtitle: `${item.name} — disponibili ${avail}`,
-            code,
-          });
-          return;
-        }
-        if (cur.quantity + 1 > avail) {
-          setLastScan({
-            type: "warn",
-            title: "QUANTITÀ MASSIMA RAGGIUNTA",
-            subtitle: `${item.name} — disponibili ${avail}`,
-            code,
-          });
-          return;
-        }
-        setSelections((prev) => {
-          const c = prev[item.id] || { quantity: 0, serials: [] };
-          return {
-            ...prev,
-            [item.id]: { quantity: c.quantity + 1, serials: [] },
-          };
-        });
-        setPendingSerializedItem(null);
+        return;
+      }
+      if (data.status === "ok" && data.matched_by === "sn_receipt" && data.item) {
+        // SN valido: presente in Entrate e non in Uscite (già controllato)
+        const product = { id: data.item.id, name: data.item.name };
+        addSerialToList(product, code);
         setLastScan({
           type: "ok",
-          title: "Prodotto aggiunto",
-          subtitle: `${item.name} — quantità ora ${cur.quantity + 1} ${
-            item.unit || "pz"
-          }`,
+          title: "🟢 SERIALE AGGIUNTO",
+          subtitle: `${product.name} — SN ${code}`,
+          code,
+        });
+        setPending({ id: product.id, name: product.name });
+        return;
+      }
+      // status === "not_found" → non è né SKU né SN entrato → block
+      if (pending) {
+        // Utente ha un modello pending ma SN non è in Entrate → block
+        setLastScan({
+          type: "error",
+          title: "🔴 SERIALE NON PRESENTE IN MAGAZZINO",
+          subtitle: `SN ${code} non risulta in Consegne / Entrate`,
+          code,
+        });
+      } else {
+        setLastScan({
+          type: "error",
+          title: "🔴 CODICE NON RICONOSCIUTO",
+          subtitle: `${code} non è un codice prodotto valido né un SN entrato in magazzino`,
           code,
         });
       }
@@ -258,88 +229,61 @@ export default function ChecklistPage() {
       setLastScan({
         type: "error",
         title: "Errore ricerca Notion",
-        subtitle:
-          e?.response?.data?.detail || e?.message || "Riprova più tardi",
-        code,
+        subtitle: e?.response?.data?.detail || e?.message || "",
       });
     }
   };
 
-
-
-  const buildPayload = () => {
-    const itemsPayload = [];
-    items.forEach((it) => {
-      const s = selections[it.id];
-      if (s && s.quantity > 0) {
-        itemsPayload.push({
-          page_id: it.id,
-          name: it.name,
-          category: it.category || null,
-          unit: it.unit || "pz",
-          serialized: !!it.serialized,
-          quantity: s.quantity,
-          serials: it.serialized ? s.serials : [],
-        });
-      }
-    });
-    return {
-      operator: operator.trim(),
-      shipping_date: shippingDate,
-      structure: structure.trim(),
-      notes: notes.trim() || null,
-      items: itemsPayload,
-    };
-  };
-
-  const validate = (payload) => {
-    if (!payload.operator) return "Nome operatore obbligatorio";
-    if (!payload.structure) return "Cliente / Destinazione obbligatorio";
-    if (!payload.shipping_date) return "Data spedizione obbligatoria";
-    if (payload.items.length === 0) return "Aggiungi almeno un materiale";
-    for (const it of payload.items) {
-      if (it.serialized) {
-        if (
-          it.serials.length !== Math.floor(it.quantity) ||
-          it.serials.some((s) => !s || !s.trim())
-        ) {
-          return `Compila tutti i seriali per ${it.name}`;
-        }
-      }
-      // Client-side stock check (server re-checks live)
-      const invItem = items.find((x) => x.id === it.page_id);
-      if (invItem && it.quantity > (invItem.quantity || 0)) {
-        return `${it.name}: disponibili ${invItem.quantity} — richiesti ${it.quantity}`;
-      }
-    }
-    return null;
-  };
-
   const submit = async () => {
-    const payload = buildPayload();
-    const err = validate(payload);
-    if (err) {
-      toast.error("Verifica dati", { description: err });
+    if (!cliente.trim()) {
+      toast.error("Cliente obbligatorio");
+      return;
+    }
+    if (!takenBy.trim()) {
+      toast.error("Preso da obbligatorio");
+      return;
+    }
+    if (!operator.trim()) {
+      toast.error("Nome operatore obbligatorio");
+      return;
+    }
+    if (!shippingDate) {
+      toast.error("Data obbligatoria");
+      return;
+    }
+    if (list.length === 0) {
+      toast.error("Aggiungi almeno un prodotto");
       return;
     }
     setSubmitting(true);
     try {
+      const payload = {
+        operator: operator.trim(),
+        shipping_date: shippingDate,
+        structure: cliente.trim(),
+        taken_by: takenBy.trim(),
+        notes: notes.trim() || null,
+        items: list.map((li) => ({
+          page_id: li.id,
+          name: li.name,
+          unit: li.unit || "pz",
+          serialized: !!li.serialized,
+          quantity: li.quantity,
+          serials: li.serialized ? li.serials : [],
+        })),
+      };
       const { data } = await axios.post(`${API}/checklist/send`, payload);
-      const summary = (data.movements || [])
-        .map((m) => `${m.name}: ${m.before} → ${m.after} ${m.unit || "pz"}`)
-        .join(" • ");
-      toast.success("Spedizione confermata", {
-        description: summary || data.message,
-        duration: 8000,
-      });
-      resetForm();
+      toast.success("Spedizione confermata", { description: data.message, duration: 6000 });
+      setList([]);
+      setCliente("");
+      setTakenBy("");
+      setNotes("");
+      setPending(null);
+      setLastScan(null);
       await refresh();
     } catch (e) {
-      const msg =
-        e?.response?.data?.detail ||
-        e?.message ||
-        "Impossibile aggiornare il magazzino. Riprova.";
-      toast.error("Errore invio", { description: msg, duration: 8000 });
+      const msg = e?.response?.data?.detail || e?.message || "Errore invio";
+      toast.error("Errore", { description: msg, duration: 8000 });
     } finally {
       setSubmitting(false);
     }
@@ -349,12 +293,15 @@ export default function ChecklistPage() {
     <div className="pb-32" data-testid="checklist-page">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6 pb-2 flex items-end justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="font-display text-3xl sm:text-4xl font-bold text-slate-900">
+          <div className="flex items-center gap-2 text-blue-700">
+            <ArrowSquareOut size={22} weight="bold" />
+            <span className="text-[11px] tracking-[0.2em] uppercase font-semibold">Uscite</span>
+          </div>
+          <h1 className="font-display text-3xl sm:text-4xl font-bold text-slate-900 mt-1">
             Spedizione
           </h1>
           <p className="text-slate-500 mt-1 text-sm">
-            Registra un'uscita: scansiona seriali o codici, verifica seriali
-            live su Notion alla conferma.
+            Registra un'uscita verso Spedizioni / Uscite. Verifica live su Notion alla conferma.
           </p>
         </div>
         <div
@@ -369,40 +316,54 @@ export default function ChecklistPage() {
       </div>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-4 space-y-6">
-        {/* General product scanner (USB/Bluetooth keyboard + camera) */}
-        <ScannerBar
-          onScanned={handleScannedCode}
-          lastScan={lastScan}
-          onClearLastScan={() => setLastScan(null)}
-          hint={
-            pendingSerializedItem
-              ? `In attesa del seriale per: ${pendingSerializedItem.name}`
-              : "Scansiona un codice prodotto o un seriale — l'articolo sarà aggiunto automaticamente"
-          }
-        />
-
-        {/* General info */}
+        {/* Dati generali */}
         <section className="bg-white border border-slate-200 rounded-md p-4 sm:p-6">
           <div className="text-xs tracking-[0.1em] uppercase text-slate-500 font-semibold mb-4">
             Dati Generali
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <Label htmlFor="cliente" className="text-slate-700 text-sm font-semibold">
+                <Buildings size={14} className="inline mr-1" /> Cliente
+              </Label>
+              <Input
+                id="cliente"
+                data-testid="input-structure"
+                value={cliente}
+                onChange={(e) => setCliente(e.target.value)}
+                placeholder="Es. ABC Srl"
+                className="h-12 mt-1 text-base"
+              />
+            </div>
+            <div>
+              <Label htmlFor="takenby" className="text-slate-700 text-sm font-semibold">
+                <UserCircle size={14} className="inline mr-1" /> Preso da
+              </Label>
+              <Input
+                id="takenby"
+                data-testid="input-taken-by"
+                value={takenBy}
+                onChange={(e) => setTakenBy(e.target.value)}
+                placeholder="Es. Mario Rossi"
+                className="h-12 mt-1 text-base"
+              />
+            </div>
             <div>
               <Label htmlFor="operator" className="text-slate-700 text-sm font-semibold">
-                <User size={14} className="inline mr-1" /> Nome Operatore
+                <User size={14} className="inline mr-1" /> Operatore
               </Label>
               <Input
                 id="operator"
                 data-testid="input-operator"
                 value={operator}
                 onChange={(e) => setOperator(e.target.value)}
-                placeholder="Es. Mario Rossi"
+                placeholder="Es. chi registra"
                 className="h-12 mt-1 text-base"
               />
             </div>
             <div>
               <Label htmlFor="date" className="text-slate-700 text-sm font-semibold">
-                <CalendarBlank size={14} className="inline mr-1" /> Data Spedizione
+                <CalendarBlank size={14} className="inline mr-1" /> Data
               </Label>
               <Input
                 id="date"
@@ -413,274 +374,232 @@ export default function ChecklistPage() {
                 className="h-12 mt-1 text-base"
               />
             </div>
-            <div>
-              <Label htmlFor="structure" className="text-slate-700 text-sm font-semibold">
-                <Buildings size={14} className="inline mr-1" /> Cliente / Destinazione
-              </Label>
-              <Input
-                id="structure"
-                data-testid="input-structure"
-                value={structure}
-                onChange={(e) => setStructure(e.target.value)}
-                placeholder="Es. Cliente XXXXX"
-                className="h-12 mt-1 text-base"
-              />
+          </div>
+        </section>
+
+        <ScannerBar
+          onScanned={handleScannedCode}
+          lastScan={lastScan}
+          onClearLastScan={() => setLastScan(null)}
+          hint={
+            pending
+              ? `In attesa dei seriali per: ${pending.name}`
+              : "Scansiona seriali o codici prodotto — o seleziona manualmente qui sotto"
+          }
+        />
+
+        {/* Contesto: modello selezionato + picker manuali */}
+        <section className="bg-white border border-slate-200 rounded-md p-4">
+          <div className="flex flex-wrap items-center gap-2 justify-between">
+            <div className="min-w-0 flex-1">
+              {pending ? (
+                <div className="flex items-center gap-2 flex-wrap" data-testid="pending-serialized-banner">
+                  <Badge className="bg-blue-600 hover:bg-blue-700">
+                    🎯 Modello: {pending.name}
+                  </Badge>
+                  <span className="text-xs text-slate-500">
+                    Ora scansiona i seriali (verifica LIVE presenza in Entrate)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPending(null)}
+                    className="text-xs text-red-600 hover:underline"
+                    data-testid="clear-pending-btn"
+                  >
+                    Rimuovi selezione
+                  </button>
+                </div>
+              ) : (
+                <div className="text-sm text-slate-500">
+                  Scansiona un codice/seriale o seleziona manualmente il prodotto.
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setPicker({ filter: "serialized" })}
+                className="h-10"
+                data-testid="pick-serialized-btn"
+              >
+                <MagnifyingGlass size={16} className="mr-1" /> Prodotto a Seriale
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setPicker({ filter: "quantity" })}
+                className="h-10"
+                data-testid="pick-quantity-btn"
+              >
+                <MagnifyingGlass size={16} className="mr-1" /> Prodotto a Quantità
+              </Button>
             </div>
           </div>
         </section>
 
-        {/* Notion error state */}
-        {error && (
-          <div className="border border-red-200 bg-red-50 text-red-700 p-4 rounded-md flex items-start gap-2">
-            <Warning size={20} weight="bold" className="shrink-0 mt-0.5" />
-            <div>
-              <div className="font-semibold">Notion non raggiungibile</div>
-              <div className="text-sm mt-1">{error}</div>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={async () => { await refresh(); toast.success("Magazzino aggiornato"); }}
-                className="mt-3 h-10 border-red-300 text-red-700"
-              >
-                Riprova
-              </Button>
-            </div>
+        {/* Lista */}
+        <section
+          className="bg-white border border-slate-200 rounded-md overflow-hidden"
+          data-testid="spedizioni-list"
+        >
+          <div className="px-4 py-3 border-b border-slate-200 bg-slate-900 text-white flex items-center justify-between">
+            <h2 className="font-display text-base font-bold">Lista temporanea</h2>
+            <span className="text-xs text-slate-300">
+              {list.length} riga{list.length === 1 ? "" : "he"} · {totalUnits} pz
+            </span>
           </div>
-        )}
-
-        {/* Category filter */}
-        {!error && (
-          <section className="bg-white border border-slate-200 rounded-md p-3 sm:p-4">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs uppercase tracking-wider text-slate-500 font-semibold mr-2">
-                Filtra:
-              </span>
-              <Button
-                type="button"
-                variant={filter === CAT_ALL ? "default" : "outline"}
-                onClick={() => setFilter(CAT_ALL)}
-                className={`h-9 px-3 ${filter === CAT_ALL ? "bg-slate-900 hover:bg-slate-800" : ""}`}
-                data-testid="filter-all"
-              >
-                Tutti ({items.length})
-              </Button>
-              {categories.map((c) => {
-                const count = items.filter(
-                  (it) => (it.category || "Senza categoria") === c
-                ).length;
-                return (
-                  <Button
-                    key={c}
-                    type="button"
-                    variant={filter === c ? "default" : "outline"}
-                    onClick={() => setFilter(c)}
-                    className={`h-9 px-3 ${filter === c ? "bg-slate-900 hover:bg-slate-800" : ""}`}
-                    data-testid={`filter-${c}`}
-                  >
-                    {c} ({count})
-                  </Button>
-                );
-              })}
+          {list.length === 0 ? (
+            <div className="px-4 py-10 text-center text-slate-400 text-sm">
+              Ancora nessun prodotto. Scansiona o seleziona per iniziare.
             </div>
-          </section>
-        )}
-
-        {/* Inventory list */}
-        {loading && !items.length && (
-          <div className="text-center py-10 text-slate-500">Caricamento magazzino Notion…</div>
-        )}
-        {!loading && !error && items.length === 0 && (
-          <div className="text-center py-10 border border-dashed border-slate-300 rounded-md text-slate-500">
-            Il database Notion è vuoto.
-          </div>
-        )}
-
-        {Object.keys(grouped)
-          .sort()
-          .map((catName) => (
-            <section
-              key={catName}
-              className="bg-white border border-slate-200 rounded-md overflow-hidden"
-              data-testid={`cat-${catName}`}
-            >
-              <div className="px-4 sm:px-6 py-3 border-b border-slate-200 bg-slate-900 text-white flex items-center justify-between">
-                <h2 className="font-display text-base sm:text-lg font-bold">
-                  {catName}
-                </h2>
-                <span className="text-xs text-slate-400">
-                  {grouped[catName].length} articoli
-                </span>
-              </div>
-              <ul className="divide-y divide-slate-200">
-                {grouped[catName].map((it) => {
-                  const sel = selections[it.id] || { quantity: 0, serials: [] };
-                  const avail = Number(it.quantity) || 0;
-                  const outOfStock = avail <= 0;
-                  const testKey = `item-${it.id}`;
-                  return (
-                    <li key={it.id} className="px-4 sm:px-6 py-4" data-testid={testKey}>
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-slate-900 font-semibold text-base">
-                              {it.name}
-                            </span>
-                            {it.serialized && (
-                              <Badge variant="outline" className="border-amber-300 text-amber-800 bg-amber-50">
-                                S/N
-                              </Badge>
-                            )}
-                            {it.code && (
-                              <span className="text-xs font-mono-tight text-slate-400">
-                                {it.code}
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-xs text-slate-500 mt-0.5">
-                            Disponibili:{" "}
-                            <span
-                              className={`font-mono-tight font-semibold ${
-                                outOfStock ? "text-red-600" : "text-slate-700"
-                              }`}
-                              data-testid={`${testKey}-avail`}
-                            >
-                              {avail} {it.unit}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            onClick={() => bump(it, -1)}
-                            disabled={sel.quantity <= 0}
-                            className="h-12 w-12 border-slate-300"
-                            data-testid={`${testKey}-dec`}
-                            aria-label="Diminuisci"
-                          >
-                            <Minus size={20} weight="bold" />
-                          </Button>
-                          <Input
-                            type="number"
-                            min={0}
-                            max={avail}
-                            step={it.unit === "m" ? "0.5" : "1"}
-                            value={sel.quantity}
-                            onChange={(e) => {
-                              const v = parseFloat(e.target.value || "0");
-                              setQuantity(it, isFinite(v) ? v : 0);
-                            }}
-                            className="h-12 w-20 text-center text-lg font-mono-tight font-semibold"
-                            data-testid={`${testKey}-value`}
-                            disabled={outOfStock}
-                          />
-                          <Button
-                            type="button"
-                            variant="default"
-                            size="icon"
-                            onClick={() => bump(it, 1)}
-                            disabled={outOfStock || sel.quantity >= avail}
-                            className="h-12 w-12 bg-slate-900 hover:bg-slate-800"
-                            data-testid={`${testKey}-inc`}
-                            aria-label="Aumenta"
-                          >
-                            <Plus size={20} weight="bold" />
-                          </Button>
-                        </div>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {list.map((li) => (
+                <li key={li.id} className="px-4 py-3" data-testid={`sped-row-${li.id}`}>
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-slate-900 flex items-center gap-2 flex-wrap">
+                        {li.name}
+                        {li.serialized ? (
+                          <Badge variant="outline" className="border-amber-300 text-amber-800 bg-amber-50">
+                            A Seriale
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="border-slate-300 text-slate-600">
+                            A Quantità
+                          </Badge>
+                        )}
                       </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono-tight font-semibold text-slate-900">
+                        {li.quantity} {li.unit || "pz"}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        onClick={() => removeRow(li.id)}
+                        className="h-8 w-8 border-red-300 text-red-600 hover:bg-red-50"
+                        aria-label="Rimuovi"
+                        data-testid={`sped-remove-${li.id}`}
+                      >
+                        <Trash size={16} />
+                      </Button>
+                    </div>
+                  </div>
+                  {li.serialized && li.serials.length > 0 && (
+                    <ul className="mt-2 ml-4 space-y-1">
+                      {li.serials.map((sn, idx) => (
+                        <li
+                          key={`${li.id}-${idx}`}
+                          className="flex items-center gap-2 text-sm font-mono-tight text-slate-700"
+                        >
+                          <Barcode size={14} className="text-slate-400" />
+                          <span>SN {sn}</span>
+                          <button
+                            type="button"
+                            onClick={() => removeSerial(li.id, idx)}
+                            className="text-red-500 hover:text-red-700 ml-auto"
+                            aria-label="Rimuovi seriale"
+                            data-testid={`sped-remove-sn-${li.id}-${idx}`}
+                          >
+                            <X size={14} />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
-                      {it.serialized && sel.quantity > 0 && (
-                        <div className="mt-4 space-y-2 border-l-2 border-amber-400 pl-4">
-                          <div className="text-[11px] tracking-[0.1em] uppercase text-slate-500 font-semibold">
-                            Seriali (S/N) — {Math.floor(sel.quantity)} richiesti
-                          </div>
-                          {sel.serials.map((sn, idx) => {
-                            const sid = `${testKey}-sn-${idx}`;
-                            return (
-                              <div key={`${it.id}-sn-${idx}`} className="flex gap-2">
-                                <Input
-                                  value={sn}
-                                  onChange={(e) => setSerial(it.id, idx, e.target.value)}
-                                  placeholder={`Seriale #${idx + 1}`}
-                                  className="h-12 font-mono-tight"
-                                  data-testid={sid}
-                                />
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  onClick={() => openScanner(it.id, idx, `${it.name} #${idx + 1}`)}
-                                  className="h-12 border-slate-300 shrink-0"
-                                  data-testid={`${sid}-scan`}
-                                  aria-label="Scansiona"
-                                >
-                                  <QrCode size={20} />
-                                </Button>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          ))}
-
-        {/* Notes */}
-        {!error && items.length > 0 && (
-          <section className="bg-white border border-slate-200 rounded-md p-4 sm:p-6">
-            <Label htmlFor="notes" className="text-slate-700 text-sm font-semibold">
-              Note aggiuntive (opzionale)
-            </Label>
-            <Textarea
-              id="notes"
-              data-testid="input-notes"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Eventuali note per la spedizione…"
-              className="mt-2 min-h-[90px]"
-            />
-          </section>
-        )}
+        <section className="bg-white border border-slate-200 rounded-md p-4 sm:p-6">
+          <Label htmlFor="notes" className="text-slate-700 text-sm font-semibold">
+            Note aggiuntive (opzionale)
+          </Label>
+          <Textarea
+            id="notes"
+            data-testid="input-notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Eventuali note per questa spedizione…"
+            className="mt-2 min-h-[90px]"
+          />
+        </section>
       </main>
 
-      {/* Sticky footer */}
       <footer className="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 z-40">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
           <div className="text-sm text-slate-600">
             <span className="font-mono-tight font-semibold text-slate-900">{totalUnits}</span>{" "}
-            pz da spedire
+            pz in uscita · {list.length} prodotti
           </div>
           <Button
             type="button"
             onClick={submit}
-            disabled={submitting || totalUnits === 0}
+            disabled={submitting || list.length === 0}
             className="h-12 px-6 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-base"
             data-testid="submit-checklist-btn"
           >
             {submitting ? (
               <>
-                <CircleNotch size={20} className="mr-2 animate-spin" />
-                Conferma in corso…
+                <CircleNotch size={20} className="mr-2 animate-spin" /> Conferma in corso…
               </>
             ) : (
               <>
-                <PaperPlaneTilt size={20} className="mr-2" weight="fill" />
-                CONFERMA SPEDIZIONE
+                <ArrowSquareOut size={20} weight="bold" className="mr-2" /> CONFERMA SPEDIZIONE
               </>
             )}
           </Button>
         </div>
       </footer>
 
-      <BarcodeScanner
-        open={!!scanTarget}
-        onClose={closeScanner}
-        onDetected={onScanned}
-        label={scanTarget?.label}
-      />
+      {qtyDialog && (
+        <QtyDialog
+          item={qtyDialog.item}
+          initial={qtyDialog.initial}
+          maxAvailable={qtyDialog.maxAvailable}
+          label="Quantità da spedire"
+          confirmLabel="Aggiungi"
+          variant="spedizioni"
+          onClose={() => setQtyDialog(null)}
+          onConfirm={(qty) => {
+            addQtyToList(qtyDialog.item, qty);
+            setLastScan({
+              type: "ok",
+              title: "🟢 AGGIUNTO ALLA LISTA",
+              subtitle: `${qtyDialog.item.name} — ${qty} ${qtyDialog.item.unit || "pz"}`,
+            });
+            setQtyDialog(null);
+          }}
+        />
+      )}
+
+      {picker && (
+        <ProductPicker
+          items={items}
+          filter={picker.filter}
+          onClose={() => setPicker(null)}
+          onSelect={(product) => {
+            if (picker.filter === "serialized") {
+              setPending({ id: product.id, name: product.name });
+              setLastScan({
+                type: "ok",
+                title: "MODELLO SELEZIONATO",
+                subtitle: `${product.name} — scansiona i seriali`,
+              });
+              setPicker(null);
+            } else {
+              setPicker(null);
+              openQtyForItem(product);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

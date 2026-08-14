@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { useInventoryCtx } from "../lib/InventoryContext";
 import ScannerBar from "../components/ScannerBar";
+import QtyDialog from "../components/QtyDialog";
+import ProductPicker from "../components/ProductPicker";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Button } from "../components/ui/button";
@@ -541,6 +543,9 @@ export default function ArriviPage() {
         <QtyDialog
           item={qtyDialog.item}
           initial={qtyDialog.initial}
+          label="Quantità in arrivo"
+          confirmLabel="Aggiungi"
+          variant="arrivi"
           onClose={() => setQtyDialog(null)}
           onConfirm={(qty) => {
             addQtyToList(qtyDialog.item, qty);
@@ -562,7 +567,6 @@ export default function ArriviPage() {
           onSelect={(product) => {
             if (picker.filter === "serialized") {
               if (picker.pendingSn) {
-                // We had an SN waiting for a model — add now
                 addSerialToList(product, picker.pendingSn);
                 setLastScan({
                   type: "ok",
@@ -580,198 +584,12 @@ export default function ArriviPage() {
               }
               setPicker(null);
             } else {
-              // filter === quantity
               setPicker(null);
               setQtyDialog({ item: product, initial: 1 });
             }
           }}
         />
       )}
-    </div>
-  );
-}
-
-/* -------- QtyDialog -------- */
-function QtyDialog({ item, initial, onClose, onConfirm }) {
-  const [qty, setQty] = useState(String(initial ?? 1));
-  const inputRef = useRef(null);
-  useEffect(() => {
-    setTimeout(() => {
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    }, 0);
-  }, []);
-  const confirm = () => {
-    const n = parseFloat(qty);
-    if (!isFinite(n) || n <= 0) {
-      toast.error("Quantità non valida");
-      return;
-    }
-    onConfirm(n);
-  };
-  return (
-    <div
-      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-      data-testid="qty-dialog"
-    >
-      <div
-        className="bg-white rounded-lg w-full max-w-md p-6 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="text-[10px] tracking-[0.2em] uppercase text-slate-500 font-semibold">
-          Quantità in arrivo
-        </div>
-        <div className="font-display text-2xl font-bold text-slate-900 mt-1">
-          {item.name}
-        </div>
-        <div className="text-sm text-slate-500 mt-1">
-          Stock attuale:{" "}
-          <span className="font-mono-tight font-semibold text-slate-700">
-            {item.quantity ?? 0} {item.unit || "pz"}
-          </span>
-        </div>
-        <div className="mt-5">
-          <Label htmlFor="qty-input" className="text-slate-700 text-sm font-semibold">
-            Quantità in arrivo
-          </Label>
-          <Input
-            id="qty-input"
-            ref={inputRef}
-            type="number"
-            min={1}
-            step="1"
-            value={qty}
-            onChange={(e) => setQty(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                confirm();
-              }
-            }}
-            className="h-14 mt-2 text-2xl font-mono-tight font-bold text-center"
-            data-testid="qty-input"
-          />
-        </div>
-        <div className="mt-5 flex gap-2 justify-end">
-          <Button variant="outline" onClick={onClose} className="h-11" data-testid="qty-cancel">
-            Annulla
-          </Button>
-          <Button
-            onClick={confirm}
-            className="h-11 bg-emerald-600 hover:bg-emerald-700"
-            data-testid="qty-confirm"
-          >
-            Aggiungi
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* -------- ProductPicker -------- */
-function ProductPicker({ items, filter, onClose, onSelect }) {
-  const [q, setQ] = useState("");
-  const inputRef = useRef(null);
-  useEffect(() => {
-    setTimeout(() => inputRef.current?.focus(), 0);
-  }, []);
-  const filtered = useMemo(() => {
-    const query = q.trim().toLowerCase();
-    return items.filter((it) => {
-      if (filter === "serialized" && !it.serialized) return false;
-      if (filter === "quantity" && it.serialized) return false;
-      if (!query) return true;
-      return (
-        (it.name || "").toLowerCase().includes(query) ||
-        (it.code || "").toLowerCase().includes(query) ||
-        (it.category || "").toLowerCase().includes(query)
-      );
-    });
-  }, [items, filter, q]);
-  return (
-    <div
-      className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-      data-testid="product-picker"
-    >
-      <div
-        className="bg-white rounded-lg w-full max-w-2xl mt-16 max-h-[70vh] flex flex-col shadow-xl overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-4 border-b border-slate-200 flex items-center gap-2">
-          <div className="text-[10px] tracking-[0.2em] uppercase text-slate-500 font-semibold flex-1">
-            Seleziona prodotto{" "}
-            {filter === "serialized"
-              ? "(A Seriale)"
-              : filter === "quantity"
-              ? "(A Quantità)"
-              : ""}
-          </div>
-          <button
-            onClick={onClose}
-            className="text-slate-500 hover:text-slate-900 p-1"
-            aria-label="Chiudi"
-            data-testid="picker-close"
-          >
-            <X size={18} />
-          </button>
-        </div>
-        <div className="p-4 border-b border-slate-100">
-          <div className="relative">
-            <MagnifyingGlass
-              size={18}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-            />
-            <Input
-              ref={inputRef}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Cerca per nome, codice o categoria…"
-              className="pl-10 h-11"
-              autoComplete="off"
-              data-testid="picker-search"
-            />
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-          {filtered.length === 0 ? (
-            <div className="p-8 text-center text-slate-400 text-sm">
-              Nessun prodotto{filter === "serialized" ? " a seriale" : filter === "quantity" ? " a quantità" : ""} trovato.
-            </div>
-          ) : (
-            filtered.map((it) => (
-              <button
-                key={it.id}
-                type="button"
-                onClick={() => onSelect(it)}
-                className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center justify-between"
-                data-testid={`picker-item-${it.id}`}
-              >
-                <div className="min-w-0">
-                  <div className="font-semibold text-slate-900">{it.name}</div>
-                  <div className="text-xs text-slate-500 font-mono-tight">
-                    {it.code || "—"} · {it.category || "—"}
-                  </div>
-                </div>
-                <div className="text-right shrink-0 ml-3">
-                  <div className="font-mono-tight font-semibold text-slate-900">
-                    {it.quantity ?? 0} {it.unit || "pz"}
-                  </div>
-                  <div className="text-[10px] text-slate-400">
-                    {it.serialized ? "A Seriale" : "A Quantità"}
-                  </div>
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-      </div>
     </div>
   );
 }

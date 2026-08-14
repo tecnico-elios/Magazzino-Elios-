@@ -134,6 +134,7 @@ def test_submit_rejects_unknown_serial(api):
         "operator": "Test F0",
         "shipping_date": "2026-02-14",
         "structure": "TEST_CLIENTE_F0_STRICT",
+        "taken_by": "Tester",
         "items": [{
             "page_id": serialized["id"],
             "name": serialized["name"],
@@ -161,6 +162,7 @@ def test_submit_rejects_duplicate_serial_in_same_shipment(api):
         "operator": "Test F0",
         "shipping_date": "2026-02-14",
         "structure": "TEST_CLIENTE_F0_DUP",
+        "taken_by": "Tester",
         "items": [{
             "page_id": serialized["id"],
             "name": serialized["name"],

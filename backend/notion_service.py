@@ -177,21 +177,37 @@ async def create_pick(
     quantity: float,
     cliente: str,
     data_uscita: str,
+    taken_by: str = "",
 ) -> str:
-    """Create a new row in the Inventory Tracker data source. Returns new page id.
-    Notion's formula on the Inventario item auto-updates via rollup on Picked Quantity."""
+    """Create a new row in the Inventory Tracker (Spedizioni/Uscite) data source.
+    Returns new page id. Notion's rollup on the Inventario item auto-updates via
+    'Item in uscita' relation.
+
+    Property mapping (actual Notion schema):
+      SN (title)              — serial number or product code
+      Item in uscita (rel)    — link to Inventario item
+      Quantità (number)
+      Preso per (rich_text)   — Cliente / Destinazione (free text)
+      Preso da (rich_text)    — Chi ha materialmente prelevato (free text)
+      Data Uscita (date)
+    """
     if not NOTION_TOKEN or not NOTION_TRACKER_DS_ID:
         raise RuntimeError("Tracker data source non configurato")
     url = f"{NOTION_BASE}/pages"
+    properties: Dict[str, Any] = {
+        "SN": {"title": [{"type": "text", "text": {"content": (sn_title or "—")[:200]}}]},
+        "Quantità": {"number": quantity},
+        "Item in uscita": {"relation": [{"id": item_page_id}]},
+        "Preso per": {"rich_text": [{"type": "text", "text": {"content": (cliente or "")[:2000]}}]},
+        "Data Uscita": {"date": {"start": data_uscita}},
+    }
+    if taken_by and taken_by.strip():
+        properties["Preso da"] = {
+            "rich_text": [{"type": "text", "text": {"content": taken_by.strip()[:2000]}}]
+        }
     body = {
         "parent": {"type": "data_source_id", "data_source_id": NOTION_TRACKER_DS_ID},
-        "properties": {
-            "SN": {"title": [{"type": "text", "text": {"content": sn_title[:200] or "—"}}]},
-            "Quantità": {"number": quantity},
-            "Item in uscita": {"relation": [{"id": item_page_id}]},
-            "Preso per": {"rich_text": [{"type": "text", "text": {"content": (cliente or "")[:200]}}]},
-            "Data Uscita": {"date": {"start": data_uscita}},
-        },
+        "properties": properties,
     }
     async with httpx.AsyncClient(timeout=20) as client:
         resp = await client.post(url, headers=_headers(), json=body)

@@ -53,6 +53,7 @@ def test_checklist_send_fake_serial_rejected():
         "operator": "TEST_OP",
         "shipping_date": "2026-01-14",
         "structure": "TEST_CLIENT_DO_NOT_CREATE",
+        "taken_by": "TEST_OP",
         "notes": None,
         "items": [{
             "page_id": item["id"],
@@ -78,6 +79,7 @@ def test_checklist_send_duplicate_serials_rejected():
         "operator": "TEST_OP",
         "shipping_date": "2026-01-14",
         "structure": "TEST_CLIENT_DO_NOT_CREATE",
+        "taken_by": "TEST_OP",
         "notes": None,
         "items": [{
             "page_id": item["id"],
