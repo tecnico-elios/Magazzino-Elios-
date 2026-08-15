@@ -86,11 +86,13 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
       if (debouncersRef.current[idx]) { clearTimeout(debouncersRef.current[idx]); delete debouncersRef.current[idx]; }
       return;
     }
-    // Auto-validate dopo 500ms di inattività (gestisce sia digitazione manuale sia paste)
+    // Arrivi: nessuna validazione — il seriale può essere nuovo e qualsiasi.
+    // Verrà registrato su Notion solo con CONFERMA ARRIVO.
+    if (mode === "arrivi") return;
+    // Spedizioni: auto-validate dopo 500ms di inattività (F6 lookup su cache)
     if (debouncersRef.current[idx]) clearTimeout(debouncersRef.current[idx]);
     const capturedValue = val;
     debouncersRef.current[idx] = setTimeout(() => {
-      // Solo se non è già stata validata OK con lo stesso valore
       validateOne(idx, capturedValue);
     }, 500);
   };
@@ -178,14 +180,21 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
     const value = (code || "").toString().trim();
     setCameraFor(null);
     if (!value) return;
-    // Aggiorna il valore e valida immediatamente con la stessa pipeline
+    // Aggiorna il valore e valida immediatamente con la stessa pipeline (solo Spedizioni).
+    // In Arrivi il seriale viene solo scritto nel campo — la validazione live è disattivata.
     setSerial(idx, value);
-    validateOne(idx, value);
+    if (mode !== "arrivi") validateOne(idx, value);
   };
 
-  const allValid = () =>
-    pending.serials.every((s, i) => (s || "").trim() && validations[i]?.state === "ok") &&
-    pending.serials.length === pending.quantity;
+  const allValid = () => {
+    if (pending.serials.length !== pending.quantity) return false;
+    // Arrivi: basta che tutti i seriali siano non vuoti — nessuna validazione richiesta.
+    if (mode === "arrivi") {
+      return pending.serials.every((s) => (s || "").trim().length > 0);
+    }
+    // Spedizioni: mantiene la validazione live F6 su ogni seriale.
+    return pending.serials.every((s, i) => (s || "").trim() && validations[i]?.state === "ok");
+  };
 
   const submit = () => {
     if (!allValid()) {
@@ -251,7 +260,7 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
                   value={sn}
                   onChange={(e) => setSerial(idx, e.target.value)}
                   onBlur={() => {
-                    // Validazione immediata quando l'utente tocca/clicca altrove
+                    if (mode === "arrivi") return; // Arrivi: nessuna validazione
                     if ((sn || "").trim() && v.state !== "ok" && v.state !== "checking") {
                       if (debouncersRef.current[idx]) clearTimeout(debouncersRef.current[idx]);
                       validateOne(idx);
@@ -260,6 +269,7 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault();
+                      if (mode === "arrivi") return; // Arrivi: Enter non triggera lookup (seriale libero)
                       if (debouncersRef.current[idx]) clearTimeout(debouncersRef.current[idx]);
                       validateOne(idx);
                     }
