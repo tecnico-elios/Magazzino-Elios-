@@ -225,8 +225,8 @@ export default function ArriviPage() {
       toast.error("Fornitore / Mittente obbligatorio");
       return;
     }
-    if (!operator.trim()) {
-      toast.error("Nome operatore obbligatorio");
+    if (!operatorName) {
+      toast.error("Operatore non identificato — rieffettua il login");
       return;
     }
     if (!arrivalDate) {
@@ -246,7 +246,7 @@ export default function ArriviPage() {
     setConfirmError(null);
     try {
       const payload = {
-        operator: operator.trim(),
+        operator: operatorName,
         arrival_date: arrivalDate,
         fornitore: fornitore.trim(),
         notes: notes.trim() || null,
@@ -261,7 +261,6 @@ export default function ArriviPage() {
       };
       const { data } = await axios.post(`${API}/arrivi/send`, payload);
       toast.success("Arrivo confermato", { description: data.message, duration: 6000 });
-      setOpCtx(operator.trim()); // F4: persist operator across sessions
       setList([]);
       setFornitore("");
       setNotes("");

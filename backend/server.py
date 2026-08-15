@@ -18,7 +18,7 @@ load_dotenv(ROOT_DIR / '.env')
 
 import notion_service
 import auth as auth_mod
-from routes import auth_routes, admin_users_routes
+from routes import auth_routes, admin_users_routes, admin_extra_routes
 try:
     from zoneinfo import ZoneInfo
     ROME_TZ = ZoneInfo("Europe/Rome")
@@ -1218,6 +1218,7 @@ app.include_router(api_router)
 # Auth + Admin user routers (Phase 2 — Prompt 220)
 app.include_router(auth_routes.build_router(db, auth_deps), prefix="/api")
 app.include_router(admin_users_routes.build_router(db, auth_deps), prefix="/api")
+app.include_router(admin_extra_routes.build_router(db, auth_deps), prefix="/api")
 
 
 @app.on_event("startup")

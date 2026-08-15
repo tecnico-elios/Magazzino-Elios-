@@ -24,7 +24,13 @@ import {
   ClockCounterClockwise,
   Package,
   ArrowsClockwise,
+  MagnifyingGlass,
+  Warning,
+  Broom,
+  Gear,
+  ListMagnifyingGlass,
 } from "@phosphor-icons/react";
+import { AuditLogTab, SettingsTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab } from "./AdminExtraTabs";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -744,9 +750,9 @@ export default function AdminPage() {
       </header>
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
         <Tabs defaultValue="inventory">
-          <TabsList className="mb-6">
+          <TabsList className="mb-6 flex-wrap h-auto">
             <TabsTrigger value="inventory" data-testid="tab-inventory">
-              <Package size={16} className="mr-1" /> Gestione Prodotti
+              <Package size={16} className="mr-1" /> Prodotti
             </TabsTrigger>
             <TabsTrigger value="recipients" data-testid="tab-recipients">
               <Envelope size={16} className="mr-1" /> Destinatari
@@ -754,16 +760,30 @@ export default function AdminPage() {
             <TabsTrigger value="history" data-testid="tab-history">
               <ClockCounterClockwise size={16} className="mr-1" /> Storico
             </TabsTrigger>
+            <TabsTrigger value="global-search" data-testid="tab-global-search">
+              <MagnifyingGlass size={16} className="mr-1" /> Ricerca
+            </TabsTrigger>
+            <TabsTrigger value="serial-history" data-testid="tab-serial-history">
+              <ListMagnifyingGlass size={16} className="mr-1" /> Storico SN
+            </TabsTrigger>
+            <TabsTrigger value="audit-log" data-testid="tab-audit-log">
+              <ClockCounterClockwise size={16} className="mr-1" /> Audit
+            </TabsTrigger>
+            <TabsTrigger value="cleanup" data-testid="tab-cleanup">
+              <Broom size={16} className="mr-1" /> Cleanup
+            </TabsTrigger>
+            <TabsTrigger value="settings" data-testid="tab-settings">
+              <Gear size={16} className="mr-1" /> Impostazioni
+            </TabsTrigger>
           </TabsList>
-          <TabsContent value="inventory">
-            <InventoryTab />
-          </TabsContent>
-          <TabsContent value="recipients">
-            <RecipientsTab />
-          </TabsContent>
-          <TabsContent value="history">
-            <HistoryTab />
-          </TabsContent>
+          <TabsContent value="inventory"><InventoryTab /></TabsContent>
+          <TabsContent value="recipients"><RecipientsTab /></TabsContent>
+          <TabsContent value="history"><HistoryTab /></TabsContent>
+          <TabsContent value="global-search"><GlobalSearchTab /></TabsContent>
+          <TabsContent value="serial-history"><SerialHistoryTab /></TabsContent>
+          <TabsContent value="audit-log"><AuditLogTab /></TabsContent>
+          <TabsContent value="cleanup"><CleanupTestTab /></TabsContent>
+          <TabsContent value="settings"><SettingsTab /></TabsContent>
         </Tabs>
       </main>
     </div>
