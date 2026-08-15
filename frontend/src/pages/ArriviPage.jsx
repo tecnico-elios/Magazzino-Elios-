@@ -376,13 +376,13 @@ export default function ArriviPage() {
             <div className="min-w-0 flex-1">
               {pending ? (
                 <div
-                  className="flex items-center gap-2 flex-wrap"
+                  className="flex items-start gap-2 flex-wrap"
                   data-testid="pending-serialized-banner"
                 >
-                  <Badge className="bg-emerald-600 hover:bg-emerald-700">
+                  <Badge className="bg-emerald-600 hover:bg-emerald-700 whitespace-normal break-words max-w-full text-left leading-snug">
                     🎯 Modello: {pending.name}
                   </Badge>
-                  <span className="text-xs text-slate-500">
+                  <span className="text-xs text-slate-500 break-words">
                     Ora inserisci o scansiona il seriale uno alla volta — digitazione manuale, ENTER, CERCA o scanner sono equivalenti.
                   </span>
                   <button
@@ -441,29 +441,29 @@ export default function ArriviPage() {
           ) : (
             <ul className="divide-y divide-slate-100">
               {list.map((li) => (
-                <li key={li.id} className="px-4 py-3" data-testid={`arrivi-row-${li.id}`}>
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                <li key={li.id} className="px-3 sm:px-4 py-3" data-testid={`arrivi-row-${li.id}`}>
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
                     <div className="min-w-0 flex-1">
-                      <div className="font-semibold text-slate-900 flex items-center gap-2 flex-wrap">
-                        {li.name}
+                      <div className="font-semibold text-slate-900 flex items-start gap-2 flex-wrap">
+                        <span className="break-words min-w-0 flex-1">{li.name}</span>
                         {li.serialized ? (
                           <Badge
                             variant="outline"
-                            className="border-amber-300 text-amber-800 bg-amber-50"
+                            className="border-amber-300 text-amber-800 bg-amber-50 shrink-0"
                           >
                             A Seriale
                           </Badge>
                         ) : (
                           <Badge
                             variant="outline"
-                            className="border-slate-300 text-slate-600"
+                            className="border-slate-300 text-slate-600 shrink-0"
                           >
                             A Quantità
                           </Badge>
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 shrink-0">
                       <span className="font-mono-tight font-semibold text-slate-900">
                         {li.quantity} {li.unit || "pz"}
                       </span>

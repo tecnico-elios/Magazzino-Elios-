@@ -327,10 +327,10 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
           <div className="min-w-0 flex-1">
             <div className="font-semibold text-sm">{lastScan.title}</div>
             {lastScan.subtitle && (
-              <div className="text-xs mt-0.5">{lastScan.subtitle}</div>
+              <div className="text-xs mt-0.5 break-words whitespace-normal">{lastScan.subtitle}</div>
             )}
             {lastScan.code && (
-              <div className="text-[10px] font-mono-tight mt-1 opacity-70">
+              <div className="text-[10px] font-mono-tight mt-1 opacity-70 break-all">
                 Codice: {lastScan.code}
               </div>
             )}

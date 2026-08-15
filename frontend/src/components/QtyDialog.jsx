@@ -75,7 +75,7 @@ export default function QtyDialog({
         <div className="text-[10px] tracking-[0.2em] uppercase text-slate-500 font-semibold">
           {label}
         </div>
-        <div className="font-display text-2xl font-bold text-slate-900 mt-1">
+        <div className="font-display text-xl sm:text-2xl font-bold text-slate-900 mt-1 break-words">
           {item.name}
         </div>
         <div className="text-sm text-slate-500 mt-1">

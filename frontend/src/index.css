@@ -260,6 +260,15 @@ input[type='number'] {
    Responsive tweaks (F7) — smartphone, tablet, palmare, PC
    ============================================================ */
 
+/* Word-break globale su testi utente (nomi prodotto, seriali, barcode) */
+[data-testid="arrivi-list"] li,
+[data-testid="spedizioni-list"] li,
+[data-testid="pending-serialized-banner"],
+[data-testid="scanner-banner"] {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
 /* Touch targets minimi 44x44 su tutti i device touch */
 @media (hover: none) and (pointer: coarse) {
     button, .et-btn-primary, [role="button"] {

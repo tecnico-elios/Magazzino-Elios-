@@ -223,7 +223,7 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
           <div className="text-[10px] tracking-[0.2em] uppercase text-slate-500 font-semibold">
             Prodotto A Seriale
           </div>
-          <div className="font-display text-xl font-bold text-slate-900 mt-0.5" data-testid="collector-name">
+          <div className="font-display text-lg sm:text-xl font-bold text-slate-900 mt-0.5 break-words" data-testid="collector-name">
             {pending.name}
           </div>
         </div>

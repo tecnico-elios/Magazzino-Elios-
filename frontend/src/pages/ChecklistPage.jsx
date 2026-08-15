@@ -459,23 +459,23 @@ export default function ChecklistPage() {
           ) : (
             <ul className="divide-y divide-slate-100">
               {list.map((li) => (
-                <li key={li.id} className="px-4 py-3" data-testid={`sped-row-${li.id}`}>
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                <li key={li.id} className="px-3 sm:px-4 py-3" data-testid={`sped-row-${li.id}`}>
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
                     <div className="min-w-0 flex-1">
-                      <div className="font-semibold text-slate-900 flex items-center gap-2 flex-wrap">
-                        {li.name}
+                      <div className="font-semibold text-slate-900 flex items-start gap-2 flex-wrap">
+                        <span className="break-words min-w-0 flex-1">{li.name}</span>
                         {li.serialized ? (
-                          <Badge variant="outline" className="border-amber-300 text-amber-800 bg-amber-50">
+                          <Badge variant="outline" className="border-amber-300 text-amber-800 bg-amber-50 shrink-0">
                             A Seriale
                           </Badge>
                         ) : (
-                          <Badge variant="outline" className="border-slate-300 text-slate-600">
+                          <Badge variant="outline" className="border-slate-300 text-slate-600 shrink-0">
                             A Quantità
                           </Badge>
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 shrink-0">
                       <span className="font-mono-tight font-semibold text-slate-900">
                         {li.quantity} {li.unit || "pz"}
                       </span>
