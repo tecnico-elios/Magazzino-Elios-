@@ -8,6 +8,47 @@ import BarcodeScanner from "./BarcodeScanner";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+// Cache impostazioni beep — letta una sola volta al primo render di un collector.
+// Il client la aggiorna quando l'admin salva le impostazioni.
+let _cachedSoundEnabled = null;
+async function isBeepEnabled() {
+  if (_cachedSoundEnabled !== null) return _cachedSoundEnabled;
+  try {
+    const { data } = await axios.get(`${API}/settings`);
+    _cachedSoundEnabled = !!data?.scanner?.sound_enabled;
+  } catch {
+    _cachedSoundEnabled = false;
+  }
+  return _cachedSoundEnabled;
+}
+// Reset cache quando l'admin salva impostazioni (evento globale opzionale)
+if (typeof window !== "undefined") {
+  window.addEventListener("elios:settings-changed", () => { _cachedSoundEnabled = null; });
+}
+
+// Beep breve via WebAudio — nessun asset esterno, nessun import extra.
+let _audioCtx = null;
+function playBeep(frequency = 880, durationMs = 100) {
+  try {
+    if (!_audioCtx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      _audioCtx = new Ctx();
+    }
+    if (_audioCtx.state === "suspended") _audioCtx.resume();
+    const osc = _audioCtx.createOscillator();
+    const gain = _audioCtx.createGain();
+    osc.frequency.value = frequency;
+    osc.type = "sine";
+    gain.gain.setValueAtTime(0.001, _audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.2, _audioCtx.currentTime + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, _audioCtx.currentTime + durationMs / 1000);
+    osc.connect(gain).connect(_audioCtx.destination);
+    osc.start();
+    osc.stop(_audioCtx.currentTime + durationMs / 1000 + 0.02);
+  } catch { /* silent */ }
+}
+
 /**
  * SerialCollector — inserimento di N seriali per un prodotto A Seriale.
  *
@@ -97,12 +138,14 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
             message: data.status === "unseen" ? "Seriale nuovo — verrà creato in Notion" : "Rientro riconosciuto",
           },
         }));
+        isBeepEnabled().then((on) => on && playBeep());
         focusNext(idx);
         return;
       }
       // Spedizioni
       if (data.status === "in_warehouse") {
         setValidations((v) => ({ ...v, [idx]: { state: "ok", message: "Presente in Entrate — pronto" } }));
+        isBeepEnabled().then((on) => on && playBeep());
         focusNext(idx);
       } else if (data.status === "out") {
         setValidations((v) => ({ ...v, [idx]: { state: "error", message: "Già uscito in una spedizione precedente" } }));

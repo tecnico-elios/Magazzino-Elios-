@@ -576,10 +576,30 @@ function HistoryTab() {
 
       {/* Local shipments */}
       <div className="space-y-2">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
             Spedizioni App ({items.length})
           </div>
+          {items.length > 0 && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={async () => {
+                if (!window.confirm(`Eliminare TUTTE le ${items.length} spedizioni salvate localmente?\n\nNotion NON verrà toccato — resta la fonte di verità storica.\n\nAzione irreversibile.`)) return;
+                try {
+                  const { data } = await axios.delete(`${API}/admin/history`);
+                  toast.success(`Storico locale eliminato: ${data.deleted} record`);
+                  loadLocal();
+                } catch (e) {
+                  toast.error("Eliminazione fallita", { description: e?.response?.data?.detail || e?.message });
+                }
+              }}
+              className="h-9 border-red-300 text-red-600 hover:bg-red-50"
+              data-testid="clear-history-btn"
+            >
+              <Trash size={14} className="mr-1" /> Elimina tutto lo storico
+            </Button>
+          )}
         </div>
         {loading ? (
           <div className="text-slate-500">Caricamento…</div>

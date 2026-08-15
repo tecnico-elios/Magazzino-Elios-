@@ -351,7 +351,7 @@ export default function AdminUsersPage() {
           </Button>
         </div>
 
-        <div className="et-card-elevated overflow-hidden">
+        <div className="et-card-elevated overflow-hidden hidden sm:block">
           <div className="overflow-x-auto scrollbar-thin">
             <table className="et-table min-w-[820px]">
             <thead>
@@ -470,6 +470,112 @@ export default function AdminUsersPage() {
             </tbody>
           </table>
           </div>
+        </div>
+
+        {/* Card view mobile — visibile solo <640px, dati identici ma verticali */}
+        <div className="sm:hidden space-y-3" data-testid="users-cards-mobile">
+          {users.map((u) => {
+            const isMe = me?.id === u.id;
+            return (
+              <div
+                key={u.id}
+                className="et-card-elevated p-3 space-y-2"
+                data-testid={`user-card-${u.username}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-slate-900 text-sm">
+                      {u.full_name || u.username}
+                    </div>
+                    <div className="text-xs font-mono-tight text-slate-500">@{u.username}</div>
+                    <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-1 flex-wrap">
+                      {u.email ? (
+                        <span className="font-mono-tight break-all">{u.email}</span>
+                      ) : (
+                        <span className="text-slate-400 italic">nessuna email</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setEmailTarget(u)}
+                        className="text-[10px] uppercase tracking-wider text-slate-500 hover:text-slate-900 underline underline-offset-2"
+                      >
+                        modifica
+                      </button>
+                    </div>
+                  </div>
+                  {u.active ? (
+                    <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 hover:bg-emerald-100 shrink-0">
+                      Attivo
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="border-red-200 text-red-700 bg-red-50 shrink-0">
+                      Disattivato
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500 mr-1">Ruolo</span>
+                  <button
+                    type="button"
+                    onClick={() => changeRole(u, "operator")}
+                    disabled={isMe}
+                    className={`px-2 h-8 rounded-md text-xs font-semibold border ${
+                      u.role === "operator"
+                        ? "bg-slate-900 text-white border-slate-900"
+                        : "bg-white border-slate-300 text-slate-600"
+                    } disabled:opacity-40`}
+                  >
+                    Operatore
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => changeRole(u, "admin")}
+                    disabled={isMe}
+                    className={`px-2 h-8 rounded-md text-xs font-semibold border ${
+                      u.role === "admin"
+                        ? "bg-amber-600 text-white border-amber-600"
+                        : "bg-white border-slate-300 text-slate-600"
+                    } disabled:opacity-40`}
+                  >
+                    Admin
+                  </button>
+                  {isMe && (
+                    <span className="ml-1 text-[10px] uppercase tracking-wider text-slate-400">tu</span>
+                  )}
+                </div>
+
+                <div className="text-[11px] text-slate-500 font-mono-tight">
+                  Ultimo accesso: {fmtDate(u.last_login)}
+                </div>
+
+                <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-100">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setResetTarget(u)}
+                    className="h-9 flex-1"
+                    data-testid={`m-reset-${u.username}`}
+                  >
+                    <Key size={14} className="mr-1" /> Reset PW
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => toggleActive(u)}
+                    disabled={isMe}
+                    className={`h-9 flex-1 ${u.active ? "border-red-300 text-red-600 hover:bg-red-50" : "border-emerald-300 text-emerald-700 hover:bg-emerald-50"}`}
+                    data-testid={`m-toggle-${u.username}`}
+                  >
+                    <Prohibit size={14} className="mr-1" /> {u.active ? "Disattiva" : "Riattiva"}
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+          {users.length === 0 && !loading && (
+            <div className="et-card p-4 text-center text-slate-400 text-sm">Nessun utente.</div>
+          )}
         </div>
       </main>
 

@@ -178,6 +178,9 @@ export function SettingsTab() {
       const { data } = await axios.put(`${API}/admin/settings`, payload);
       setS(data);
       toast.success("Impostazioni salvate");
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("elios:settings-changed"));
+      }
     } catch (e) { toast.error("Salvataggio fallito", { description: formatError(e) }); }
     finally { setSaving(false); }
   };

@@ -1170,6 +1170,34 @@ async def admin_history(
     return {"items": docs, "count": len(docs)}
 
 
+@api_router.delete("/admin/history", dependencies=[Depends(dep_require_admin)])
+async def admin_history_clear(admin=Depends(dep_require_admin)):
+    """Elimina TUTTE le spedizioni salvate localmente (db.checklists).
+    ATTENZIONE: NON tocca Notion — che rimane la fonte di verità storica.
+    Solo Admin. Registrato in audit_logs.
+    """
+    res = await db.checklists.delete_many({})
+    await db.audit_logs.insert_one({
+        "at": datetime.now(timezone.utc),
+        "actor_id": str(admin["_id"]),
+        "actor_username": admin.get("username"),
+        "action": "history.clear_all",
+        "target_user_id": None,
+        "meta": {"deleted": int(res.deleted_count)},
+    })
+    return {"ok": True, "deleted": int(res.deleted_count)}
+
+
+@api_router.get("/settings", dependencies=[Depends(dep_current_user)])
+async def get_settings_public():
+    """Impostazioni app leggibili da qualsiasi utente autenticato.
+    Serve al client (es. beep scanner, live search) per adattare la UI.
+    Le modifiche restano riservate agli Admin via PUT /admin/settings.
+    """
+    from routes.admin_extra_routes import get_app_settings
+    return await get_app_settings(db)
+
+
 @api_router.get("/admin/notion-exits", dependencies=[Depends(dep_require_admin)])
 async def admin_notion_exits(
     cliente: Optional[str] = None,
