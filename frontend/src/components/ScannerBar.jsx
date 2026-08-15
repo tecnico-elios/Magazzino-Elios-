@@ -155,7 +155,7 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
       data-testid="scanner-bar"
     >
       <div className="text-[10px] tracking-[0.2em] uppercase text-slate-500 font-semibold mb-2">
-        Scansiona prodotto
+        Inserisci o scansiona prodotto
       </div>
 
       <div className="flex items-center gap-2">
@@ -173,7 +173,7 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
             onChange={(e) => setBuffer(e.target.value)}
             onKeyDown={onKeyDown}
             onFocus={() => suggestions.length && setOpen(true)}
-            placeholder="Scansiona seriale o codice prodotto — supporta lettore USB/Bluetooth"
+            placeholder="Inserisci o scansiona seriale/codice prodotto — digita e premi ENTER o CERCA"
             className="w-full h-11 text-base bg-transparent border-0 border-b border-slate-200 focus:outline-none focus:border-slate-500 font-mono-tight"
           />
           {buffer && (

@@ -166,7 +166,7 @@ export default function ChecklistPage() {
     }
     if (local && local.serialized) {
       setPending({ id: local.id, name: local.name });
-      setLastScan({ type: "ok", title: "MODELLO SELEZIONATO", subtitle: `${local.name} — scansiona i seriali`, code });
+      setLastScan({ type: "ok", title: "MODELLO SELEZIONATO", subtitle: `${local.name} — inserisci o scansiona il seriale`, code });
       return;
     }
 
@@ -383,7 +383,7 @@ export default function ChecklistPage() {
           hint={
             pending
               ? `In attesa dei seriali per: ${pending.name}`
-              : "Scansiona seriali o codici prodotto — o seleziona manualmente qui sotto"
+              : "Inserisci o scansiona seriali o codici prodotto — puoi anche selezionare manualmente qui sotto"
           }
         />
 
@@ -397,7 +397,7 @@ export default function ChecklistPage() {
                     🎯 Modello: {pending.name}
                   </Badge>
                   <span className="text-xs text-slate-500">
-                    Ora scansiona i seriali (verifica LIVE presenza in Entrate)
+                    Ora inserisci o scansiona il seriale (verifica LIVE presenza in Entrate) — digitazione manuale, ENTER, CERCA o scanner sono equivalenti.
                   </span>
                   <button
                     type="button"
@@ -410,7 +410,7 @@ export default function ChecklistPage() {
                 </div>
               ) : (
                 <div className="text-sm text-slate-500">
-                  Scansiona un codice/seriale o seleziona manualmente il prodotto.
+                  Inserisci o scansiona un codice/seriale, oppure seleziona manualmente il prodotto.
                 </div>
               )}
             </div>
@@ -450,7 +450,7 @@ export default function ChecklistPage() {
           </div>
           {list.length === 0 ? (
             <div className="px-4 py-10 text-center text-slate-400 text-sm">
-              Ancora nessun prodotto. Scansiona o seleziona per iniziare.
+              Ancora nessun prodotto. Inserisci, scansiona o seleziona per iniziare.
             </div>
           ) : (
             <ul className="divide-y divide-slate-100">
@@ -589,7 +589,7 @@ export default function ChecklistPage() {
               setLastScan({
                 type: "ok",
                 title: "MODELLO SELEZIONATO",
-                subtitle: `${product.name} — scansiona i seriali`,
+                subtitle: `${product.name} — inserisci o scansiona il seriale`,
               });
               setPicker(null);
             } else {

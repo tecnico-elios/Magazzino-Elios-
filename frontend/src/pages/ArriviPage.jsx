@@ -150,7 +150,7 @@ export default function ArriviPage() {
     }
     if (local && local.serialized) {
       setPending({ id: local.id, name: local.name });
-      setLastScan({ type: "ok", title: "MODELLO SELEZIONATO", subtitle: `${local.name} — scansiona i seriali`, code });
+      setLastScan({ type: "ok", title: "MODELLO SELEZIONATO", subtitle: `${local.name} — inserisci o scansiona il seriale`, code });
       return;
     }
 
@@ -361,7 +361,7 @@ export default function ArriviPage() {
           hint={
             pending
               ? `In attesa dei seriali per: ${pending.name}`
-              : "Scansiona un codice prodotto o un seriale — o seleziona manualmente qui sotto"
+              : "Inserisci o scansiona un codice prodotto o un seriale — puoi anche selezionare manualmente qui sotto"
           }
         />
 
@@ -378,7 +378,7 @@ export default function ArriviPage() {
                     🎯 Modello: {pending.name}
                   </Badge>
                   <span className="text-xs text-slate-500">
-                    Ora scansiona i seriali uno alla volta.
+                    Ora inserisci o scansiona il seriale uno alla volta — digitazione manuale, ENTER, CERCA o scanner sono equivalenti.
                   </span>
                   <button
                     type="button"
@@ -391,7 +391,7 @@ export default function ArriviPage() {
                 </div>
               ) : (
                 <div className="text-sm text-slate-500">
-                  Nessun modello selezionato. Scansiona un barcode o seleziona il prodotto manualmente.
+                  Nessun modello selezionato. Inserisci o scansiona un barcode, oppure seleziona il prodotto manualmente.
                 </div>
               )}
             </div>
@@ -431,7 +431,7 @@ export default function ArriviPage() {
           </div>
           {list.length === 0 ? (
             <div className="px-4 py-10 text-center text-slate-400 text-sm">
-              Ancora nessun prodotto. Scansiona o seleziona per iniziare.
+              Ancora nessun prodotto. Inserisci, scansiona o seleziona per iniziare.
             </div>
           ) : (
             <ul className="divide-y divide-slate-100">
@@ -625,7 +625,7 @@ export default function ArriviPage() {
                 setLastScan({
                   type: "ok",
                   title: "MODELLO SELEZIONATO",
-                  subtitle: `${product.name} — scansiona i seriali`,
+                  subtitle: `${product.name} — inserisci o scansiona il seriale`,
                 });
               }
               setPicker(null);
