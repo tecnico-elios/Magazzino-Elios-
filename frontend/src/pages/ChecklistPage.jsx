@@ -6,6 +6,7 @@ import { useAuth } from "../lib/AuthContext";
 import ScannerBar from "../components/ScannerBar";
 import QtyDialog from "../components/QtyDialog";
 import ConfirmSubmitDialog from "../components/ConfirmSubmitDialog";
+import SerialCollector from "../components/SerialCollector";
 import ProductPicker from "../components/ProductPicker";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -165,8 +166,9 @@ export default function ChecklistPage() {
       return;
     }
     if (local && local.serialized) {
-      setPending({ id: local.id, name: local.name });
-      setLastScan({ type: "ok", title: "MODELLO SELEZIONATO", subtitle: `${local.name} — inserisci o scansiona il seriale`, code });
+      setPending(null);
+      setQtyDialog({ item: local, initial: 1, forSerials: true });
+      setLastScan({ type: "ok", title: "MODELLO A SERIALE", subtitle: `${local.name} — indica la quantità`, code });
       return;
     }
 
@@ -203,8 +205,9 @@ export default function ChecklistPage() {
           return;
         }
         if (data.item.serialized) {
-          setPending({ id: data.item.id, name: data.item.name });
-          setLastScan({ type: "ok", title: "MODELLO SELEZIONATO", subtitle: `${data.item.name}`, code });
+          setPending(null);
+          setQtyDialog({ item: data.item, initial: 1, forSerials: true });
+          setLastScan({ type: "ok", title: "MODELLO A SERIALE", subtitle: `${data.item.name} — indica la quantità`, code });
         } else {
           openQtyForItem(data.item);
         }
@@ -561,12 +564,24 @@ export default function ChecklistPage() {
         <QtyDialog
           item={qtyDialog.item}
           initial={qtyDialog.initial}
-          maxAvailable={qtyDialog.maxAvailable}
-          label="Quantità da spedire"
-          confirmLabel="Aggiungi"
+          maxAvailable={qtyDialog.forSerials ? undefined : qtyDialog.maxAvailable}
+          label={qtyDialog.forSerials ? "Quantità pezzi" : "Quantità da spedire"}
+          confirmLabel={qtyDialog.forSerials ? "Continua" : "Aggiungi"}
           variant="spedizioni"
           onClose={() => setQtyDialog(null)}
           onConfirm={(qty) => {
+            if (qtyDialog.forSerials) {
+              const qi = Math.max(1, Math.floor(qty));
+              setSerialSession({
+                id: qtyDialog.item.id,
+                name: qtyDialog.item.name,
+                unit: qtyDialog.item.unit || "pz",
+                quantity: qi,
+                serials: Array(qi).fill(""),
+              });
+              setQtyDialog(null);
+              return;
+            }
             addQtyToList(qtyDialog.item, qty);
             setLastScan({
               type: "ok",
@@ -578,6 +593,48 @@ export default function ChecklistPage() {
         />
       )}
 
+      {serialSession && (
+        <div className="max-w-5xl mx-auto px-4 sm:px-6">
+          <SerialCollector
+            pending={serialSession}
+            mode="spedizioni"
+            existingSerials={list.flatMap((li) => li.serials || [])}
+            onChange={setSerialSession}
+            onCancel={() => setSerialSession(null)}
+            onCommit={(sess) => {
+              setList((prev) => {
+                const existing = prev.find((x) => x.id === sess.id);
+                if (existing) {
+                  const merged = {
+                    ...existing,
+                    serials: [...existing.serials, ...sess.serials],
+                    quantity: (existing.quantity || 0) + sess.quantity,
+                  };
+                  return prev.map((x) => (x.id === sess.id ? merged : x));
+                }
+                return [
+                  ...prev,
+                  {
+                    id: sess.id,
+                    name: sess.name,
+                    unit: sess.unit || "pz",
+                    serialized: true,
+                    quantity: sess.quantity,
+                    serials: sess.serials.slice(),
+                  },
+                ];
+              });
+              setLastScan({
+                type: "ok",
+                title: "🟢 SERIALI AGGIUNTI",
+                subtitle: `${sess.name} — ${sess.quantity} pz`,
+              });
+              setSerialSession(null);
+            }}
+          />
+        </div>
+      )}
+
       {picker && (
         <ProductPicker
           items={items}
@@ -585,17 +642,13 @@ export default function ChecklistPage() {
           onClose={() => setPicker(null)}
           onSelect={(product) => {
             if (picker.filter === "serialized") {
-              setPending({ id: product.id, name: product.name });
-              setLastScan({
-                type: "ok",
-                title: "MODELLO SELEZIONATO",
-                subtitle: `${product.name} — inserisci o scansiona il seriale`,
-              });
               setPicker(null);
-            } else {
-              setPicker(null);
-              openQtyForItem(product);
+              setPending(null);
+              setQtyDialog({ item: product, initial: 1, forSerials: true });
+              return;
             }
+            setPicker(null);
+            openQtyForItem(product);
           }}
         />
       )}

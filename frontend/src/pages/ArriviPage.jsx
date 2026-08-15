@@ -7,6 +7,7 @@ import ScannerBar from "../components/ScannerBar";
 import QtyDialog from "../components/QtyDialog";
 import ProductPicker from "../components/ProductPicker";
 import ConfirmSubmitDialog from "../components/ConfirmSubmitDialog";
+import SerialCollector from "../components/SerialCollector";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Button } from "../components/ui/button";
@@ -43,7 +44,8 @@ export default function ArriviPage() {
   const [lastScan, setLastScan] = useState(null);
   const [qtyDialog, setQtyDialog] = useState(null); // {item}
   const [picker, setPicker] = useState(null); // {filter, pendingSn}
-  const [pending, setPending] = useState(null); // {id, name} — modello selezionato per SN successivi
+  const [pending, setPending] = useState(null); // {id, name} legacy (used briefly during scanner→product step)
+  const [serialSession, setSerialSession] = useState(null); // {id, name, quantity, serials[]} — new flow A Seriale — modello selezionato per SN successivi
   const [rientroConfirm, setRientroConfirm] = useState(null); // {sn, productId, productName, cliente, shippedDate}
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmError, setConfirmError] = useState(null);
@@ -149,8 +151,10 @@ export default function ArriviPage() {
       return;
     }
     if (local && local.serialized) {
-      setPending({ id: local.id, name: local.name });
-      setLastScan({ type: "ok", title: "MODELLO SELEZIONATO", subtitle: `${local.name} — inserisci o scansiona il seriale`, code });
+      // NEW UX: chiedi prima la quantità, poi apri il collector
+      setPending(null);
+      setQtyDialog({ item: local, initial: 1, forSerials: true });
+      setLastScan({ type: "ok", title: "MODELLO A SERIALE", subtitle: `${local.name} — indica la quantità`, code });
       return;
     }
 
@@ -187,8 +191,9 @@ export default function ArriviPage() {
           return;
         }
         if (data.item.serialized) {
-          setPending({ id: data.item.id, name: data.item.name });
-          setLastScan({ type: "ok", title: "MODELLO SELEZIONATO", subtitle: `${data.item.name}`, code });
+          setPending(null);
+          setQtyDialog({ item: data.item, initial: 1, forSerials: true });
+          setLastScan({ type: "ok", title: "MODELLO A SERIALE", subtitle: `${data.item.name} — indica la quantità`, code });
         } else {
           setQtyDialog({ item: data.item, initial: 1 });
           setLastScan({ type: "ok", title: "PRODOTTO RICONOSCIUTO", subtitle: `${data.item.name}`, code });
@@ -589,11 +594,23 @@ export default function ArriviPage() {
         <QtyDialog
           item={qtyDialog.item}
           initial={qtyDialog.initial}
-          label="Quantità in arrivo"
-          confirmLabel="Aggiungi"
+          label={qtyDialog.forSerials ? "Quantità pezzi" : "Quantità in arrivo"}
+          confirmLabel={qtyDialog.forSerials ? "Continua" : "Aggiungi"}
           variant="arrivi"
           onClose={() => setQtyDialog(null)}
           onConfirm={(qty) => {
+            if (qtyDialog.forSerials) {
+              const qi = Math.max(1, Math.floor(qty));
+              setSerialSession({
+                id: qtyDialog.item.id,
+                name: qtyDialog.item.name,
+                unit: qtyDialog.item.unit || "pz",
+                quantity: qi,
+                serials: Array(qi).fill(""),
+              });
+              setQtyDialog(null);
+              return;
+            }
             addQtyToList(qtyDialog.item, qty);
             setLastScan({
               type: "ok",
@@ -605,6 +622,49 @@ export default function ArriviPage() {
         />
       )}
 
+      {serialSession && (
+        <div className="max-w-5xl mx-auto px-4 sm:px-6">
+          <SerialCollector
+            pending={serialSession}
+            mode="arrivi"
+            existingSerials={list.flatMap((li) => li.serials || [])}
+            onChange={setSerialSession}
+            onCancel={() => setSerialSession(null)}
+            onCommit={(sess) => {
+              // Merge tutti i seriali come singola riga (o append se esiste già)
+              setList((prev) => {
+                const existing = prev.find((x) => x.id === sess.id);
+                if (existing) {
+                  const merged = {
+                    ...existing,
+                    serials: [...existing.serials, ...sess.serials],
+                    quantity: (existing.quantity || 0) + sess.quantity,
+                  };
+                  return prev.map((x) => (x.id === sess.id ? merged : x));
+                }
+                return [
+                  ...prev,
+                  {
+                    id: sess.id,
+                    name: sess.name,
+                    unit: sess.unit || "pz",
+                    serialized: true,
+                    quantity: sess.quantity,
+                    serials: sess.serials.slice(),
+                  },
+                ];
+              });
+              setLastScan({
+                type: "ok",
+                title: "🟢 SERIALI AGGIUNTI",
+                subtitle: `${sess.name} — ${sess.quantity} pz`,
+              });
+              setSerialSession(null);
+            }}
+          />
+        </div>
+      )}
+
       {picker && (
         <ProductPicker
           items={items}
@@ -612,27 +672,14 @@ export default function ArriviPage() {
           onClose={() => setPicker(null)}
           onSelect={(product) => {
             if (picker.filter === "serialized") {
-              if (picker.pendingSn) {
-                addSerialToList(product, picker.pendingSn);
-                setLastScan({
-                  type: "ok",
-                  title: "🟢 SERIALE AGGIUNTO",
-                  subtitle: `${product.name} — SN ${picker.pendingSn}`,
-                });
-                setPending({ id: product.id, name: product.name });
-              } else {
-                setPending({ id: product.id, name: product.name });
-                setLastScan({
-                  type: "ok",
-                  title: "MODELLO SELEZIONATO",
-                  subtitle: `${product.name} — inserisci o scansiona il seriale`,
-                });
-              }
+              // NEW UX: chiedi la quantità e apri il collector
               setPicker(null);
-            } else {
-              setPicker(null);
-              setQtyDialog({ item: product, initial: 1 });
+              setPending(null);
+              setQtyDialog({ item: product, initial: 1, forSerials: true });
+              return;
             }
+            setPicker(null);
+            setQtyDialog({ item: product, initial: 1 });
           }}
         />
       )}
