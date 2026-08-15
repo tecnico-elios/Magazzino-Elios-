@@ -27,6 +27,12 @@ class LoginBody(BaseModel):
     model_config = ConfigDict(extra="ignore")
     username: str
     password: str
+    remember_me: bool = False
+
+
+class ForgotPasswordBody(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    username: str
 
 
 class BootstrapBody(BaseModel):
@@ -112,8 +118,9 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             username=user["username"],
             role=user["role"],
             password_version=int(user.get("password_version", 1)),
+            remember=bool(body.remember_me),
         )
-        return {"token": token, "user": auth_mod.public_user(user)}
+        return {"token": token, "user": auth_mod.public_user(user), "remember_me": bool(body.remember_me)}
 
     @router.get("/me")
     async def me(current=Depends(deps.get_current_user)):
@@ -140,5 +147,31 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             password_version=new_pv,
         )
         return {"ok": True, "token": token}
+
+    @router.post("/forgot-password")
+    async def forgot_password(body: ForgotPasswordBody):
+        """Flusso "Password dimenticata" ADMIN-ONLY (per il ruolo, non richiesto un token esistente).
+        Non rivela mai se l'username esiste o meno per evitare enumeration.
+        - Se lo username corrisponde a un ADMIN attivo → risposta informativa
+          (nessuna infrastruttura email attualmente disponibile).
+        - Altrimenti restituisce identica risposta generica.
+        """
+        username = _normalize_username(body.username)
+        user = await db.users.find_one({"username": username})
+        # Log solo lato server, mai nel body della risposta
+        if user and user.get("active") and user.get("role") == auth_mod.ROLE_ADMIN:
+            logger.info(
+                "forgot-password requested for admin username=%s — invita un altro admin a effettuare il reset via Gestione Utenti",
+                username,
+            )
+        # Risposta generica identica per evitare enumeration
+        return {
+            "ok": True,
+            "message": (
+                "Se lo username corrisponde a un account amministratore attivo, un altro amministratore "
+                "può reimpostare la password dalla sezione Admin → Gestione Utenti. "
+                "L'infrastruttura di recupero email non è ancora configurata."
+            ),
+        }
 
     return router

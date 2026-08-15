@@ -44,6 +44,14 @@ def _access_ttl_minutes() -> int:
         return 480
 
 
+def _remember_ttl_minutes() -> int:
+    """Durata token quando l'utente ha spuntato 'Rimani collegato'."""
+    try:
+        return int(os.environ.get("JWT_REMEMBER_TTL_MINUTES", str(60 * 24 * 30)))  # 30 giorni
+    except ValueError:
+        return 60 * 24 * 30
+
+
 # ---------- Password hashing ----------
 
 def hash_password(password: str) -> str:
@@ -64,15 +72,17 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 # ---------- JWT ----------
 
-def create_access_token(user_id: str, username: str, role: str, password_version: int) -> str:
+def create_access_token(user_id: str, username: str, role: str, password_version: int, remember: bool = False) -> str:
     now = datetime.now(timezone.utc)
+    ttl_min = _remember_ttl_minutes() if remember else _access_ttl_minutes()
     payload = {
         "sub": user_id,
         "username": username,
         "role": role,
         "pwv": password_version,
+        "rem": bool(remember),
         "iat": int(now.timestamp()),
-        "exp": now + timedelta(minutes=_access_ttl_minutes()),
+        "exp": now + timedelta(minutes=ttl_min),
         "type": "access",
     }
     return jwt.encode(payload, _jwt_secret(), algorithm=JWT_ALGORITHM)
