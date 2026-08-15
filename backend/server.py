@@ -562,6 +562,11 @@ async def submit_checklist(payload: ChecklistPayload):
         for it in filled:
             fresh = fresh_map[it.page_id]
             before = fresh.get("quantity") or 0
+            # STRICT Notion mapping (Prompt 220 §11):
+            #   SN (title)  = SOLO seriale (o nome prodotto per A Quantità — MAI concatenato)
+            #   Preso per   = SOLO cliente/struttura
+            #   Preso da    = SOLO operatore
+            operator_name = (payload.taken_by or payload.operator or "").strip()
             if it.serialized and it.serials:
                 for s in it.serials:
                     pid = await notion_service.create_pick(
@@ -570,16 +575,18 @@ async def submit_checklist(payload: ChecklistPayload):
                         quantity=1,
                         cliente=payload.structure,
                         data_uscita=payload.shipping_date,
+                        taken_by=operator_name,
                     )
                     tracker_ids.append(pid)
             else:
-                title = f"{payload.structure} — {it.name} — {payload.shipping_date}"
+                # A Quantità: nessun seriale → title = SOLO nome prodotto (nessuna concatenazione)
                 pid = await notion_service.create_pick(
                     item_page_id=it.page_id,
-                    sn_title=title,
+                    sn_title=it.name,
                     quantity=it.quantity,
                     cliente=payload.structure,
                     data_uscita=payload.shipping_date,
+                    taken_by=operator_name,
                 )
                 tracker_ids.append(pid)
             movements.append({
@@ -983,6 +990,8 @@ async def submit_arrivo(payload: ArrivoPayload):
     receipts_ids: List[str] = []
     try:
         for it in filled:
+            # STRICT Notion mapping (Prompt 220 §11):
+            #   Item (title) = SOLO seriale (o nome prodotto per A Quantità — MAI concatenato)
             if it.serialized and it.serials:
                 for s in it.serials:
                     pid = await notion_service.create_receipt(
@@ -993,10 +1002,10 @@ async def submit_arrivo(payload: ArrivoPayload):
                     )
                     receipts_ids.append(pid)
             else:
-                title = f"{it.name} — {payload.arrival_date}"
+                # A Quantità: nessun seriale → title = SOLO nome prodotto (nessuna concatenazione)
                 pid = await notion_service.create_receipt(
                     item_page_id=it.page_id,
-                    sn_title=title,
+                    sn_title=it.name,
                     quantity=it.quantity,
                     data_consegna=payload.arrival_date,
                 )
