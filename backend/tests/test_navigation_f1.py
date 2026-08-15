@@ -1,9 +1,21 @@
-"""F1 backend regression tests: root, inventory, lookup, strict serial validation, admin, removed PDF endpoint."""
+"""F1 backend regression tests: root, inventory, lookup, strict serial validation, admin, removed PDF endpoint.
+Phase 2 aware — admin routes JWT, checklist/send JWT operator."""
 import os
 import requests
 import pytest
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://stock-dispatch-12.preview.emergentagent.com").rstrip("/")
+from conftest import BASE_URL, _ensure_admin_token, _ensure_op_token
+
+
+def _admin_hdr():
+    tok, _ = _ensure_admin_token()
+    return {"Authorization": f"Bearer {tok}"}
+
+
+def _op_hdr():
+    admin_tok, _ = _ensure_admin_token()
+    tok, _ = _ensure_op_token(admin_tok)
+    return {"Authorization": f"Bearer {tok}", "Content-Type": "application/json"}
 
 
 def _get(path, **kw):
@@ -65,7 +77,7 @@ def test_checklist_send_fake_serial_rejected():
             "serials": ["NEVER_SEEN_XYZ_FAKE_9999"],
         }],
     }
-    r = _post("/api/checklist/send", json=payload)
+    r = _post("/api/checklist/send", headers=_op_hdr(), json=payload)
     assert r.status_code == 409, f"expected 409, got {r.status_code}: {r.text[:300]}"
     detail = (r.json().get("detail") or "").lower()
     assert "mai entrato in magazzino" in detail or "non risulta presente in magazzino" in detail, f"unexpected detail: {detail}"
@@ -91,7 +103,7 @@ def test_checklist_send_duplicate_serials_rejected():
             "serials": ["DUP_TEST_SN_ABC", "DUP_TEST_SN_ABC"],
         }],
     }
-    r = _post("/api/checklist/send", json=payload)
+    r = _post("/api/checklist/send", headers=_op_hdr(), json=payload)
     assert r.status_code == 409, f"expected 409, got {r.status_code}: {r.text[:300]}"
     detail = (r.json().get("detail") or "").lower()
     assert ("inserito più volte" in detail) or ("non risulta presente" in detail) or ("mai entrato" in detail), f"unexpected detail: {detail}"
@@ -103,11 +115,11 @@ def test_admin_history_requires_password():
 
 
 def test_admin_history_with_password():
-    r = _get("/api/admin/history", headers={"X-Admin-Password": "admin123"})
+    r = _get("/api/admin/history", headers=_admin_hdr())
     assert r.status_code == 200
     assert isinstance(r.json(), (list, dict))
 
 
 def test_admin_history_pdf_removed():
-    r = _get("/api/admin/history/some-id/pdf", headers={"X-Admin-Password": "admin123"})
+    r = _get("/api/admin/history/some-id/pdf", headers=_admin_hdr())
     assert r.status_code == 404, f"expected 404, got {r.status_code}"

@@ -112,7 +112,8 @@ def test_spedizione_a_seriale_mapping_strict(stub_notion):
             serialized=True, quantity=1, serials=["SN12345"],
         )],
     )
-    _run(server.submit_checklist(payload))
+    current_user = {"_id": "test", "username": "test", "first_name": "Mario", "last_name": "Rossi", "role": "operator", "active": True}
+    _run(server.submit_checklist(payload, current_user=current_user))
 
     cp = stub_notion["create_pick"]
     assert cp.await_count == 1
@@ -147,11 +148,9 @@ def test_spedizione_a_quantita_no_concat(stub_notion):
             serialized=False, quantity=3, serials=[],
         )],
     )
-    _run(server.submit_checklist(payload))
-
-    cp = stub_notion["create_pick"]
-    kwargs = cp.await_args.kwargs
-    # STRICT: MAI concatenazione — solo nome prodotto
+    current_user = {"_id": "u", "username": "luca", "first_name": "Luca", "last_name": "", "role": "operator", "active": True}
+    _run(server.submit_checklist(payload, current_user=current_user))
+    kwargs = stub_notion["create_pick"].await_args.kwargs
     assert kwargs["sn_title"] == "Cavo Ricarica 5m"
     assert " — " not in kwargs["sn_title"]
     assert "Cliente" not in kwargs["sn_title"]
@@ -176,7 +175,8 @@ def test_spedizione_taken_by_isolato_da_cliente(stub_notion):
             page_id="pg3", name="Item", serialized=True, quantity=1, serials=["ABC"],
         )],
     )
-    _run(server.submit_checklist(payload))
+    current_user = {"_id": "u", "username": "op1", "first_name": "Op1", "last_name": "", "role": "operator", "active": True}
+    _run(server.submit_checklist(payload, current_user=current_user))
     kw = stub_notion["create_pick"].await_args.kwargs
     assert kw["cliente"] == "Cliente — con trattino"
     assert kw["taken_by"] == "Op1"
@@ -186,6 +186,69 @@ def test_spedizione_taken_by_isolato_da_cliente(stub_notion):
     assert "Op1" not in kw["cliente"]
     assert "ABC" not in kw["cliente"]
     assert "ABC" not in kw["taken_by"]
+
+
+def test_spedizione_operator_from_current_user_overrides_payload(stub_notion):
+    """TEST #8 Prompt 220: Preso da = full_name del current_user (JWT), MAI dal payload."""
+    stub_notion["get_item_map"]["pg-op"] = {
+        "name": "Item X", "quantity": 5, "unit": "pz", "tipo_gestione": "a_seriale"
+    }
+    stub_notion["latest_status_map"]["SN-AUTO"] = {"status": "in_warehouse", "last": {}}
+
+    # Payload contiene un operator MANIPOLATO ("FAKE_ATTACKER")
+    payload = server.ChecklistPayload(
+        operator="FAKE_ATTACKER",
+        shipping_date="2026-02-15",
+        structure="Cliente OK",
+        taken_by="ANOTHER_FAKE",
+        items=[server.ProductItem(
+            page_id="pg-op", name="Item X", serialized=True, quantity=1, serials=["SN-AUTO"],
+        )],
+    )
+    # current_user simula il risultato del JWT decode
+    current_user = {
+        "_id": "u1",
+        "username": "mrossi",
+        "first_name": "Mario",
+        "last_name": "Rossi",
+        "role": "operator",
+        "active": True,
+    }
+    _run(server.submit_checklist(payload, current_user=current_user))
+    kw = stub_notion["create_pick"].await_args.kwargs
+    # Il valore DEVE essere "Mario Rossi" — MAI "FAKE_ATTACKER" o "ANOTHER_FAKE"
+    assert kw["taken_by"] == "Mario Rossi", f"taken_by should be from JWT, got {kw['taken_by']!r}"
+    assert "FAKE" not in kw["taken_by"]
+    assert "FAKE" not in kw["cliente"]
+    # Il cliente resta quello del payload (solo taken_by è auto)
+    assert kw["cliente"] == "Cliente OK"
+
+
+def test_arrivo_operator_from_current_user_overrides_payload(stub_notion):
+    """Anche in arrivi il payload.operator è ignorato — operator viene dal JWT."""
+    stub_notion["get_item_map"]["pg-op-a"] = {
+        "name": "Item Y", "quantity": 0, "unit": "pz", "tipo_gestione": "a_quantita"
+    }
+    payload = server.ArrivoPayload(
+        operator="FAKE",
+        arrival_date="2026-02-15",
+        fornitore="ForZ",
+        items=[server.ArrivoItem(
+            page_id="pg-op-a", name="Item Y", serialized=False, quantity=3, serials=[],
+        )],
+    )
+    current_user = {
+        "_id": "u2",
+        "username": "lverdi",
+        "first_name": "Luigi",
+        "last_name": "Verdi",
+        "role": "operator",
+        "active": True,
+    }
+    _run(server.submit_arrivo(payload, current_user=current_user))
+    # submit_arrivo scrive `operator` nel record Mongo (non su Notion) — verifico
+    # tramite la mutazione del payload (server sovrascrive prima di validate/save).
+    assert payload.operator == "Luigi Verdi"
 
 
 # ---------------- ARRIVI ----------------
@@ -205,7 +268,8 @@ def test_arrivo_a_seriale_mapping_strict(stub_notion):
             serialized=True, quantity=1, serials=["NEWSN1"],
         )],
     )
-    _run(server.submit_arrivo(payload))
+    current_user = {"_id": "u", "username": "op2", "first_name": "Op2", "last_name": "", "role": "operator", "active": True}
+    _run(server.submit_arrivo(payload, current_user=current_user))
     cr = stub_notion["create_receipt"]
     assert cr.await_count == 1
     kwargs = cr.await_args.kwargs
@@ -232,7 +296,8 @@ def test_arrivo_a_quantita_no_date_concat(stub_notion):
             serialized=False, quantity=7, serials=[],
         )],
     )
-    _run(server.submit_arrivo(payload))
+    current_user = {"_id": "u", "username": "op3", "first_name": "Op3", "last_name": "", "role": "operator", "active": True}
+    _run(server.submit_arrivo(payload, current_user=current_user))
     kw = stub_notion["create_receipt"].await_args.kwargs
     assert kw["sn_title"] == "Accessorio K"
     assert "2026" not in kw["sn_title"]

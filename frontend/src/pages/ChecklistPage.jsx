@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { useInventoryCtx } from "../lib/InventoryContext";
-import { useOperator } from "../lib/useOperator";
+import { useAuth } from "../lib/AuthContext";
 import ScannerBar from "../components/ScannerBar";
 import QtyDialog from "../components/QtyDialog";
 import ConfirmSubmitDialog from "../components/ConfirmSubmitDialog";
@@ -28,20 +28,12 @@ import {
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-/**
- * ChecklistPage (Spedizioni) — F3
- * Registrazione uscite verso Spedizioni / Uscite. UX identica ad Arrivi
- * (scanner-first, cache locale, focus persistente) con differenze:
- *  - Cliente (Preso per) + "Preso da" (rich_text) — entrambi testo libero
- *  - Prodotti A Quantità: popup con MAX = stock disponibile → blocca overflow
- *  - Seriali: devono essere in Entrate AND non in Uscite AND non duplicati sessione
- */
 export default function ChecklistPage() {
   const { items, lookupLocalBySku, refresh } = useInventoryCtx();
-  const { operator: opCtx, setOperator: setOpCtx } = useOperator();
+  const { user } = useAuth();
+  const operatorName = user?.full_name || user?.username || "";
 
   const [cliente, setCliente] = useState("");
-  const [operator, setOperator] = useState(opCtx || "");
   const [shippingDate, setShippingDate] = useState(todayISO());
   const [notes, setNotes] = useState("");
 
@@ -60,10 +52,6 @@ export default function ChecklistPage() {
   useEffect(() => {
     if (!qtyDialog && !picker) focusScanner();
   }, [qtyDialog, picker]);
-
-  useEffect(() => {
-    if (opCtx && !operator) setOperator(opCtx);
-  }, [opCtx, operator]);
 
   const totalUnits = list.reduce((a, li) => a + (li.quantity || 0), 0);
 
@@ -256,8 +244,8 @@ export default function ChecklistPage() {
       toast.error("Cliente obbligatorio");
       return;
     }
-    if (!operator.trim()) {
-      toast.error("Operatore obbligatorio");
+    if (!operatorName) {
+      toast.error("Operatore non identificato — rieffettua il login");
       return;
     }
     if (!shippingDate) {
@@ -276,11 +264,13 @@ export default function ChecklistPage() {
     setSubmitting(true);
     setConfirmError(null);
     try {
+      // NB: operator + taken_by NON vengono più inviati manualmente.
+      // Il backend li imposta dal JWT (auth_deps.get_current_user).
       const payload = {
-        operator: operator.trim(),
+        operator: operatorName,
         shipping_date: shippingDate,
         structure: cliente.trim(),
-        taken_by: operator.trim(), // UI "Operatore" → Notion "Preso da"
+        taken_by: operatorName,
         notes: notes.trim() || null,
         items: list.map((li) => ({
           page_id: li.id,
@@ -293,7 +283,6 @@ export default function ChecklistPage() {
       };
       const { data } = await axios.post(`${API}/checklist/send`, payload);
       toast.success("Spedizione confermata", { description: data.message, duration: 6000 });
-      setOpCtx(operator.trim()); // F4: persist operator across sessions
       setList([]);
       setCliente("");
       setNotes("");
@@ -357,17 +346,19 @@ export default function ChecklistPage() {
               />
             </div>
             <div>
-              <Label htmlFor="operator" className="text-slate-700 text-sm font-semibold">
-                <User size={14} className="inline mr-1" /> Operatore
+              <Label className="text-slate-700 text-sm font-semibold">
+                <User size={14} className="inline mr-1" /> Operatore (Preso da)
               </Label>
-              <Input
-                id="operator"
-                data-testid="input-operator"
-                value={operator}
-                onChange={(e) => setOperator(e.target.value)}
-                placeholder="Es. Mario Rossi"
-                className="h-12 mt-1 text-base"
-              />
+              <div
+                className="h-12 mt-1 px-3 flex items-center border border-slate-200 bg-slate-50 rounded-md text-slate-900 font-semibold"
+                data-testid="operator-readonly"
+                title="L'operatore è determinato dal login (non modificabile)"
+              >
+                {operatorName || "—"}
+                <span className="ml-auto text-[10px] uppercase tracking-wider text-slate-400">
+                  auto
+                </span>
+              </div>
             </div>
             <div>
               <Label htmlFor="date" className="text-slate-700 text-sm font-semibold">
@@ -622,8 +613,7 @@ export default function ChecklistPage() {
         }))}
         meta={[
           { label: "Cliente", value: cliente.trim() },
-          { label: "Preso da", value: operator.trim() },
-          { label: "Operatore", value: operator.trim() },
+          { label: "Preso da (Operatore loggato)", value: operatorName },
           { label: "Data", value: shippingDate },
         ]}
         submitting={submitting}

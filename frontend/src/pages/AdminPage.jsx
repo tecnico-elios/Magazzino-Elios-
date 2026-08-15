@@ -27,78 +27,12 @@ import {
 } from "@phosphor-icons/react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const AUTH_KEY = "admin_password";
 
-const authHeaders = () => ({
-  "X-Admin-Password": sessionStorage.getItem(AUTH_KEY) || "",
-});
+// Auth is now handled by AuthContext + axios interceptor (Bearer token).
+// L'endpoint richiede JWT admin (Depends(dep_require_admin) lato backend).
+const authHeaders = () => ({}); // Bearer inserito dall'interceptor globale in AuthContext
 
-// ---------- Login ----------
-function LoginScreen({ onLogin }) {
-  const [pwd, setPwd] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const submit = async (e) => {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      await axios.post(`${API}/admin/login`, { password: pwd });
-      sessionStorage.setItem(AUTH_KEY, pwd);
-      onLogin();
-    } catch (err) {
-      toast.error("Accesso negato", {
-        description: err?.response?.data?.detail || "Password non valida",
-      });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-sm border-slate-200">
-        <CardHeader>
-          <CardTitle className="font-display text-2xl">Pannello Admin</CardTitle>
-          <CardDescription>
-            Accesso riservato — inserisci la password amministratore.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={submit} className="space-y-4">
-            <div>
-              <Label htmlFor="pwd" className="text-sm font-semibold">
-                Password
-              </Label>
-              <Input
-                id="pwd"
-                data-testid="admin-password-input"
-                type="password"
-                value={pwd}
-                onChange={(e) => setPwd(e.target.value)}
-                className="h-12 mt-1"
-                autoFocus
-              />
-            </div>
-            <Button
-              type="submit"
-              disabled={busy || !pwd}
-              className="h-12 w-full bg-slate-900 hover:bg-slate-800"
-              data-testid="admin-login-btn"
-            >
-              {busy ? "Verifica…" : "Accedi"}
-            </Button>
-            <Link
-              to="/"
-              className="block text-center text-sm text-slate-500 hover:text-slate-900"
-            >
-              ← Torna al magazzino
-            </Link>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
+function _RemovedLoginScreen() { return null; }
 
 // ---------- F5: Gestione Prodotti — Tipo Gestione da Notion (SSOT) ----------
 function InventoryTab() {
@@ -779,15 +713,6 @@ function HistoryTab() {
 
 // ---------- Root ----------
 export default function AdminPage() {
-  const [loggedIn, setLoggedIn] = useState(!!sessionStorage.getItem(AUTH_KEY));
-
-  const logout = () => {
-    sessionStorage.removeItem(AUTH_KEY);
-    setLoggedIn(false);
-  };
-
-  if (!loggedIn) return <LoginScreen onLogin={() => setLoggedIn(true)} />;
-
   return (
     <div className="min-h-screen bg-slate-50" data-testid="admin-page">
       <header className="sticky top-0 z-30 bg-white border-b border-slate-200">
@@ -808,15 +733,13 @@ export default function AdminPage() {
               </h1>
             </div>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={logout}
-            className="h-10"
-            data-testid="admin-logout-btn"
+          <Link
+            to="/admin/utenti"
+            className="h-10 inline-flex items-center px-3 border border-slate-200 rounded-md text-slate-700 hover:text-slate-900 hover:border-slate-300 text-sm"
+            data-testid="link-admin-users"
           >
-            <SignOut size={16} className="mr-1" /> Esci
-          </Button>
+            Gestione Utenti →
+          </Link>
         </div>
       </header>
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6">

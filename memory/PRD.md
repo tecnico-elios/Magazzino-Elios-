@@ -4,17 +4,13 @@
 - **F0/F1/F2/F3** ✅
 - **F4 — Multi-utente + Anomalie + Movimenti** ✅
 - **F5 — Dashboard KPI + Admin Gestione Prodotti (Tipo Gestione = Notion SSOT)** ✅
-- **UI-op — Rimozione badge topbar + rename "Preso da" → "Operatore" in Spedizioni** ✅
-- **Movimenti per mese — filtro server-side Notion + cache per-mese** ✅
-- **F6 — Regressione finale (75 test verdi)** ✅
-- **F6-feedback — Timer 3s auto-clear banner scanner** ✅ (14/02/2026)
-- **F6-rientri — Logica ULTIMO MOVIMENTO per prodotti A Seriale** ✅ (14/02/2026)
-- **F6-rientro-dialog — Conferma esplicita reintegro Wallbox già spedita** ✅ (14/02/2026)
-- **F6-orario — Data/ora Europe/Rome nelle email + KPI "today" locale** ✅ (14/02/2026)
-- **F6-quantita — Barcode ripetibile per A Quantità + Dropdown ricerca live** ✅ (14/02/2026)
-- **F6-manual-search — Lookup SN debounced (400ms) in dropdown per inserimento tastiera** ✅ (14/02/2026)
-- **F6-conferma-finale — Popup riepilogo prima di scrittura Notion+email in Arrivi e Spedizioni** ✅ (14/02/2026)
-- **F6-e2e-tiebreaker — Fix `latest_serial_status` tie sui minuti Notion + `taken_by` esposto in movimenti** ✅ (14/08/2026)
+- **F6 — Regressione finale + rientri Wallbox + conferma finale + mapping strict Notion** ✅ (14/02/2026)
+- **Phase-2 Auth & RBAC — JWT + bcrypt + MongoDB users/audit_logs** ✅ (15/02/2026)
+  - Bootstrap sicuro primo admin (nessun autoseed)
+  - Ruoli operator|admin — 403 su rotte admin per operator
+  - Session invalidation via `password_version` (JWT `pwv`)
+  - Operatore auto in Spedizioni/Arrivi: `Preso da` = full_name(JWT), non modificabile
+  - Test: 94 passed, 1 skipped (E2E-only). Mapping strict §11: 8/8.
 - PWA — solo alla fine, dopo verifica gestionale completa
 
 ## F6-rientri Changelog

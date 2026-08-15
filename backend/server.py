@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Header, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Header, Depends, Request
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -17,6 +17,8 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 import notion_service
+import auth as auth_mod
+from routes import auth_routes, admin_users_routes
 try:
     from zoneinfo import ZoneInfo
     ROME_TZ = ZoneInfo("Europe/Rome")
@@ -98,9 +100,24 @@ def annotate_item(it: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def require_admin(x_admin_password: Optional[str] = Header(default=None)):
+    """LEGACY — kept only for backward compat during Phase 2 migration.
+    Use `auth_deps.require_admin` for new admin routes. Will be removed in Phase 3."""
     if not x_admin_password or x_admin_password != ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="Non autorizzato")
     return True
+
+
+# JWT-based auth deps — bound to the same db handle.
+auth_deps = auth_mod.AuthDependencies(db)
+
+
+# Module-level dependency wrappers so FastAPI can introspect signatures.
+async def dep_current_user(request: Request, authorization: Optional[str] = Header(default=None)):
+    return await auth_deps.get_current_user(request, authorization)
+
+
+async def dep_require_admin(request: Request, authorization: Optional[str] = Header(default=None)):
+    return await auth_deps.require_admin(request, authorization)
 
 
 # ---------- Models ----------
@@ -193,8 +210,8 @@ def validate_checklist_basic(payload: ChecklistPayload) -> None:
         raise HTTPException(400, "Nome operatore obbligatorio")
     if not payload.structure.strip():
         raise HTTPException(400, "Cliente / Destinazione obbligatorio")
-    if not (payload.taken_by or "").strip():
-        raise HTTPException(400, "Preso da obbligatorio")
+    # NOTA F2: `taken_by` NON è più obbligatorio nel payload. Il backend lo
+    # imposta automaticamente dal JWT dell'operatore loggato (submit_checklist).
     if not payload.shipping_date.strip():
         raise HTTPException(400, "Data spedizione obbligatoria")
 
@@ -456,7 +473,15 @@ async def inventory_lookup(code: str):
 
 
 @api_router.post("/checklist/send")
-async def submit_checklist(payload: ChecklistPayload):
+async def submit_checklist(
+    payload: ChecklistPayload,
+    current_user: Dict[str, Any] = Depends(dep_current_user),
+):
+    # NOTA: risolto tramite override sotto (app.dependency_overrides) → auth_deps
+    # OVERRIDE server-side (Prompt 220 §Operatore Automatico): l'identità
+    # dell'operatore proviene ESCLUSIVAMENTE dal token, non dal payload.
+    payload.operator = f"{current_user.get('first_name','')} {current_user.get('last_name','')}".strip() or current_user.get("username") or ""
+    payload.taken_by = payload.operator
     validate_checklist_basic(payload)
     if not notion_service.is_configured():
         raise HTTPException(503, "Integrazione Notion non configurata")
@@ -912,7 +937,11 @@ def validate_arrivo_basic(payload: ArrivoPayload) -> None:
 
 
 @api_router.post("/arrivi/send")
-async def submit_arrivo(payload: ArrivoPayload):
+async def submit_arrivo(
+    payload: ArrivoPayload,
+    current_user: Dict[str, Any] = Depends(dep_current_user),
+):
+    payload.operator = f"{current_user.get('first_name','')} {current_user.get('last_name','')}".strip() or current_user.get("username") or ""
     validate_arrivo_basic(payload)
     if not notion_service.is_configured():
         raise HTTPException(503, "Integrazione Notion non configurata")
@@ -1062,7 +1091,7 @@ async def admin_login(req: LoginRequest):
     return {"status": "ok"}
 
 
-@api_router.get("/admin/inventory", dependencies=[Depends(require_admin)])
+@api_router.get("/admin/inventory", dependencies=[Depends(dep_require_admin)])
 async def admin_inventory():
     if not notion_service.is_configured():
         raise HTTPException(503, "Integrazione Notion non configurata")
@@ -1077,7 +1106,7 @@ class TipoGestioneUpdate(BaseModel):
     tipo_gestione: str  # 'a_seriale' | 'a_quantita'
 
 
-@api_router.put("/admin/inventory/tipo-gestione", dependencies=[Depends(require_admin)])
+@api_router.put("/admin/inventory/tipo-gestione", dependencies=[Depends(dep_require_admin)])
 async def admin_set_tipo_gestione(update: TipoGestioneUpdate):
     """F5: Update Notion `Tipo gestione` DIRECTLY. Notion = SSOT. Invalidates cache."""
     if update.tipo_gestione not in ("a_seriale", "a_quantita"):
@@ -1091,7 +1120,7 @@ async def admin_set_tipo_gestione(update: TipoGestioneUpdate):
     return {"status": "ok", "page_id": update.page_id, "tipo_gestione": update.tipo_gestione}
 
 
-@api_router.put("/admin/inventory/serial", dependencies=[Depends(require_admin)])
+@api_router.put("/admin/inventory/serial", dependencies=[Depends(dep_require_admin)])
 async def admin_set_serial(update: SerialOverrideUpdate):
     """DEPRECATED — proxies to Notion Tipo gestione. Kept for backward compat."""
     tipo = "a_seriale" if update.serialized else "a_quantita"
@@ -1102,12 +1131,12 @@ async def admin_set_serial(update: SerialOverrideUpdate):
     return {"status": "ok"}
 
 
-@api_router.get("/admin/recipients", dependencies=[Depends(require_admin)])
+@api_router.get("/admin/recipients", dependencies=[Depends(dep_require_admin)])
 async def admin_get_recipients():
     return {"emails": await get_recipients()}
 
 
-@api_router.put("/admin/recipients", dependencies=[Depends(require_admin)])
+@api_router.put("/admin/recipients", dependencies=[Depends(dep_require_admin)])
 async def admin_put_recipients(update: RecipientsUpdate):
     emails = [str(e).strip() for e in update.emails if str(e).strip()]
     if not emails:
@@ -1117,7 +1146,7 @@ async def admin_put_recipients(update: RecipientsUpdate):
     return {"status": "ok", "emails": unique}
 
 
-@api_router.get("/admin/history", dependencies=[Depends(require_admin)])
+@api_router.get("/admin/history", dependencies=[Depends(dep_require_admin)])
 async def admin_history(
     limit: int = 500,
     cliente: Optional[str] = None,
@@ -1141,7 +1170,7 @@ async def admin_history(
     return {"items": docs, "count": len(docs)}
 
 
-@api_router.get("/admin/notion-exits", dependencies=[Depends(require_admin)])
+@api_router.get("/admin/notion-exits", dependencies=[Depends(dep_require_admin)])
 async def admin_notion_exits(
     cliente: Optional[str] = None,
     materiale: Optional[str] = None,
@@ -1185,6 +1214,19 @@ async def admin_notion_exits(
 
 
 app.include_router(api_router)
+
+# Auth + Admin user routers (Phase 2 — Prompt 220)
+app.include_router(auth_routes.build_router(db, auth_deps), prefix="/api")
+app.include_router(admin_users_routes.build_router(db, auth_deps), prefix="/api")
+
+
+@app.on_event("startup")
+async def _phase2_startup_indexes():
+    try:
+        await db.users.create_index("username", unique=True)
+        await db.audit_logs.create_index([("at", -1)])
+    except Exception as e:
+        logging.error(f"MongoDB index creation failed: {e}")
 
 app.add_middleware(
     CORSMiddleware,

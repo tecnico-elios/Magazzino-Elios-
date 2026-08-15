@@ -1,20 +1,29 @@
 """F6 — regression bug-sweep. All endpoints return sane data, no 500s.
 READ-ONLY + FAKE_SN strict-validation. Zero real Notion writes.
+Phase 2: admin routes use JWT; op JWT used for /checklist/send.
 """
 import os
 import requests
 import pytest
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
-if not BASE_URL:
-    with open("/app/frontend/.env") as f:
-        for line in f:
-            if line.startswith("REACT_APP_BACKEND_URL="):
-                BASE_URL = line.split("=", 1)[1].strip().rstrip("/")
-                break
+from conftest import BASE_URL, _ensure_admin_token, _ensure_op_token
+
 API = f"{BASE_URL}/api"
-ADMIN_HDR = {"X-Admin-Password": os.environ.get("ADMIN_PASSWORD", "admin123")}
 FAKE_SN = "F6FAKE_SN_NOT_EXISTS_XYZ"
+
+
+def _admin_hdr():
+    tok, _ = _ensure_admin_token()
+    return {"Authorization": f"Bearer {tok}"}
+
+
+def _op_hdr():
+    admin_tok, _ = _ensure_admin_token()
+    tok, _ = _ensure_op_token(admin_tok)
+    return {"Authorization": f"Bearer {tok}", "Content-Type": "application/json"}
+
+
+ADMIN_HDR = None  # populated lazily below to avoid module-import failures
 
 
 def _unwrap(payload):
@@ -96,16 +105,16 @@ class TestAdminEndpoints:
         assert r.status_code in (401, 403)
 
     def test_admin_inventory_ok(self):
-        r = requests.get(f"{API}/admin/inventory", headers=ADMIN_HDR, timeout=60)
+        r = requests.get(f"{API}/admin/inventory", headers=_admin_hdr(), timeout=60)
         assert r.status_code == 200
         assert isinstance(_unwrap(r.json()), list)
 
     def test_admin_recipients(self):
-        r = requests.get(f"{API}/admin/recipients", headers=ADMIN_HDR, timeout=30)
+        r = requests.get(f"{API}/admin/recipients", headers=_admin_hdr(), timeout=30)
         assert r.status_code == 200
 
     def test_admin_notion_exits(self):
-        r = requests.get(f"{API}/admin/notion-exits", headers=ADMIN_HDR, timeout=60)
+        r = requests.get(f"{API}/admin/notion-exits", headers=_admin_hdr(), timeout=60)
         assert r.status_code == 200
 
 
@@ -126,7 +135,7 @@ class TestSerialStrictValidation:
             "structure": "TEST_F6_CLIENTE", "shipping_date": "2026-01-15",
             "items": [{"page_id": s["id"], "name": s["name"], "serialized": True, "quantity": 1, "serials": [FAKE_SN]}],
         }
-        r = requests.post(f"{API}/checklist/send", json=payload, timeout=60)
+        r = requests.post(f"{API}/checklist/send", headers=_op_hdr(), json=payload, timeout=60)
         assert r.status_code in (400, 409), f"expected block got {r.status_code}: {r.text[:200]}"
         assert "non risulta" in r.text.lower() or "presente" in r.text.lower()
 
@@ -138,7 +147,7 @@ class TestSerialStrictValidation:
             "structure": "TEST_F6_CLIENTE", "shipping_date": "2026-01-15",
             "items": [{"page_id": s["id"], "name": s["name"], "serialized": True, "quantity": 2, "serials": [FAKE_SN, FAKE_SN]}],
         }
-        r = requests.post(f"{API}/checklist/send", json=payload, timeout=60)
+        r = requests.post(f"{API}/checklist/send", headers=_op_hdr(), json=payload, timeout=60)
         assert r.status_code in (400, 409)
         assert "più volte" in r.text.lower() or "duplicat" in r.text.lower() or "non risulta" in r.text.lower()
 
@@ -150,6 +159,6 @@ class TestSerialStrictValidation:
             "structure": "TEST_F6_CLIENTE", "shipping_date": "2026-01-15",
             "items": [{"page_id": q["id"], "name": q["name"], "serialized": False, "quantity": 99999999, "serials": []}],
         }
-        r = requests.post(f"{API}/checklist/send", json=payload, timeout=60)
+        r = requests.post(f"{API}/checklist/send", headers=_op_hdr(), json=payload, timeout=60)
         assert r.status_code in (400, 409)
         assert "quantit" in r.text.lower() or "disponibil" in r.text.lower()

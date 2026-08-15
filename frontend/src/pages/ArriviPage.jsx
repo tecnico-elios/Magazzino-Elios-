@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { useInventoryCtx } from "../lib/InventoryContext";
-import { useOperator } from "../lib/useOperator";
+import { useAuth } from "../lib/AuthContext";
 import ScannerBar from "../components/ScannerBar";
 import QtyDialog from "../components/QtyDialog";
 import ProductPicker from "../components/ProductPicker";
@@ -30,17 +30,12 @@ import {
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-/**
- * ArriviPage — F2
- * Registrazione ingressi materiali (Consegne Wallbox / Entrate).
- * Fornitore / Mittente è ESCLUSIVAMENTE per l'email — NON viene scritto su Notion.
- */
 export default function ArriviPage() {
   const { items, lookupLocalBySku, refresh } = useInventoryCtx();
-  const { operator: opCtx, setOperator: setOpCtx } = useOperator();
+  const { user } = useAuth();
+  const operatorName = user?.full_name || user?.username || "";
 
   const [fornitore, setFornitore] = useState("");
-  const [operator, setOperator] = useState(opCtx || "");
   const [arrivalDate, setArrivalDate] = useState(todayISO());
   const [notes, setNotes] = useState("");
 
@@ -61,11 +56,6 @@ export default function ArriviPage() {
   useEffect(() => {
     if (!qtyDialog && !picker && !rientroConfirm) focusScanner();
   }, [qtyDialog, picker, rientroConfirm]);
-
-  useEffect(() => {
-    // Se cambia l'operatore in AppLayout mentre siamo qui, riflette
-    if (opCtx && !operator) setOperator(opCtx);
-  }, [opCtx, operator]);
 
   const totalUnits = list.reduce((a, li) => a + (li.quantity || 0), 0);
 
@@ -334,17 +324,19 @@ export default function ArriviPage() {
               <div className="text-[11px] text-slate-400 mt-1">Solo per l'email — non salvato su Notion.</div>
             </div>
             <div>
-              <Label htmlFor="operator" className="text-slate-700 text-sm font-semibold">
-                <User size={14} className="inline mr-1" /> Nome Operatore
+              <Label className="text-slate-700 text-sm font-semibold">
+                <User size={14} className="inline mr-1" /> Operatore (auto)
               </Label>
-              <Input
-                id="operator"
-                data-testid="input-operator"
-                value={operator}
-                onChange={(e) => setOperator(e.target.value)}
-                placeholder="Es. Mario Rossi"
-                className="h-12 mt-1 text-base"
-              />
+              <div
+                className="h-12 mt-1 px-3 flex items-center border border-slate-200 bg-slate-50 rounded-md text-slate-900 font-semibold"
+                data-testid="operator-readonly"
+                title="L'operatore è determinato dal login (non modificabile)"
+              >
+                {operatorName || "—"}
+                <span className="ml-auto text-[10px] uppercase tracking-wider text-slate-400">
+                  auto
+                </span>
+              </div>
             </div>
             <div>
               <Label htmlFor="date" className="text-slate-700 text-sm font-semibold">
@@ -659,7 +651,7 @@ export default function ArriviPage() {
         }))}
         meta={[
           { label: "Fornitore", value: fornitore.trim() },
-          { label: "Operatore", value: operator.trim() },
+          { label: "Operatore (loggato)", value: operatorName },
           { label: "Data", value: arrivalDate },
         ]}
         submitting={submitting}

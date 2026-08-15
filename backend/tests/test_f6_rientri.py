@@ -1,4 +1,5 @@
 """F6-rientri: verifica logica ultimo movimento per prodotti A Seriale.
+Phase 2: /checklist/send e /arrivi/send richiedono JWT operator.
 - SN unseen → arrivi OK, spedizioni BLOCK
 - SN last=entrata → arrivi BLOCK, spedizioni OK
 - SN last=uscita → arrivi OK (rientro), spedizioni BLOCK
@@ -10,13 +11,13 @@ import requests
 import pytest
 import asyncio
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
-if not BASE_URL:
-    with open("/app/frontend/.env") as f:
-        for line in f:
-            if line.startswith("REACT_APP_BACKEND_URL="):
-                BASE_URL = line.split("=", 1)[1].strip().rstrip("/")
-                break
+from conftest import BASE_URL, _ensure_admin_token, _ensure_op_token
+
+
+def _op_hdr():
+    admin_tok, _ = _ensure_admin_token()
+    tok, _ = _ensure_op_token(admin_tok)
+    return {"Authorization": f"Bearer {tok}", "Content-Type": "application/json"}
 
 
 @pytest.fixture(scope="module")
@@ -94,7 +95,7 @@ def test_arrivo_blocks_serial_currently_in_warehouse(api):
             "serialized": True, "quantity": 1, "serials": [in_wh_sn],
         }],
     }
-    r = api.post(f"{BASE_URL}/api/arrivi/send", json=payload, timeout=60)
+    r = api.post(f"{BASE_URL}/api/arrivi/send", headers=_op_hdr(), json=payload, timeout=60)
     assert r.status_code == 409, r.text[:200]
     detail = (r.json().get("detail") or "").lower()
     assert "già presente" in detail or "gia presente" in detail, detail
@@ -128,7 +129,7 @@ def test_arrivo_blocks_duplicate_serial_in_payload(api):
             "serials": ["F6RIENTRI_DUP_SN", "F6RIENTRI_DUP_SN"],
         }],
     }
-    r = api.post(f"{BASE_URL}/api/arrivi/send", json=payload, timeout=60)
+    r = api.post(f"{BASE_URL}/api/arrivi/send", headers=_op_hdr(), json=payload, timeout=60)
     assert r.status_code == 409
     detail = (r.json().get("detail") or "").lower()
     assert "inserito più volte" in detail or "inserito piu volte" in detail
@@ -151,7 +152,7 @@ def test_spedizione_blocks_unseen_serial(api):
             "serials": ["F6RIENTRI_NEVER_SEEN_ABC"],
         }],
     }
-    r = api.post(f"{BASE_URL}/api/checklist/send", json=payload, timeout=60)
+    r = api.post(f"{BASE_URL}/api/checklist/send", headers=_op_hdr(), json=payload, timeout=60)
     assert r.status_code == 409
     detail = (r.json().get("detail") or "").lower()
     assert "mai entrato" in detail, detail

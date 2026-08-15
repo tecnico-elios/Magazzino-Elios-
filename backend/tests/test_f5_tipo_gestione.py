@@ -1,19 +1,24 @@
-"""F5 backend tests — Tipo Gestione (Notion SSOT) + Dashboard KPI + Admin update."""
+"""F5 backend tests — Tipo Gestione (Notion SSOT) + Dashboard KPI + Admin update.
+Phase 2: admin routes usano JWT."""
 import os
 import requests
 import pytest
 
-BASE_URL = None
-if os.environ.get("REACT_APP_BACKEND_URL"):
-    BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
-else:
-    with open("/app/frontend/.env") as f:
-        for line in f:
-            if line.startswith("REACT_APP_BACKEND_URL="):
-                BASE_URL = line.split("=", 1)[1].strip().rstrip("/")
-                break
+from conftest import BASE_URL, _ensure_admin_token, _ensure_op_token
 
-ADMIN_HEADERS = {"X-Admin-Password": "admin123"}
+
+def _admin_hdr():
+    tok, _ = _ensure_admin_token()
+    return {"Authorization": f"Bearer {tok}"}
+
+
+def _op_hdr():
+    admin_tok, _ = _ensure_admin_token()
+    tok, _ = _ensure_op_token(admin_tok)
+    return {"Authorization": f"Bearer {tok}", "Content-Type": "application/json"}
+
+
+ADMIN_HEADERS = None  # replaced dynamically via _admin_hdr()
 
 
 @pytest.fixture(scope="module")
@@ -101,7 +106,7 @@ def test_admin_update_tipo_gestione_invalid_value(api):
     sample = inv[0]
     r = api.put(
         f"{BASE_URL}/api/admin/inventory/tipo-gestione",
-        headers=ADMIN_HEADERS,
+        headers=_admin_hdr(),
         json={"page_id": sample["id"], "tipo_gestione": "banana"},
     )
     assert r.status_code == 400
@@ -123,7 +128,7 @@ def test_admin_update_tipo_gestione_roundtrip(api):
         # Flip to a_seriale
         r = api.put(
             f"{BASE_URL}/api/admin/inventory/tipo-gestione",
-            headers=ADMIN_HEADERS,
+            headers=_admin_hdr(),
             json={"page_id": target["id"], "tipo_gestione": "a_seriale"},
             timeout=30,
         )
@@ -140,7 +145,7 @@ def test_admin_update_tipo_gestione_roundtrip(api):
         # Restore original
         api.put(
             f"{BASE_URL}/api/admin/inventory/tipo-gestione",
-            headers=ADMIN_HEADERS,
+            headers=_admin_hdr(),
             json={"page_id": target["id"], "tipo_gestione": original},
             timeout=30,
         )
@@ -148,7 +153,7 @@ def test_admin_update_tipo_gestione_roundtrip(api):
 
 # ---- Admin inventory list exposes tipo_gestione ----
 def test_admin_inventory_exposes_tipo_gestione(api):
-    r = api.get(f"{BASE_URL}/api/admin/inventory", headers=ADMIN_HEADERS, timeout=60)
+    r = api.get(f"{BASE_URL}/api/admin/inventory", headers=_admin_hdr(), timeout=60)
     assert r.status_code == 200
     items = r.json().get("items", [])
     assert len(items) > 0
@@ -174,7 +179,7 @@ def test_no_mongo_override_effect(api):
         # Use deprecated endpoint — MUST now write to Notion
         r = api.put(
             f"{BASE_URL}/api/admin/inventory/serial",
-            headers=ADMIN_HEADERS,
+            headers=_admin_hdr(),
             json={"page_id": target["id"], "serialized": True},
             timeout=30,
         )
@@ -186,7 +191,7 @@ def test_no_mongo_override_effect(api):
     finally:
         api.put(
             f"{BASE_URL}/api/admin/inventory/tipo-gestione",
-            headers=ADMIN_HEADERS,
+            headers=_admin_hdr(),
             json={"page_id": target["id"], "tipo_gestione": original},
             timeout=30,
         )
@@ -215,6 +220,6 @@ def test_submit_arrivo_blocks_not_configured(api, monkeypatch=None):
             }
         ],
     }
-    r = api.post(f"{BASE_URL}/api/arrivi/send", json=payload, timeout=60)
+    r = api.post(f"{BASE_URL}/api/arrivi/send", headers=_op_hdr(), json=payload, timeout=60)
     assert r.status_code == 400, r.text[:200]
     assert "NON CONFIGURATO" in r.text.upper()
