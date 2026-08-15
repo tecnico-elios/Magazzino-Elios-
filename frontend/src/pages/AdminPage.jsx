@@ -32,6 +32,9 @@ import {
   UsersFour,
 } from "@phosphor-icons/react";
 import { AuditLogTab, SettingsTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab, SessionsTab } from "./AdminExtraTabs";
+// Note: AuditLogTab importato ma non renderizzato — tab rimossa su richiesta utente.
+// eslint-disable-next-line no-unused-vars
+const _AuditLogTab_unused = AuditLogTab;
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -770,9 +773,6 @@ export default function AdminPage() {
             <TabsTrigger value="serial-history" data-testid="tab-serial-history" className="shrink-0">
               <ListMagnifyingGlass size={16} className="mr-1" /> Storico SN
             </TabsTrigger>
-            <TabsTrigger value="audit-log" data-testid="tab-audit-log" className="shrink-0">
-              <ClockCounterClockwise size={16} className="mr-1" /> Audit
-            </TabsTrigger>
             <TabsTrigger value="sessions" data-testid="tab-sessions" className="shrink-0">
               <UsersFour size={16} className="mr-1" /> Sessioni
             </TabsTrigger>
@@ -788,7 +788,6 @@ export default function AdminPage() {
           <TabsContent value="history"><HistoryTab /></TabsContent>
           <TabsContent value="global-search"><GlobalSearchTab /></TabsContent>
           <TabsContent value="serial-history"><SerialHistoryTab /></TabsContent>
-          <TabsContent value="audit-log"><AuditLogTab /></TabsContent>
           <TabsContent value="sessions"><SessionsTab /></TabsContent>
           <TabsContent value="cleanup"><CleanupTestTab /></TabsContent>
           <TabsContent value="settings"><SettingsTab /></TabsContent>

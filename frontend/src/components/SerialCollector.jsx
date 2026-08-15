@@ -2,29 +2,30 @@ import { useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
-import { Badge } from "./ui/badge";
-import { MagnifyingGlass, CheckCircle, Warning, X, Plus, Minus, Trash } from "@phosphor-icons/react";
+import { CheckCircle, Warning, X, Plus, Minus, Trash, Camera } from "@phosphor-icons/react";
 import { toast } from "sonner";
+import BarcodeScanner from "./BarcodeScanner";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 /**
  * SerialCollector — inserimento di N seriali per un prodotto A Seriale.
  *
- * Props:
- *  - pending: { id, name, quantity, serials[] }  (serials pre-allocati "" o valorizzati)
- *  - mode: "arrivi" | "spedizioni"
- *  - existingSerials: string[]  — seriali già presenti in altre righe della lista
- *  - onChange(pending): aggiorna serials/quantity
- *  - onCommit(pending): tutti validi → aggiungi alla lista
- *  - onCancel(): abbandona
+ * Comportamento:
+ *  - NESSUN pulsante "Cerca" per riga: la validazione parte automaticamente
+ *    su ENTER (tastiera / scanner fisico Bluetooth/USB) o dopo la scansione
+ *    con la fotocamera del dispositivo (pulsante 📷 per riga).
+ *  - La logica di validazione è identica alla F6 (endpoint /api/inventory/lookup)
+ *    e alle regole per Arrivi/Spedizioni.
+ *  - Focus automatico: dopo una validazione OK il focus salta al primo campo
+ *    vuoto successivo.
  */
 export default function SerialCollector({ pending, mode, existingSerials = [], onChange, onCommit, onCancel }) {
   const refs = useRef([]);
-  const [validations, setValidations] = useState({}); // idx -> {state: idle|checking|ok|error, message}
+  const [validations, setValidations] = useState({}); // idx -> {state, message}
+  const [cameraFor, setCameraFor] = useState(null); // idx della riga per cui è aperta la camera
 
   useEffect(() => {
-    // focus la prima riga vuota
     const firstEmpty = pending.serials.findIndex((s) => !s || !s.trim());
     const target = firstEmpty === -1 ? 0 : firstEmpty;
     setTimeout(() => refs.current[target]?.focus(), 30);
@@ -40,7 +41,6 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
     const newQ = Math.max(1, pending.quantity + delta);
     if (newQ === pending.quantity) return;
     if (newQ < pending.quantity) {
-      // Rimuovi righe eccedenti solo se vuote — altrimenti chiedi conferma
       const toRemove = pending.quantity - newQ;
       const nonEmptyTail = pending.serials.slice(newQ).filter((s) => (s || "").trim());
       if (nonEmptyTail.length > 0) {
@@ -56,24 +56,22 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
   };
 
   const focusNext = (idx) => {
-    // trova primo campo vuoto dopo idx
     for (let j = idx + 1; j < pending.quantity; j++) {
       if (!(pending.serials[j] || "").trim()) {
         refs.current[j]?.focus();
         return true;
       }
     }
-    // se tutti pieni, focus fuori
     refs.current[idx]?.blur();
     return false;
   };
 
-  const validateOne = async (idx) => {
-    const value = (pending.serials[idx] || "").trim();
+  const validateOne = async (idx, overrideValue = null) => {
+    const value = (overrideValue ?? pending.serials[idx] ?? "").toString().trim();
     if (!value) return;
-    // Duplicati nel collector
+    // Duplicati nel collector corrente
     const dupInCollector = pending.serials
-      .map((s, i) => ({ s: (s || "").trim(), i }))
+      .map((s, i) => ({ s: (i === idx ? value : (s || "")).trim(), i }))
       .filter((x) => x.s === value && x.i !== idx).length > 0;
     if (dupInCollector) {
       setValidations((v) => ({ ...v, [idx]: { state: "error", message: "Duplicato in questa lista" } }));
@@ -88,12 +86,10 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
     try {
       const { data } = await axios.get(`${API}/inventory/lookup`, { params: { code: value } });
       if (mode === "arrivi") {
-        // Regola arrivi: SN NON deve essere in magazzino (già entrato)
         if (data.status === "in_warehouse") {
           setValidations((v) => ({ ...v, [idx]: { state: "error", message: "Già presente in magazzino" } }));
           return;
         }
-        // Ok se unseen o out (rientro) — per unseen (nuovo) NON bloccare
         setValidations((v) => ({
           ...v,
           [idx]: {
@@ -104,7 +100,7 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
         focusNext(idx);
         return;
       }
-      // Spedizioni: SN DEVE essere in magazzino (in_warehouse)
+      // Spedizioni
       if (data.status === "in_warehouse") {
         setValidations((v) => ({ ...v, [idx]: { state: "ok", message: "Presente in Entrate — pronto" } }));
         focusNext(idx);
@@ -118,6 +114,15 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
     }
   };
 
+  const onCameraDetected = (idx, code) => {
+    const value = (code || "").toString().trim();
+    setCameraFor(null);
+    if (!value) return;
+    // Aggiorna il valore e valida immediatamente con la stessa pipeline
+    setSerial(idx, value);
+    validateOne(idx, value);
+  };
+
   const allValid = () =>
     pending.serials.every((s, i) => (s || "").trim() && validations[i]?.state === "ok") &&
     pending.serials.length === pending.quantity;
@@ -127,7 +132,6 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
       toast.error("Completa e valida tutti i seriali prima di continuare");
       return;
     }
-    // controllo finale duplicati
     const dedup = new Set(pending.serials.map((s) => s.trim()));
     if (dedup.size !== pending.serials.length) {
       toast.error("Sono presenti seriali duplicati");
@@ -154,20 +158,20 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
             {pending.name}
           </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 flex-wrap">
           <span className="text-xs text-slate-500 mr-2">Quantità</span>
-          <Button type="button" variant="outline" size="icon" className="h-9 w-9" onClick={() => changeQty(-1)}
+          <Button type="button" variant="outline" size="icon" className="h-11 w-11" onClick={() => changeQty(-1)}
             disabled={pending.quantity <= 1} data-testid="collector-qty-minus">
             <Minus size={14} />
           </Button>
-          <div className="h-9 min-w-[3rem] px-3 border border-slate-200 rounded-md grid place-items-center font-mono-tight font-bold" data-testid="collector-qty">
+          <div className="h-11 min-w-[3rem] px-3 border border-slate-200 rounded-md grid place-items-center font-mono-tight font-bold" data-testid="collector-qty">
             {pending.quantity}
           </div>
-          <Button type="button" variant="outline" size="icon" className="h-9 w-9" onClick={() => changeQty(1)}
+          <Button type="button" variant="outline" size="icon" className="h-11 w-11" onClick={() => changeQty(1)}
             data-testid="collector-qty-plus">
             <Plus size={14} />
           </Button>
-          <Button type="button" variant="outline" onClick={onCancel} className="ml-2 h-9 border-red-300 text-red-600 hover:bg-red-50" data-testid="collector-cancel">
+          <Button type="button" variant="outline" onClick={onCancel} className="ml-2 h-11 border-red-300 text-red-600 hover:bg-red-50" data-testid="collector-cancel">
             <X size={14} className="mr-1" /> Annulla
           </Button>
         </div>
@@ -177,11 +181,11 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
         {pending.serials.map((sn, idx) => {
           const v = validations[idx] || { state: "idle" };
           return (
-            <li key={idx} className="flex items-center gap-2" data-testid={`collector-row-${idx}`}>
-              <div className="w-16 shrink-0 text-xs uppercase tracking-wider text-slate-500 font-semibold">
+            <li key={idx} className="flex items-center gap-2 flex-wrap sm:flex-nowrap" data-testid={`collector-row-${idx}`}>
+              <div className="w-full sm:w-20 shrink-0 text-xs uppercase tracking-wider text-slate-500 font-semibold">
                 Seriale {idx + 1}
               </div>
-              <div className="flex-1 relative">
+              <div className="flex-1 min-w-0 relative">
                 <Input
                   ref={(el) => (refs.current[idx] = el)}
                   value={sn}
@@ -192,8 +196,8 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
                       validateOne(idx);
                     }
                   }}
-                  placeholder="Inserisci o scansiona il seriale"
-                  className={`h-11 font-mono-tight pr-10 ${
+                  placeholder="Digita o scansiona il seriale (ENTER per validare)"
+                  className={`h-11 font-mono-tight pr-9 ${
                     v.state === "ok" ? "border-emerald-400 bg-emerald-50/40" :
                     v.state === "error" ? "border-red-400 bg-red-50/40" : ""
                   }`}
@@ -206,17 +210,21 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
                 {v.state === "error" && (
                   <Warning size={18} weight="fill" className="absolute right-2 top-1/2 -translate-y-1/2 text-red-600 pointer-events-none" />
                 )}
+                {v.state === "checking" && (
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">…</span>
+                )}
               </div>
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => validateOne(idx)}
-                disabled={!sn || !sn.trim() || v.state === "checking"}
-                className="h-11 shrink-0"
-                data-testid={`collector-search-${idx}`}
+                size="icon"
+                onClick={() => setCameraFor(idx)}
+                className="h-11 w-11 shrink-0"
+                data-testid={`collector-camera-${idx}`}
+                aria-label={`Apri fotocamera per seriale ${idx + 1}`}
+                title="Apri fotocamera"
               >
-                <MagnifyingGlass size={14} className="mr-1" />
-                {v.state === "checking" ? "…" : "Cerca"}
+                <Camera size={16} />
               </Button>
               {sn && sn.trim() && (
                 <Button type="button" variant="outline" size="icon"
@@ -238,17 +246,16 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
           const v = validations[idx];
           if (!v || v.state === "idle" || v.state === "checking") return null;
           return (
-            <div key={idx} className={`text-xs pl-16 ${v.state === "ok" ? "text-emerald-700" : "text-red-600"}`}>
+            <div key={idx} className={`text-xs sm:pl-20 ${v.state === "ok" ? "text-emerald-700" : "text-red-600"}`}>
               <strong>Seriale {idx + 1}:</strong> {v.message}
             </div>
           );
         })}
       </div>
 
-      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
+      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 flex-wrap">
         <div className="text-xs text-slate-500">
-          {pending.serials.filter((s) => (s || "").trim()).length} / {pending.quantity} inseriti ·
-          {" "}
+          {pending.serials.filter((s) => (s || "").trim()).length} / {pending.quantity} inseriti ·{" "}
           {Object.values(validations).filter((v) => v.state === "ok").length} validati
         </div>
         <Button
@@ -261,6 +268,13 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
           Aggiungi alla lista
         </Button>
       </div>
+
+      <BarcodeScanner
+        open={cameraFor !== null}
+        onClose={() => setCameraFor(null)}
+        onDetected={(code) => onCameraDetected(cameraFor, code)}
+        label={cameraFor !== null ? `Inquadra il barcode/QR del seriale ${cameraFor + 1}` : ""}
+      />
     </section>
   );
 }
