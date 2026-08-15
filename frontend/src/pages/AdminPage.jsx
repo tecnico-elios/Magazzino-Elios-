@@ -723,60 +723,63 @@ export default function AdminPage() {
   return (
     <div className="min-h-screen bg-slate-50" data-testid="admin-page">
       <header className="et-header-dark sticky top-0 z-30">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 sm:flex-none">
             <Link
               to="/"
-              className="h-10 inline-flex items-center px-3 rounded-md bg-white/5 border border-white/10 text-slate-100 hover:border-amber-300/50 hover:text-white text-sm transition-colors"
+              className="h-10 inline-flex items-center px-3 rounded-md bg-white/5 border border-white/10 text-slate-100 hover:border-amber-300/50 hover:text-white text-sm transition-colors shrink-0"
             >
-              <ArrowLeft size={16} className="mr-1" /> Magazzino
+              <ArrowLeft size={16} className="mr-1" /> <span className="hidden xs:inline sm:inline">Magazzino</span>
             </Link>
-            <div>
-              <div className="text-[10px] tracking-[0.22em] uppercase text-amber-300/80 font-semibold">
+            <div className="min-w-0">
+              <div className="text-[10px] tracking-[0.22em] uppercase text-amber-300/80 font-semibold truncate">
                 Elios Tech — Magazzino
               </div>
-              <h1 className="font-display text-xl sm:text-2xl font-bold text-white">
+              <h1 className="font-display text-lg sm:text-2xl font-bold text-white leading-tight">
                 Pannello Admin
               </h1>
             </div>
           </div>
           <Link
             to="/admin/utenti"
-            className="h-10 inline-flex items-center px-3 rounded-md bg-white/5 border border-white/10 text-slate-100 hover:border-amber-300/50 hover:text-white text-sm transition-colors"
+            className="h-10 inline-flex items-center px-3 rounded-md bg-white/5 border border-white/10 text-slate-100 hover:border-amber-300/50 hover:text-white text-xs sm:text-sm transition-colors shrink-0"
             data-testid="link-admin-users"
           >
-            Gestione Utenti →
+            <span className="whitespace-nowrap">Gestione Utenti →</span>
           </Link>
         </div>
       </header>
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
         <Tabs defaultValue="inventory">
-          <TabsList className="mb-6 flex-wrap h-auto">
-            <TabsTrigger value="inventory" data-testid="tab-inventory">
+          <TabsList
+            className="mb-6 h-auto flex flex-nowrap w-full max-w-full justify-start overflow-x-auto scrollbar-thin bg-transparent p-0 gap-1 sm:bg-muted sm:p-1 sm:flex-wrap sm:overflow-visible"
+            data-testid="admin-tabs-list"
+          >
+            <TabsTrigger value="inventory" data-testid="tab-inventory" className="shrink-0">
               <Package size={16} className="mr-1" /> Prodotti
             </TabsTrigger>
-            <TabsTrigger value="recipients" data-testid="tab-recipients">
+            <TabsTrigger value="recipients" data-testid="tab-recipients" className="shrink-0">
               <Envelope size={16} className="mr-1" /> Destinatari
             </TabsTrigger>
-            <TabsTrigger value="history" data-testid="tab-history">
+            <TabsTrigger value="history" data-testid="tab-history" className="shrink-0">
               <ClockCounterClockwise size={16} className="mr-1" /> Storico
             </TabsTrigger>
-            <TabsTrigger value="global-search" data-testid="tab-global-search">
+            <TabsTrigger value="global-search" data-testid="tab-global-search" className="shrink-0">
               <MagnifyingGlass size={16} className="mr-1" /> Ricerca
             </TabsTrigger>
-            <TabsTrigger value="serial-history" data-testid="tab-serial-history">
+            <TabsTrigger value="serial-history" data-testid="tab-serial-history" className="shrink-0">
               <ListMagnifyingGlass size={16} className="mr-1" /> Storico SN
             </TabsTrigger>
-            <TabsTrigger value="audit-log" data-testid="tab-audit-log">
+            <TabsTrigger value="audit-log" data-testid="tab-audit-log" className="shrink-0">
               <ClockCounterClockwise size={16} className="mr-1" /> Audit
             </TabsTrigger>
-            <TabsTrigger value="sessions" data-testid="tab-sessions">
+            <TabsTrigger value="sessions" data-testid="tab-sessions" className="shrink-0">
               <UsersFour size={16} className="mr-1" /> Sessioni
             </TabsTrigger>
-            <TabsTrigger value="cleanup" data-testid="tab-cleanup">
+            <TabsTrigger value="cleanup" data-testid="tab-cleanup" className="shrink-0">
               <Broom size={16} className="mr-1" /> Cleanup
             </TabsTrigger>
-            <TabsTrigger value="settings" data-testid="tab-settings">
+            <TabsTrigger value="settings" data-testid="tab-settings" className="shrink-0">
               <Gear size={16} className="mr-1" /> Impostazioni
             </TabsTrigger>
           </TabsList>

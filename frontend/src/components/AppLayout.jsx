@@ -151,9 +151,10 @@ export default function AppLayout() {
 
         {/* Primary nav (dark) */}
         <nav
-          className="max-w-7xl mx-auto px-1 sm:px-4 border-t border-white/8 flex overflow-x-auto scrollbar-thin"
+          className="max-w-7xl mx-auto px-1 sm:px-4 border-t border-white/8 flex overflow-x-auto scrollbar-thin -mx-1 sm:mx-auto"
           data-testid="main-nav"
           aria-label="Navigazione principale"
+          style={{ WebkitOverflowScrolling: "touch" }}
         >
           {nav.map((n) => (
             <NavLink

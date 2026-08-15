@@ -314,29 +314,29 @@ export default function AdminUsersPage() {
   return (
     <div className="min-h-screen bg-slate-50" data-testid="admin-users-page">
       <header className="et-header-dark sticky top-0 z-30">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+        <div className="max-w-5xl mx-auto px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 sm:flex-none">
             <Link
               to="/"
-              className="h-10 inline-flex items-center px-3 rounded-md bg-white/5 border border-white/10 text-slate-100 hover:border-amber-300/50 hover:text-white text-sm transition-colors"
+              className="h-10 inline-flex items-center px-3 rounded-md bg-white/5 border border-white/10 text-slate-100 hover:border-amber-300/50 hover:text-white text-sm transition-colors shrink-0"
             >
-              <ArrowLeft size={16} className="mr-1" /> Magazzino
+              <ArrowLeft size={16} className="mr-1" /> <span className="hidden xs:inline sm:inline">Magazzino</span>
             </Link>
-            <div>
-              <div className="text-[10px] tracking-[0.22em] uppercase text-amber-300/80 font-semibold">
+            <div className="min-w-0">
+              <div className="text-[10px] tracking-[0.22em] uppercase text-amber-300/80 font-semibold truncate">
                 Amministrazione
               </div>
-              <h1 className="font-display text-xl sm:text-2xl font-bold text-white">
+              <h1 className="font-display text-lg sm:text-2xl font-bold text-white leading-tight">
                 Gestione Utenti
               </h1>
             </div>
           </div>
           <Button
             onClick={() => setCreateOpen(true)}
-            className="h-10 et-btn-primary border-0"
+            className="h-10 et-btn-primary border-0 text-xs sm:text-sm shrink-0"
             data-testid="create-user-btn"
           >
-            <UserPlus size={16} className="mr-1" /> Nuovo utente
+            <UserPlus size={16} className="mr-1" /> <span className="whitespace-nowrap">Nuovo utente</span>
           </Button>
         </div>
       </header>
@@ -352,7 +352,8 @@ export default function AdminUsersPage() {
         </div>
 
         <div className="et-card-elevated overflow-hidden">
-          <table className="et-table">
+          <div className="overflow-x-auto scrollbar-thin">
+            <table className="et-table min-w-[820px]">
             <thead>
               <tr>
                 <th>Utente</th>
@@ -468,6 +469,7 @@ export default function AdminUsersPage() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       </main>
 

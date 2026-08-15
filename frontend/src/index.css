@@ -258,10 +258,9 @@ input[type='number'] {
 
 /* ============================================================
    Responsive tweaks (F7) — smartphone, tablet, palmare, PC
-   Punto d'ingresso unico per media queries condivise.
    ============================================================ */
 
-/* Touch targets minimi 44x44 (Apple HIG / Material) su tutti i device touch */
+/* Touch targets minimi 44x44 su tutti i device touch */
 @media (hover: none) and (pointer: coarse) {
     button, .et-btn-primary, [role="button"] {
         min-height: 44px;
@@ -274,48 +273,85 @@ input[type='number'] {
     select, textarea { min-height: 44px; font-size: 16px !important; }
 }
 
-/* Small screens (smartphone verticale): riduci padding orizzontali e testi enormi */
+/* Fade-edge hint per scroll orizzontale (nav + tabs + tabelle) */
+.scroll-hint-x {
+    position: relative;
+}
+.scroll-hint-x::after {
+    content: "";
+    position: absolute;
+    top: 0; bottom: 0; right: 0; width: 24px;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent 0%, rgba(15,23,42,0.35) 100%);
+    opacity: 0;
+    transition: opacity 200ms ease;
+}
+.scroll-hint-x.is-scrollable::after { opacity: 1; }
+
+/* Mobile / palmari (<640px) */
 @media (max-width: 640px) {
     .et-header-dark { box-shadow: 0 4px 16px -8px rgba(2,6,23,0.5); }
     .et-table thead th { padding: 8px 10px; font-size: 9px; }
-    .et-table tbody td { padding: 10px 10px; }
-    /* Dialog shadcn: full-width con padding coerente */
+    .et-table tbody td { padding: 10px; }
+    /* Dialog shadcn: full-width */
     [data-radix-dialog-content] {
         width: calc(100% - 24px) !important;
         max-width: calc(100% - 24px) !important;
     }
-    /* Riduci gap card grandi Arrivi/Spedizioni sulla dashboard */
     .grid-dashboard-hero { gap: 12px !important; }
-    /* KPI grid: 2 colonne su xs invece di 4 */
     .grid-cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    /* Rimuovi ombre pesanti su mobile per performance */
     .shadow-lg, .shadow-xl { box-shadow: 0 2px 8px -2px rgba(15,23,42,0.15); }
-    /* Tabs list: consenti overflow scroll orizzontale invece di wrap */
-    [role="tablist"] {
-        flex-wrap: nowrap !important;
-        overflow-x: auto;
-        scrollbar-width: none;
+    /* AppLayout main-nav — scrollbar sempre visibile ma sottile su mobile */
+    [data-testid="main-nav"] {
+        scrollbar-width: thin;
+        -webkit-overflow-scrolling: touch;
     }
-    [role="tablist"]::-webkit-scrollbar { display: none; }
+    [data-testid="main-nav"]::-webkit-scrollbar { height: 3px; }
+    [data-testid="main-nav"]::-webkit-scrollbar-thumb {
+        background: rgba(250,204,21,0.4);
+        border-radius: 999px;
+    }
+    /* Admin tabs (Radix): forza nowrap + scroll orizzontale */
+    [data-testid="admin-tabs-list"] {
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        overflow-y: hidden;
+        justify-content: flex-start !important;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+    }
+    [data-testid="admin-tabs-list"]::-webkit-scrollbar { height: 4px; }
+    [data-testid="admin-tabs-list"]::-webkit-scrollbar-thumb {
+        background: rgba(148,163,184,0.5);
+        border-radius: 999px;
+    }
+    [data-testid="admin-tabs-list"] > * {
+        flex-shrink: 0;
+        min-height: 40px;
+    }
 }
 
-/* Palmare industriale tipico (larghezza 240-360 px, aspect ratio compatto) */
+/* Palmare industriale tipico (<480px) */
 @media (max-width: 480px) {
-    /* Ancora più compatto */
     .et-page-heading { font-size: 1.5rem !important; line-height: 1.2; }
     .et-table thead th { font-size: 8px; letter-spacing: 0.06em; }
     .et-table tbody td { padding: 8px; font-size: 12px; }
-    /* Header interno con logo: mostra solo logo, nasconde eyebrow duplicato */
     .et-header-dark .brand-subtitle { display: none; }
+    /* Admin header: nel pannello Admin il pulsante 'Gestione Utenti →' e 'Magazzino'
+       devono restare accessibili anche sotto i 400px */
+    [data-testid="admin-page"] header .max-w-6xl,
+    [data-testid="admin-users-page"] header .max-w-5xl {
+        gap: 6px !important;
+    }
 }
 
-/* Landscape smartphone / tablet piccolo: mantieni tabelle scrollabili X */
+/* Landscape smartphone / tablet piccolo */
 @media (orientation: landscape) and (max-height: 500px) {
     .et-header-dark { position: relative !important; }
     main { min-height: 0; }
 }
 
-/* Riduci animazioni per utenti che le hanno disabilitate (accessibilità + perf) */
+/* Reduced motion accessibility */
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
         animation-duration: 0.001ms !important;
