@@ -3,21 +3,52 @@ import axios from "axios";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const TOKEN_KEY = "elios_jwt";
+const REMEMBER_KEY = "elios_remember";
 
 const AuthContext = createContext(null);
 
-// Global axios interceptor — attaches Bearer token to every request.
-// Runs once at module load.
-axios.interceptors.request.use((config) => {
+// Storage strategy — per-device only:
+//  - "Rimani collegato" ON  → localStorage (persiste anche dopo chiusura browser)
+//  - "Rimani collegato" OFF → sessionStorage (muore alla chiusura del tab/browser)
+// Nessun cookie viene mai settato — i cookie possono essere sincronizzati
+// tra dispositivi via Chrome Sync o iCloud Keychain, mentre localStorage e
+// sessionStorage sono strettamente per-browser/per-device.
+function readStoredToken() {
   try {
-    const t = localStorage.getItem(TOKEN_KEY);
-    if (t) {
-      config.headers = config.headers || {};
-      if (!config.headers.Authorization) {
-        config.headers.Authorization = `Bearer ${t}`;
+    return sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredToken(token, remember) {
+  try {
+    // Sempre pulisci entrambi prima di scrivere
+    sessionStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+    if (token) {
+      if (remember) {
+        localStorage.setItem(TOKEN_KEY, token);
+        localStorage.setItem(REMEMBER_KEY, "1");
+      } else {
+        sessionStorage.setItem(TOKEN_KEY, token);
+        localStorage.removeItem(REMEMBER_KEY);
       }
+    } else {
+      localStorage.removeItem(REMEMBER_KEY);
     }
   } catch {}
+}
+
+// Global axios interceptor — attaches Bearer token to every request.
+axios.interceptors.request.use((config) => {
+  const t = readStoredToken();
+  if (t) {
+    config.headers = config.headers || {};
+    if (!config.headers.Authorization) {
+      config.headers.Authorization = `Bearer ${t}`;
+    }
+  }
   return config;
 });
 
@@ -26,11 +57,9 @@ axios.interceptors.response.use(
   (r) => r,
   (err) => {
     if (err?.response?.status === 401) {
-      try {
-        localStorage.removeItem(TOKEN_KEY);
-      } catch {}
-      // Force page reload only if we're not already on /login
-      if (!window.location.pathname.startsWith("/login")) {
+      writeStoredToken(null, false);
+      if (!window.location.pathname.startsWith("/login") &&
+          !window.location.pathname.startsWith("/reset-password")) {
         window.dispatchEvent(new Event("elios:auth-expired"));
       }
     }
@@ -39,27 +68,11 @@ axios.interceptors.response.use(
 );
 
 export function AuthProvider({ children }) {
-  // undefined = loading, null = anonymous, object = authenticated
   const [user, setUser] = useState(undefined);
-  const [bootstrap, setBootstrap] = useState(null); // {needs_bootstrap, users_count}
-
-  const readToken = () => {
-    try {
-      return localStorage.getItem(TOKEN_KEY) || null;
-    } catch {
-      return null;
-    }
-  };
-
-  const writeToken = (t) => {
-    try {
-      if (t) localStorage.setItem(TOKEN_KEY, t);
-      else localStorage.removeItem(TOKEN_KEY);
-    } catch {}
-  };
+  const [bootstrap, setBootstrap] = useState(null);
 
   const refreshMe = useCallback(async () => {
-    const t = readToken();
+    const t = readStoredToken();
     if (!t) {
       setUser(null);
       return null;
@@ -69,7 +82,7 @@ export function AuthProvider({ children }) {
       setUser(data);
       return data;
     } catch {
-      writeToken(null);
+      writeStoredToken(null, false);
       setUser(null);
       return null;
     }
@@ -88,21 +101,24 @@ export function AuthProvider({ children }) {
 
   const login = async (username, password, remember = false) => {
     const { data } = await axios.post(`${API}/auth/login`, { username, password, remember_me: !!remember });
-    writeToken(data.token);
+    writeStoredToken(data.token, !!remember);
     setUser(data.user);
     return data.user;
   };
 
   const bootstrapFirstAdmin = async (payload) => {
     const { data } = await axios.post(`${API}/auth/bootstrap`, payload);
-    writeToken(data.token);
+    // Bootstrap = primo login → default a sessionStorage (session-scoped) per
+    // il device che ha creato l'admin. L'utente può poi loggarsi con "Rimani
+    // collegato" se vuole persistenza cross-restart.
+    writeStoredToken(data.token, false);
     setUser(data.user);
     await refreshBootstrap();
     return data.user;
   };
 
   const logout = useCallback(() => {
-    writeToken(null);
+    writeStoredToken(null, false);
     setUser(null);
   }, []);
 

@@ -122,10 +122,8 @@ def public_user(doc: Dict[str, Any]) -> Dict[str, Any]:
 def _extract_token(request: Request, authorization: Optional[str]) -> str:
     if authorization and authorization.lower().startswith("bearer "):
         return authorization[7:].strip()
-    # Fallback to cookie (future-proof if we ever switch to cookie mode)
-    tok = request.cookies.get("access_token")
-    if tok:
-        return tok
+    # NO cookie fallback: i cookie possono essere sincronizzati tra dispositivi
+    # via Chrome Sync o iCloud Keychain. Solo Bearer header è per-device.
     raise HTTPException(401, "Autenticazione richiesta")
 
 

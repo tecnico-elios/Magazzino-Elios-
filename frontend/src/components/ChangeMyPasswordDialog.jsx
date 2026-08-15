@@ -42,9 +42,15 @@ export default function ChangeMyPasswordDialog({ open, onClose }) {
         old_password: oldPwd,
         new_password: newPwd,
       });
-      // Il backend restituisce un nuovo token con pwv aggiornato — sostituisco
+      // Nuovo token dal backend con pwv bumped — riscrivilo nello stesso storage.
       if (data?.token) {
-        try { localStorage.setItem(TOKEN_KEY, data.token); } catch {}
+        try {
+          const inLocal = !!localStorage.getItem(TOKEN_KEY);
+          sessionStorage.removeItem(TOKEN_KEY);
+          localStorage.removeItem(TOKEN_KEY);
+          if (inLocal) localStorage.setItem(TOKEN_KEY, data.token);
+          else sessionStorage.setItem(TOKEN_KEY, data.token);
+        } catch {}
       }
       toast.success("Password aggiornata");
       setOldPwd(""); setNewPwd(""); setConfirm("");
