@@ -109,6 +109,7 @@ def public_user(doc: Dict[str, Any]) -> Dict[str, Any]:
         "first_name": doc.get("first_name"),
         "last_name": doc.get("last_name"),
         "full_name": f"{doc.get('first_name') or ''} {doc.get('last_name') or ''}".strip() or doc.get("username"),
+        "email": doc.get("email"),
         "role": doc.get("role"),
         "active": bool(doc.get("active", True)),
         "last_login": doc.get("last_login"),

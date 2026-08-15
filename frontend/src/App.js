@@ -14,6 +14,7 @@ import ChecklistPage from "@/pages/ChecklistPage";
 import AdminPage from "@/pages/AdminPage";
 import AdminUsersPage from "@/pages/AdminUsersPage";
 import LoginPage from "@/pages/LoginPage";
+import ResetPasswordPage from "@/pages/ResetPasswordPage";
 
 function App() {
   return (
@@ -23,6 +24,7 @@ function App() {
           <InventoryProvider>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route
                 element={
                   <ProtectedRoute>

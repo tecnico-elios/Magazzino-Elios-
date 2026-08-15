@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useState } from "react";
 import {
   House,
   Package,
@@ -9,9 +10,12 @@ import {
   Gear,
   SignOut,
   UsersThree,
+  CaretDown,
+  Lock,
 } from "@phosphor-icons/react";
 import { useInventoryCtx } from "../lib/InventoryContext";
 import { useAuth } from "../lib/AuthContext";
+import ChangeMyPasswordDialog from "./ChangeMyPasswordDialog";
 
 const BASE_NAV = [
   { to: "/", label: "Dashboard", icon: House, end: true, testid: "nav-dashboard" },

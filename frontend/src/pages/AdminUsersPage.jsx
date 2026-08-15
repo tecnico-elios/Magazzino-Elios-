@@ -30,13 +30,14 @@ function CreateUserDialog({ open, onClose, onCreated }) {
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("operator");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (open) {
-      setFirst(""); setLast(""); setUsername(""); setPassword(""); setRole("operator");
+      setFirst(""); setLast(""); setUsername(""); setEmail(""); setPassword(""); setRole("operator");
     }
   }, [open]);
 
@@ -48,6 +49,7 @@ function CreateUserDialog({ open, onClose, onCreated }) {
         first_name: first.trim(),
         last_name: last.trim(),
         username: username.trim().toLowerCase(),
+        email: email.trim().toLowerCase() || undefined,
         password,
         role,
       });
@@ -88,6 +90,17 @@ function CreateUserDialog({ open, onClose, onCreated }) {
               className="h-11 mt-1 font-mono-tight"
               data-testid="new-user-username"
               placeholder="minuscole, numeri, . _ -"
+            />
+          </div>
+          <div>
+            <Label>Email (per recupero password)</Label>
+            <Input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value.toLowerCase())}
+              className="h-11 mt-1"
+              data-testid="new-user-email"
+              placeholder="opzionale — nome.cognome@eliostech.org"
             />
           </div>
           <div>
@@ -138,6 +151,54 @@ function CreateUserDialog({ open, onClose, onCreated }) {
     </Dialog>
   );
 }
+
+function EditEmailDialog({ user, onClose, onDone }) {
+  const [email, setEmail] = useState(user?.email || "");
+  const [busy, setBusy] = useState(false);
+  if (!user) return null;
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await axios.patch(`${API}/admin/users/${user.id}`, { email });
+      toast.success(`Email aggiornata per ${user.username}`);
+      onDone?.();
+      onClose();
+    } catch (e) {
+      toast.error("Errore", { description: formatError(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-sm" data-testid="edit-email-dialog">
+        <DialogHeader>
+          <DialogTitle>Email — {user.username}</DialogTitle>
+          <DialogDescription>Usata per il flusso "Password dimenticata".</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="space-y-3">
+          <Input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value.toLowerCase())}
+            className="h-11"
+            placeholder="nome.cognome@eliostech.org"
+            data-testid="edit-email-input"
+            autoFocus
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>Annulla</Button>
+            <Button type="submit" disabled={busy} className="bg-slate-900 hover:bg-slate-800" data-testid="edit-email-submit">
+              {busy ? "Salvo…" : "Salva email"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 
 function ResetPwdDialog({ user, onClose, onDone }) {
   const [pwd, setPwd] = useState("");
@@ -203,6 +264,7 @@ export default function AdminUsersPage() {
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [resetTarget, setResetTarget] = useState(null);
+  const [emailTarget, setEmailTarget] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -308,6 +370,21 @@ export default function AdminUsersPage() {
                     <td className="px-4 py-3">
                       <div className="font-semibold text-slate-900">{u.full_name || u.username}</div>
                       <div className="text-xs font-mono-tight text-slate-500">@{u.username}</div>
+                      <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
+                        {u.email ? (
+                          <span className="font-mono-tight">{u.email}</span>
+                        ) : (
+                          <span className="text-slate-400 italic">nessuna email</span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setEmailTarget(u)}
+                          className="text-[10px] uppercase tracking-wider text-slate-500 hover:text-slate-900 underline underline-offset-2"
+                          data-testid={`edit-email-${u.username}`}
+                        >
+                          modifica
+                        </button>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1">
@@ -396,6 +473,7 @@ export default function AdminUsersPage() {
 
       <CreateUserDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreated={load} />
       <ResetPwdDialog user={resetTarget} onClose={() => setResetTarget(null)} onDone={load} />
+      <EditEmailDialog user={emailTarget} onClose={() => setEmailTarget(null)} onDone={load} />
     </div>
   );
 }

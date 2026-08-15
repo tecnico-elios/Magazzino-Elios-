@@ -34,6 +34,7 @@ class CreateUserBody(BaseModel):
     username: str = Field(min_length=2, max_length=32)
     password: str = Field(min_length=6, max_length=128)
     role: str = Field(default=auth_mod.ROLE_OPERATOR)
+    email: Optional[str] = Field(default=None, max_length=200)
 
 
 class UpdateUserBody(BaseModel):
@@ -42,6 +43,7 @@ class UpdateUserBody(BaseModel):
     last_name: Optional[str] = None
     role: Optional[str] = None
     active: Optional[bool] = None
+    email: Optional[str] = Field(default=None, max_length=200)
 
 
 class ResetPasswordBody(BaseModel):
@@ -99,6 +101,7 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             "username": username,
             "first_name": body.first_name.strip(),
             "last_name": body.last_name.strip(),
+            "email": (body.email or "").strip().lower() or None,
             "password_hash": pw_hash,
             "role": body.role,
             "active": True,

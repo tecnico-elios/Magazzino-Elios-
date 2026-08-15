@@ -1216,7 +1216,7 @@ async def admin_notion_exits(
 app.include_router(api_router)
 
 # Auth + Admin user routers (Phase 2 — Prompt 220)
-app.include_router(auth_routes.build_router(db, auth_deps), prefix="/api")
+app.include_router(auth_routes.build_router(db, auth_deps, send_email_fn=send_email, frontend_base_url=os.environ.get("PUBLIC_FRONTEND_URL") or os.environ.get("REACT_APP_BACKEND_URL", "")), prefix="/api")
 app.include_router(admin_users_routes.build_router(db, auth_deps), prefix="/api")
 app.include_router(admin_extra_routes.build_router(db, auth_deps), prefix="/api")
 
