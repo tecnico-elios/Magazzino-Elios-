@@ -248,7 +248,7 @@ export default function DashboardPage() {
         <div className="text-[10px] text-slate-400 text-center">
           Ultimo aggiornamento KPI:{" "}
           <span className="font-mono-tight">
-            {refreshedAt.toLocaleTimeString("it-IT")}
+            {refreshedAt.toLocaleTimeString("it-IT", { timeZone: "Europe/Rome" })}
           </span>{" "}
           — auto-refresh silenzioso ogni 60s
         </div>

@@ -23,7 +23,13 @@ function formatError(err) {
 
 const fmtDate = (v) => {
   if (!v) return "—";
-  try { return new Date(v).toLocaleString("it-IT"); } catch { return v; }
+  try {
+    // Se manca il marker di timezone → il backend l'ha serializzata da datetime naive UTC.
+    // Aggiungiamo "Z" per farla parsare come UTC, poi convertiamo a Europe/Rome.
+    const s = typeof v === "string" && !/(Z|[+-]\d{2}:?\d{2})$/.test(v) && /^\d{4}-\d{2}-\d{2}T/.test(v)
+      ? v + "Z" : v;
+    return new Date(s).toLocaleString("it-IT", { timeZone: "Europe/Rome" });
+  } catch { return v; }
 };
 
 // ---------- Audit Log ----------

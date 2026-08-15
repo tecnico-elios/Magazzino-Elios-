@@ -178,7 +178,7 @@ export default function AppLayout() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 text-[10px] text-slate-300/60 pb-1">
             Ultimo sync Notion:{" "}
             <span className="font-mono-tight text-amber-300/70">
-              {refreshedAt.toLocaleTimeString("it-IT")}
+              {refreshedAt.toLocaleTimeString("it-IT", { timeZone: "Europe/Rome" })}
             </span>
           </div>
         )}

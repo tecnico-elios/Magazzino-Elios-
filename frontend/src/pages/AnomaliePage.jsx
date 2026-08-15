@@ -139,7 +139,13 @@ export default function AnomaliePage() {
                 ) : filtered.map((a, idx) => (
                   <tr key={a.id || idx} className="hover:bg-slate-50" data-testid={`anom-row-${idx}`}>
                     <td className="px-3 py-2 font-mono-tight text-xs text-slate-600 whitespace-nowrap">
-                      {a.created_at ? new Date(a.created_at).toLocaleString("it-IT") : "—"}
+                      {a.created_at ? (() => {
+                        const v = a.created_at;
+                        const s = typeof v === "string" && !/(Z|[+-]\d{2}:?\d{2})$/.test(v) && /^\d{4}-\d{2}-\d{2}T/.test(v)
+                          ? v + "Z" : v;
+                        try { return new Date(s).toLocaleString("it-IT", { timeZone: "Europe/Rome" }); }
+                        catch { return "—"; }
+                      })() : "—"}
                     </td>
                     <td className="px-3 py-2">
                       <Badge variant="outline" className="border-amber-300 text-amber-800 bg-amber-50">
