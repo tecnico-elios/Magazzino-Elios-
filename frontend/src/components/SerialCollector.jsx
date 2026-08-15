@@ -65,6 +65,7 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
   const refs = useRef([]);
   const [validations, setValidations] = useState({}); // idx -> {state, message}
   const [cameraFor, setCameraFor] = useState(null); // idx della riga per cui è aperta la camera
+  const debouncersRef = useRef({}); // idx -> timeout id (auto-validate)
 
   useEffect(() => {
     const firstEmpty = pending.serials.findIndex((s) => !s || !s.trim());
@@ -72,10 +73,26 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
     setTimeout(() => refs.current[target]?.focus(), 30);
   }, [pending.id, pending.quantity]);
 
+  // Cleanup dei debouncer al unmount
+  useEffect(() => () => {
+    Object.values(debouncersRef.current).forEach((t) => clearTimeout(t));
+  }, []);
+
   const setSerial = (idx, val) => {
     const next = { ...pending, serials: pending.serials.map((s, i) => (i === idx ? val : s)) };
     onChange(next);
-    if (!val || !val.trim()) setValidations((v) => ({ ...v, [idx]: { state: "idle" } }));
+    if (!val || !val.trim()) {
+      setValidations((v) => ({ ...v, [idx]: { state: "idle" } }));
+      if (debouncersRef.current[idx]) { clearTimeout(debouncersRef.current[idx]); delete debouncersRef.current[idx]; }
+      return;
+    }
+    // Auto-validate dopo 500ms di inattività (gestisce sia digitazione manuale sia paste)
+    if (debouncersRef.current[idx]) clearTimeout(debouncersRef.current[idx]);
+    const capturedValue = val;
+    debouncersRef.current[idx] = setTimeout(() => {
+      // Solo se non è già stata validata OK con lo stesso valore
+      validateOne(idx, capturedValue);
+    }, 500);
   };
 
   const changeQty = (delta) => {
@@ -233,9 +250,17 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
                   ref={(el) => (refs.current[idx] = el)}
                   value={sn}
                   onChange={(e) => setSerial(idx, e.target.value)}
+                  onBlur={() => {
+                    // Validazione immediata quando l'utente tocca/clicca altrove
+                    if ((sn || "").trim() && v.state !== "ok" && v.state !== "checking") {
+                      if (debouncersRef.current[idx]) clearTimeout(debouncersRef.current[idx]);
+                      validateOne(idx);
+                    }
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault();
+                      if (debouncersRef.current[idx]) clearTimeout(debouncersRef.current[idx]);
                       validateOne(idx);
                     }
                   }}
