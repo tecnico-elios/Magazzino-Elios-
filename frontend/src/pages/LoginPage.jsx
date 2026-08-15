@@ -10,6 +10,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "../components/ui/dialog";
 import { Eye, EyeSlash, User as UserIcon, Lock, ShieldCheck } from "@phosphor-icons/react";
+import EliosLogo from "../components/EliosLogo";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -159,14 +160,7 @@ function LoginForm() {
       <form onSubmit={submit} className="space-y-3" data-testid="login-form">
         {/* Logo card interno */}
         <div className="flex items-center justify-center pb-2">
-          <div className="flex items-center gap-2 text-white">
-            <div className="w-6 h-6 rounded-sm bg-amber-400/20 border border-amber-300/40 grid place-items-center">
-              <div className="w-2 h-2 rounded-full bg-amber-300"></div>
-            </div>
-            <div className="text-[13px] tracking-[0.35em] font-semibold uppercase">
-              Elios<span className="text-amber-300">Tech</span>
-            </div>
-          </div>
+          <EliosLogo size={28} />
         </div>
 
         {/* Username */}
@@ -346,14 +340,7 @@ export default function LoginPage() {
 
       {/* Top bar with logo */}
       <div className="relative z-10 flex items-center justify-between px-5 sm:px-10 pt-6">
-        <div className="flex items-center gap-2 text-white">
-          <div className="w-7 h-7 rounded-sm bg-amber-400/20 border border-amber-300/40 grid place-items-center">
-            <div className="w-3 h-3 rounded-full bg-amber-300"></div>
-          </div>
-          <div className="text-sm sm:text-base tracking-[0.35em] font-semibold uppercase">
-            Elios<span className="text-amber-300">Tech</span>
-          </div>
-        </div>
+        <EliosLogo size={36} />
       </div>
 
       {/* Main content */}
