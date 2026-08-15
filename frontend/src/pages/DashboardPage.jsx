@@ -62,20 +62,19 @@ export default function DashboardPage() {
     >
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="font-display text-3xl sm:text-4xl font-bold text-slate-900">
-            Dashboard
-          </h1>
+          <div className="et-eyebrow">Panoramica magazzino</div>
+          <h1 className="et-page-heading text-3xl sm:text-4xl mt-1">Dashboard</h1>
           <p className="text-slate-500 mt-1 text-sm">
             {loading && !kpi
               ? "Caricamento KPI Notion…"
-              : `Panoramica magazzino — ${totalProducts} prodotti · ${totalUnits} pz totali`}
+              : `${totalProducts} prodotti · ${totalUnits} pz totali`}
           </p>
         </div>
         <button
           type="button"
           onClick={() => load(false)}
           disabled={loading}
-          className="h-10 px-3 border border-slate-200 rounded-md text-sm text-slate-600 hover:text-slate-900 hover:border-slate-300 flex items-center gap-1 shrink-0 disabled:opacity-60 bg-white"
+          className="h-10 px-4 rounded-md text-sm flex items-center gap-2 shrink-0 disabled:opacity-60 et-btn-primary"
           data-testid="dashboard-refresh-btn"
         >
           <ArrowClockwise size={14} className={loading ? "animate-spin" : ""} />
@@ -83,36 +82,40 @@ export default function DashboardPage() {
         </button>
       </div>
 
-      {/* Big Arrivi / Spedizioni cards */}
+      {/* Big Arrivi / Spedizioni cards — dark navy + semantic amber glow */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Link
           to="/arrivi"
           data-testid="dash-arrivi-card"
-          className="group relative overflow-hidden rounded-lg p-8 text-white bg-gradient-to-br from-emerald-500 to-emerald-700 hover:shadow-xl transition-shadow"
+          className="group relative overflow-hidden rounded-xl p-8 text-white border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 hover:border-emerald-400/50 transition-all shadow-[0_10px_40px_-15px_rgba(2,6,23,0.5)] hover:shadow-[0_20px_60px_-15px_rgba(16,185,129,0.35)]"
         >
-          <ArrowSquareIn size={44} weight="bold" />
-          <div className="text-4xl font-black mt-4 tracking-tight">ARRIVI</div>
-          <div className="text-emerald-50 text-sm mt-2 opacity-95">
-            Registra prodotti in entrata
-          </div>
-          <div className="absolute right-4 bottom-4 text-emerald-100/95 text-xs font-mono-tight">
-            {arriviToday} oggi →
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(16,185,129,0.18),transparent_55%)]" aria-hidden />
+          <div className="relative">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-emerald-500/15 border border-emerald-400/30 text-emerald-300">
+              <ArrowSquareIn size={26} weight="bold" />
+            </div>
+            <div className="text-4xl font-display font-black mt-5 tracking-tight">ARRIVI</div>
+            <div className="text-slate-300/80 text-sm mt-2">Registra prodotti in entrata</div>
+            <div className="absolute right-0 bottom-0 text-emerald-300/90 text-xs font-mono-tight">
+              {arriviToday} oggi →
+            </div>
           </div>
         </Link>
         <Link
           to="/spedizioni"
           data-testid="dash-spedizioni-card"
-          className="group relative overflow-hidden rounded-lg p-8 text-white bg-gradient-to-br from-blue-600 to-blue-800 hover:shadow-xl transition-shadow"
+          className="group relative overflow-hidden rounded-xl p-8 text-white border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 hover:border-amber-300/60 transition-all shadow-[0_10px_40px_-15px_rgba(2,6,23,0.5)] hover:shadow-[0_20px_60px_-15px_rgba(250,204,21,0.28)]"
         >
-          <ArrowSquareOut size={44} weight="bold" />
-          <div className="text-4xl font-black mt-4 tracking-tight">
-            SPEDIZIONI
-          </div>
-          <div className="text-blue-50 text-sm mt-2 opacity-95">
-            Registra prodotti in uscita
-          </div>
-          <div className="absolute right-4 bottom-4 text-blue-100/95 text-xs font-mono-tight">
-            {spedizioniToday} oggi →
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(250,204,21,0.16),transparent_55%)]" aria-hidden />
+          <div className="relative">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-amber-400/15 border border-amber-300/30 text-amber-300">
+              <ArrowSquareOut size={26} weight="bold" />
+            </div>
+            <div className="text-4xl font-display font-black mt-5 tracking-tight">SPEDIZIONI</div>
+            <div className="text-slate-300/80 text-sm mt-2">Registra prodotti in uscita</div>
+            <div className="absolute right-0 bottom-0 text-amber-300/90 text-xs font-mono-tight">
+              {spedizioniToday} oggi →
+            </div>
           </div>
         </Link>
       </div>
@@ -265,16 +268,16 @@ function Kpi({ icon: Icon, label, value, suffix, testid, tone = "slate" }) {
       : "text-slate-900";
   return (
     <div
-      className="bg-white border border-slate-200 rounded-md p-4"
+      className="et-card-elevated p-4"
       data-testid={testid}
     >
       <div className="flex items-center justify-between">
-        <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
+        <div className="et-eyebrow">
           {label}
         </div>
         <Icon size={16} className="text-slate-400" />
       </div>
-      <div className={`text-2xl font-bold mt-1 font-mono-tight ${toneClass}`}>
+      <div className={`text-2xl font-bold mt-2 font-mono-tight ${toneClass}`}>
         {value}
         {suffix && (
           <span className="text-slate-400 text-sm font-normal ml-1">

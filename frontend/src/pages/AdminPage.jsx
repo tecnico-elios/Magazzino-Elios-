@@ -157,7 +157,7 @@ function InventoryTab() {
           type="button"
           variant={filter === "__ALL__" ? "default" : "outline"}
           onClick={() => setFilter("__ALL__")}
-          className={`h-9 px-3 ${filter === "__ALL__" ? "bg-slate-900 hover:bg-slate-800" : ""}`}
+          className={`h-9 px-3 ${filter === "__ALL__" ? "et-btn-primary" : ""}`}
           data-testid="filter-all"
         >
           Tutti ({counts.all})
@@ -356,7 +356,7 @@ function RecipientsTab() {
         <Button
           type="button"
           onClick={addEmail}
-          className="h-11 bg-slate-900 hover:bg-slate-800"
+          className="h-11 et-btn-primary border-0"
           data-testid="add-recipient-btn"
         >
           <Plus size={18} className="mr-1" /> Aggiungi
@@ -544,7 +544,7 @@ function HistoryTab() {
           <Button
             type="button"
             onClick={applyFilters}
-            className="h-10 bg-slate-900 hover:bg-slate-800"
+            className="h-10 et-btn-primary border-0"
             data-testid="apply-filters-btn"
           >
             Applica filtri
@@ -721,27 +721,27 @@ function HistoryTab() {
 export default function AdminPage() {
   return (
     <div className="min-h-screen bg-slate-50" data-testid="admin-page">
-      <header className="sticky top-0 z-30 bg-white border-b border-slate-200">
+      <header className="et-header-dark sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Link
               to="/"
-              className="h-10 inline-flex items-center px-3 border border-slate-200 rounded-md text-slate-600 hover:text-slate-900 hover:border-slate-300 text-sm"
+              className="h-10 inline-flex items-center px-3 rounded-md bg-white/5 border border-white/10 text-slate-100 hover:border-amber-300/50 hover:text-white text-sm transition-colors"
             >
               <ArrowLeft size={16} className="mr-1" /> Magazzino
             </Link>
             <div>
-              <div className="text-[11px] tracking-[0.2em] uppercase text-slate-500 font-semibold">
+              <div className="text-[10px] tracking-[0.22em] uppercase text-amber-300/80 font-semibold">
                 Elios Tech — Magazzino
               </div>
-              <h1 className="font-display text-xl sm:text-2xl font-bold text-slate-900">
+              <h1 className="font-display text-xl sm:text-2xl font-bold text-white">
                 Pannello Admin
               </h1>
             </div>
           </div>
           <Link
             to="/admin/utenti"
-            className="h-10 inline-flex items-center px-3 border border-slate-200 rounded-md text-slate-700 hover:text-slate-900 hover:border-slate-300 text-sm"
+            className="h-10 inline-flex items-center px-3 rounded-md bg-white/5 border border-white/10 text-slate-100 hover:border-amber-300/50 hover:text-white text-sm transition-colors"
             data-testid="link-admin-users"
           >
             Gestione Utenti →

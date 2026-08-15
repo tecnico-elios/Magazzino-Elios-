@@ -286,20 +286,20 @@ export default function ArriviPage() {
     <div className="pb-32" data-testid="arrivi-page">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6 pb-2 flex items-end justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2 text-emerald-700">
-            <ArrowSquareIn size={22} weight="bold" />
-            <span className="text-[11px] tracking-[0.2em] uppercase font-semibold">Ingressi</span>
+          <div className="flex items-center gap-2 text-emerald-600">
+            <ArrowSquareIn size={16} weight="bold" />
+            <span className="et-eyebrow text-emerald-700">Ingressi</span>
           </div>
-          <h1 className="font-display text-3xl sm:text-4xl font-bold text-slate-900 mt-1">Arrivi</h1>
+          <h1 className="et-page-heading text-3xl sm:text-4xl mt-1">Arrivi</h1>
           <p className="text-slate-500 mt-1 text-sm">
             Registra ingressi in Consegne Wallbox / Entrate. Il Fornitore è solo per l'email.
           </p>
         </div>
         <div
-          className="hidden sm:flex items-center gap-2 border border-slate-200 bg-white px-3 py-2 rounded-md shrink-0"
+          className="hidden sm:flex items-center gap-2 et-card px-3 py-2 shrink-0"
           data-testid="total-arrivi-badge"
         >
-          <Package size={18} className="text-slate-500" />
+          <Package size={18} className="text-emerald-600" />
           <span className="font-mono-tight text-sm text-slate-900">
             {totalUnits} pz in arrivo
           </span>

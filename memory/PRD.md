@@ -17,6 +17,15 @@
   - Impostazioni: soglia sotto-scorta, prefisso TEST, durata feedback
   - Cleanup dati TEST_: preview + conferma esplicita, mai tocca Notion
   - Tutti i nuovi endpoint in `routes/admin_extra_routes.py`, JWT-admin (401 no auth verified)
+- **Design System Unification (Ibrido premium)** ✅ (15/02/2026)
+  - Design tokens unificati in `index.css` (navy 950/900, amber 300/400, IBM Plex + Manrope, shadow soffuse)
+  - Header dark navy full-width con logo Elios (coerente con Login) su tutte le pagine + Admin
+  - Nav con active/hover amber (`.et-nav-link`)
+  - Card premium light (`.et-card`, `.et-card-elevated`) + tables (`.et-table`) con row-hover amber
+  - Pulsante primario `.et-btn-primary` (nero navy con accento amber su hover)
+  - Focus ring amber globale (input/button/textarea) via CSS override — coerente con Login
+  - Dashboard: KPI cards elevated + big Arrivi/Spedizioni card con semantic glow (emerald/amber su navy)
+  - Nessuna modifica a logiche, API, mapping Notion o autenticazione
 - PWA — solo alla fine
 
 ## File architettura

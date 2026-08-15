@@ -116,22 +116,24 @@ export default function MovimentiPage() {
     >
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="font-display text-3xl sm:text-4xl font-bold text-slate-900">
+          <div className="et-eyebrow">Cronologia · Notion</div>
+          <h1 className="et-page-heading text-3xl sm:text-4xl mt-1">
             Movimenti
           </h1>
           <p className="text-slate-500 mt-1 text-sm">
             Arrivi + Spedizioni del mese selezionato — live da Notion, {items.length} movimenti.
           </p>
         </div>
-        <Button
-          variant="outline"
+        <button
+          type="button"
           onClick={() => load(monthKey, { force: true })}
           disabled={loading}
+          className="h-10 px-4 rounded-md text-sm flex items-center gap-2 et-btn-primary disabled:opacity-60"
           data-testid="movimenti-refresh"
         >
-          <ArrowsClockwise size={16} className={loading ? "animate-spin mr-1" : "mr-1"} />
+          <ArrowsClockwise size={16} className={loading ? "animate-spin" : ""} />
           Aggiorna
-        </Button>
+        </button>
       </div>
 
       {/* Month selector */}
@@ -210,10 +212,10 @@ export default function MovimentiPage() {
               key={f.id}
               type="button"
               onClick={() => setTypeFilter(f.id)}
-              className={`h-8 px-3 text-sm rounded font-medium ${
+              className={`h-8 px-3 text-sm rounded font-medium transition-colors ${
                 typeFilter === f.id
-                  ? "bg-slate-900 text-white"
-                  : "text-slate-600 hover:bg-slate-100"
+                  ? "bg-slate-900 text-white shadow-sm"
+                  : "text-slate-600 hover:bg-amber-50 hover:text-slate-900"
               }`}
               data-testid={f.testid}
             >

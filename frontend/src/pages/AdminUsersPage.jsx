@@ -142,7 +142,7 @@ function CreateUserDialog({ open, onClose, onCreated }) {
           </div>
           <DialogFooter className="pt-2">
             <Button type="button" variant="outline" onClick={onClose}>Annulla</Button>
-            <Button type="submit" disabled={busy} className="bg-slate-900 hover:bg-slate-800" data-testid="create-user-submit">
+            <Button type="submit" disabled={busy} className="et-btn-primary border-0" data-testid="create-user-submit">
               {busy ? "Creo…" : "Crea utente"}
             </Button>
           </DialogFooter>
@@ -189,7 +189,7 @@ function EditEmailDialog({ user, onClose, onDone }) {
           />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Annulla</Button>
-            <Button type="submit" disabled={busy} className="bg-slate-900 hover:bg-slate-800" data-testid="edit-email-submit">
+            <Button type="submit" disabled={busy} className="et-btn-primary border-0" data-testid="edit-email-submit">
               {busy ? "Salvo…" : "Salva email"}
             </Button>
           </DialogFooter>
@@ -313,27 +313,27 @@ export default function AdminUsersPage() {
 
   return (
     <div className="min-h-screen bg-slate-50" data-testid="admin-users-page">
-      <header className="sticky top-0 z-30 bg-white border-b border-slate-200">
+      <header className="et-header-dark sticky top-0 z-30">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Link
               to="/"
-              className="h-10 inline-flex items-center px-3 border border-slate-200 rounded-md text-slate-600 hover:text-slate-900 hover:border-slate-300 text-sm"
+              className="h-10 inline-flex items-center px-3 rounded-md bg-white/5 border border-white/10 text-slate-100 hover:border-amber-300/50 hover:text-white text-sm transition-colors"
             >
               <ArrowLeft size={16} className="mr-1" /> Magazzino
             </Link>
             <div>
-              <div className="text-[11px] tracking-[0.2em] uppercase text-slate-500 font-semibold">
+              <div className="text-[10px] tracking-[0.22em] uppercase text-amber-300/80 font-semibold">
                 Amministrazione
               </div>
-              <h1 className="font-display text-xl sm:text-2xl font-bold text-slate-900">
+              <h1 className="font-display text-xl sm:text-2xl font-bold text-white">
                 Gestione Utenti
               </h1>
             </div>
           </div>
           <Button
             onClick={() => setCreateOpen(true)}
-            className="h-10 bg-slate-900 hover:bg-slate-800"
+            className="h-10 et-btn-primary border-0"
             data-testid="create-user-btn"
           >
             <UserPlus size={16} className="mr-1" /> Nuovo utente
@@ -351,18 +351,18 @@ export default function AdminUsersPage() {
           </Button>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-md overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
+        <div className="et-card-elevated overflow-hidden">
+          <table className="et-table">
+            <thead>
               <tr>
-                <th className="text-left px-4 py-3">Utente</th>
-                <th className="text-left px-4 py-3">Ruolo</th>
-                <th className="text-left px-4 py-3">Stato</th>
-                <th className="text-left px-4 py-3">Ultimo accesso</th>
-                <th className="text-right px-4 py-3">Azioni</th>
+                <th>Utente</th>
+                <th>Ruolo</th>
+                <th>Stato</th>
+                <th>Ultimo accesso</th>
+                <th className="text-right">Azioni</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {users.map((u) => {
                 const isMe = me?.id === u.id;
                 return (

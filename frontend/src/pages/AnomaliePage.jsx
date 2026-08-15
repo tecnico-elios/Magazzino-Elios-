@@ -78,13 +78,13 @@ export default function AnomaliePage() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-4" data-testid="anomalie-page">
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
-          <div className="flex items-center gap-2 text-amber-700">
-            <Warning size={22} weight="bold" />
-            <span className="text-[11px] tracking-[0.2em] uppercase font-semibold">Registro eventi</span>
+          <div className="flex items-center gap-2 text-amber-600">
+            <Warning size={16} weight="bold" />
+            <span className="et-eyebrow text-amber-700">Registro eventi</span>
           </div>
-          <h1 className="font-display text-3xl sm:text-4xl font-bold text-slate-900 mt-1">Anomalie</h1>
+          <h1 className="et-page-heading text-3xl sm:text-4xl mt-1">Anomalie</h1>
           <p className="text-slate-500 mt-1 text-sm">
-            {items.length} evento{items.length === 1 ? "" : "i"} registrati.
+            {items.length} event{items.length === 1 ? "o" : "i"} registrat{items.length === 1 ? "o" : "i"}.
           </p>
         </div>
         <div className="flex gap-2">
@@ -120,20 +120,20 @@ export default function AnomaliePage() {
       {loading && !items.length ? (
         <div className="text-slate-500 py-12 text-center text-sm">Caricamento anomalie…</div>
       ) : (
-        <div className="bg-white border border-slate-200 rounded-md overflow-hidden">
+        <div className="et-card-elevated overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm" data-testid="anomalie-table">
-              <thead className="bg-slate-50 border-b border-slate-200">
+            <table className="et-table" data-testid="anomalie-table">
+              <thead>
                 <tr>
-                  <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase">Data/Ora</th>
-                  <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase">Tipo</th>
-                  <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase">Operatore</th>
-                  <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase">Prodotto/Seriale</th>
-                  <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs uppercase">Descrizione</th>
+                  <th>Data/Ora</th>
+                  <th>Tipo</th>
+                  <th>Operatore</th>
+                  <th>Prodotto/Seriale</th>
+                  <th>Descrizione</th>
                   {isAdmin && <th className="w-10"></th>}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody>
                 {filtered.length === 0 ? (
                   <tr><td colSpan={isAdmin ? 6 : 5} className="text-center py-10 text-slate-400 text-sm">Nessuna anomalia registrata.</td></tr>
                 ) : filtered.map((a, idx) => (

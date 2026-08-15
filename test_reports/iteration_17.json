@@ -1,0 +1,27 @@
+{
+  "summary": "Frontend regression testing dopo il refactoring estetico 'Ibrido premium' (header dark navy + corpo chiaro + accent amber). Login OK con ui_test_admin, tutte le pagine (Dashboard, Inventario, Arrivi, Spedizioni, Movimenti, Anomalie, Admin, Admin/Utenti) renderizzano senza errori JS/console/page. Tutti i data-testid attesi risultano presenti. Menu utente, dialog 'Cambia password' e logout funzionano correttamente. Il pulsante submit del dialog password e 'Nuovo utente' hanno la classe et-btn-primary come richiesto. NON eseguito alcun click su CONFERMA ARRIVO/SPEDIZIONE per non scrivere su Notion.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "AnomaliePage", "issues": ["Typo pre-esistente 'X eventoi registrati' (dovrebbe essere 'eventi'). Segnalato ma non regressione — l'agente E1 può decidere se sistemare."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(Facoltativo) Correggere typo 'eventoi' → 'eventi' in AnomaliePage sopra la tabella (pre-esistente, non regressione)."
+  ],
+  "critical_code_review_comments": [
+    "Route path per Admin Users è '/admin/utenti' (non '/admin/users'); il link nav 'Utenti' punta correttamente a questa rotta — nessuna azione necessaria, nota per futuri agent.",
+    "L'header dark navy proprio di AdminPage/AdminUsersPage NON usa AppLayout: quindi il menu utente/Aggiorna Notion presente in AppLayout non è disponibile su queste due pagine. Comportamento voluto secondo lo scope, ma potrebbe essere ambiguo per l'utente (nessuna via 'Cambia password' visibile da /admin o /admin/utenti). Da rivalutare."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (not tested)", "frontend": "100%"},
+  "test_credentials": "ui_test_admin / TestAdmin_ci_pw_1 (funzionante)",
+  "seed_data_creation": "Nessuna",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Route Admin Users è '/admin/utenti'. Il pulsante submit del dialog 'Cambia password' ha testo 'Aggiorna password' (data-testid='cmp-submit'), NON 'Salva'. Login placeholder-based selectors: get_by_placeholder('Username') / get_by_placeholder('Password') → button 'Login'.",
+  "rca of the issue": "Nessun issue funzionale identificato in questa iterazione. Il refactoring puramente estetico non ha introdotto regressioni."
+}

@@ -300,7 +300,7 @@ function ForgotPasswordDialog({ open, onClose }) {
             />
             <DialogFooter>
               <Button type="button" variant="outline" onClick={onClose}>Chiudi</Button>
-              <Button type="submit" disabled={busy || !username} className="bg-slate-900 hover:bg-slate-800" data-testid="forgot-submit">
+              <Button type="submit" disabled={busy || !username} className="et-btn-primary border-0" data-testid="forgot-submit">
                 {busy ? "Invio…" : "Invia richiesta"}
               </Button>
             </DialogFooter>

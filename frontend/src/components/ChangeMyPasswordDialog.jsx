@@ -130,7 +130,7 @@ export default function ChangeMyPasswordDialog({ open, onClose }) {
             <Button
               type="submit"
               disabled={busy}
-              className="bg-slate-900 hover:bg-slate-800"
+              className="et-btn-primary border-0"
               data-testid="cmp-submit"
             >
               {busy ? "Aggiorno…" : "Aggiorna password"}

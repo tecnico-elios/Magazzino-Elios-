@@ -41,6 +41,7 @@ export default function ChecklistPage() {
   const [list, setList] = useState([]); // {id, name, serialized, unit, quantity, serials[]}
   const [lastScan, setLastScan] = useState(null);
   const [qtyDialog, setQtyDialog] = useState(null); // {item, maxAvailable}
+  const [serialSession, setSerialSession] = useState(null); // {id, name, unit, quantity, serials[]}
   const [picker, setPicker] = useState(null); // {filter, pendingSn}
   const [pending, setPending] = useState(null); // {id, name}
   const [submitting, setSubmitting] = useState(false);
@@ -306,11 +307,11 @@ export default function ChecklistPage() {
     <div className="pb-32" data-testid="checklist-page">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6 pb-2 flex items-end justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2 text-blue-700">
-            <ArrowSquareOut size={22} weight="bold" />
-            <span className="text-[11px] tracking-[0.2em] uppercase font-semibold">Uscite</span>
+          <div className="flex items-center gap-2 text-blue-600">
+            <ArrowSquareOut size={16} weight="bold" />
+            <span className="et-eyebrow text-blue-700">Uscite</span>
           </div>
-          <h1 className="font-display text-3xl sm:text-4xl font-bold text-slate-900 mt-1">
+          <h1 className="et-page-heading text-3xl sm:text-4xl mt-1">
             Spedizione
           </h1>
           <p className="text-slate-500 mt-1 text-sm">
@@ -318,10 +319,10 @@ export default function ChecklistPage() {
           </p>
         </div>
         <div
-          className="hidden sm:flex items-center gap-2 border border-slate-200 bg-white px-3 py-2 rounded-md shrink-0"
+          className="hidden sm:flex items-center gap-2 et-card px-3 py-2 shrink-0"
           data-testid="total-units-badge"
         >
-          <Package size={18} className="text-slate-500" />
+          <Package size={18} className="text-blue-600" />
           <span className="font-mono-tight text-sm text-slate-900">
             {totalUnits} pz totali
           </span>

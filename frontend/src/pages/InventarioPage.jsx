@@ -30,12 +30,10 @@ export default function InventarioPage() {
       data-testid="inventario-page"
     >
       <div>
-        <h1 className="font-display text-3xl sm:text-4xl font-bold text-slate-900">
-          Inventario
-        </h1>
+        <div className="et-eyebrow">Stock live · Notion SSOT</div>
+        <h1 className="et-page-heading text-3xl sm:text-4xl mt-1">Inventario</h1>
         <p className="text-slate-500 mt-1 text-sm">
-          Stock live da Notion — {items.length} prodotti · Notion è l'unica
-          fonte di verità.
+          {items.length} prodotti — Notion è l'unica fonte di verità.
         </p>
       </div>
 
@@ -65,29 +63,19 @@ export default function InventarioPage() {
           Caricamento inventario Notion…
         </div>
       ) : (
-        <div className="bg-white border border-slate-200 rounded-md overflow-hidden">
+        <div className="et-card-elevated overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm" data-testid="inventario-table">
-              <thead className="bg-slate-50 border-b border-slate-200">
+            <table className="et-table" data-testid="inventario-table">
+              <thead>
                 <tr>
-                  <th className="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider">
-                    Prodotto
-                  </th>
-                  <th className="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider">
-                    Codice
-                  </th>
-                  <th className="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider hidden sm:table-cell">
-                    Categoria
-                  </th>
-                  <th className="text-right px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider">
-                    Quantità
-                  </th>
-                  <th className="text-center px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider">
-                    Gestione
-                  </th>
+                  <th>Prodotto</th>
+                  <th>Codice</th>
+                  <th className="hidden sm:table-cell">Categoria</th>
+                  <th className="text-right">Quantità</th>
+                  <th className="text-center">Gestione</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody>
                 {filtered.length === 0 ? (
                   <tr>
                     <td

@@ -110,7 +110,7 @@ export default function ResetPasswordPage() {
               <Button
                 type="submit"
                 disabled={busy}
-                className="h-11 w-full bg-slate-900 hover:bg-slate-800"
+                className="h-11 w-full et-btn-primary border-0"
                 data-testid="reset-submit-btn"
               >
                 {busy ? "Aggiorno…" : "Aggiorna password"}

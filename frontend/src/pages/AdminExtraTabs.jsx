@@ -130,7 +130,7 @@ export function SettingsTab() {
           onChange={(e) => setS({ ...s, feedback_seconds: parseInt(e.target.value || "3", 10) })}
           className="h-11" data-testid="setting-feedback-seconds" />
       </div>
-      <Button onClick={save} disabled={saving} className="h-11 bg-slate-900 hover:bg-slate-800" data-testid="save-settings-btn">
+      <Button onClick={save} disabled={saving} className="h-11 et-btn-primary border-0" data-testid="save-settings-btn">
         {saving ? "Salvo…" : "Salva impostazioni"}
       </Button>
     </div>
@@ -180,7 +180,7 @@ export function CleanupTestTab() {
           <Input value={prefix} onChange={(e) => setPrefix(e.target.value)} className="h-11 font-mono-tight mt-1"
             placeholder="TEST_" data-testid="cleanup-prefix-input" />
         </div>
-        <Button onClick={doPreview} disabled={busy} className="h-11 bg-slate-900 hover:bg-slate-800" data-testid="cleanup-preview-btn">
+        <Button onClick={doPreview} disabled={busy} className="h-11 et-btn-primary border-0" data-testid="cleanup-preview-btn">
           {busy ? "…" : "Anteprima"}
         </Button>
       </div>
@@ -258,7 +258,7 @@ export function SerialHistoryTab() {
             className="h-11 font-mono-tight mt-1" onKeyDown={(e) => e.key === "Enter" && search()}
             data-testid="serial-history-input" />
         </div>
-        <Button onClick={search} disabled={busy || !sn.trim()} className="h-11 bg-slate-900 hover:bg-slate-800" data-testid="serial-history-search-btn">
+        <Button onClick={search} disabled={busy || !sn.trim()} className="h-11 et-btn-primary border-0" data-testid="serial-history-search-btn">
           <MagnifyingGlass size={16} className="mr-1" /> Cerca
         </Button>
       </div>
@@ -322,7 +322,7 @@ export function GlobalSearchTab() {
             className="h-11 mt-1" onKeyDown={(e) => e.key === "Enter" && search()}
             data-testid="global-search-input" />
         </div>
-        <Button onClick={search} disabled={busy || !q.trim()} className="h-11 bg-slate-900 hover:bg-slate-800" data-testid="global-search-btn">
+        <Button onClick={search} disabled={busy || !q.trim()} className="h-11 et-btn-primary border-0" data-testid="global-search-btn">
           <MagnifyingGlass size={16} className="mr-1" /> Cerca
         </Button>
       </div>
