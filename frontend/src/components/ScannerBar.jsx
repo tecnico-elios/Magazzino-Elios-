@@ -14,6 +14,25 @@ import BarcodeScanner from "./BarcodeScanner";
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const SERVER_DEBOUNCE_MS = 400;
 
+// Cache impostazioni feedback (durate ms) — invalidata via evento globale.
+let _cachedFeedbackMs = null;
+async function fetchFeedbackMs() {
+  if (_cachedFeedbackMs) return _cachedFeedbackMs;
+  try {
+    const { data } = await axios.get(`${API}/settings`);
+    _cachedFeedbackMs = {
+      green: Math.max(200, parseInt(data?.scanner?.feedback_green_ms || 3000, 10)),
+      red: Math.max(200, parseInt(data?.scanner?.feedback_red_ms || 3000, 10)),
+    };
+  } catch {
+    _cachedFeedbackMs = { green: 3000, red: 3000 };
+  }
+  return _cachedFeedbackMs;
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("elios:settings-changed", () => { _cachedFeedbackMs = null; });
+}
+
 /**
  * ScannerBar — fast scan-first input with a live product picker dropdown
  * over the local inventory cache. Notion is not called on every keystroke.
@@ -39,11 +58,21 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
     if (inputRef.current) inputRef.current.focus();
   }, []);
 
-  // 3s auto-clear feedback
+  // 3s auto-clear feedback — durata gestita da Admin → Impostazioni → Scanner (verde/rosso).
   useEffect(() => {
     if (!lastScan || !onClearLastScan) return undefined;
-    const id = setTimeout(() => onClearLastScan(), 3000);
-    return () => clearTimeout(id);
+    let cancelled = false;
+    let timerId = null;
+    fetchFeedbackMs().then((ms) => {
+      if (cancelled) return;
+      const isOk = lastScan.type === "ok";
+      const duration = isOk ? ms.green : ms.red;
+      timerId = setTimeout(() => onClearLastScan(), duration);
+    });
+    return () => {
+      cancelled = true;
+      if (timerId) clearTimeout(timerId);
+    };
   }, [lastScan, onClearLastScan]);
 
   // Close dropdown on outside click
