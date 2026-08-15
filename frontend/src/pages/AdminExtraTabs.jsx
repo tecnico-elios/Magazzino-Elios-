@@ -85,10 +85,71 @@ export function AuditLogTab() {
   );
 }
 
-// ---------- Impostazioni ----------
+// ---------- Impostazioni (F7 esteso) ----------
+function SettingSwitch({ label, hint, checked, onChange, testid }) {
+  return (
+    <label className="flex items-center justify-between gap-3 py-2 cursor-pointer" data-testid={testid}>
+      <div className="min-w-0">
+        <div className="text-sm font-semibold text-slate-800">{label}</div>
+        {hint && <div className="text-[11px] text-slate-500">{hint}</div>}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={!!checked}
+        onClick={() => onChange(!checked)}
+        className={`shrink-0 w-11 h-6 rounded-full transition-colors border ${
+          checked ? "bg-amber-400 border-amber-500" : "bg-slate-200 border-slate-300"
+        }`}
+      >
+        <span
+          className={`block w-5 h-5 rounded-full bg-white shadow transform transition-transform ${
+            checked ? "translate-x-5" : "translate-x-0"
+          }`}
+        />
+      </button>
+    </label>
+  );
+}
+
+function SettingNumber({ label, hint, value, onChange, min, max, step = 1, unit, testid }) {
+  return (
+    <div className="py-2">
+      <Label className="text-sm font-semibold text-slate-800">{label}</Label>
+      {hint && <div className="text-[11px] text-slate-500 mb-1">{hint}</div>}
+      <div className="flex items-center gap-2">
+        <Input
+          type="number"
+          min={min}
+          max={max}
+          step={step}
+          value={value ?? ""}
+          onChange={(e) => onChange(parseInt(e.target.value || "0", 10))}
+          className="h-11 max-w-[140px] font-mono-tight"
+          data-testid={testid}
+        />
+        {unit && <span className="text-xs text-slate-500">{unit}</span>}
+      </div>
+    </div>
+  );
+}
+
+function SettingsSection({ title, icon: Icon, children }) {
+  return (
+    <div className="et-card p-4">
+      <div className="flex items-center gap-2 pb-2 border-b border-slate-100 mb-2">
+        {Icon && <Icon size={16} className="text-amber-500" />}
+        <div className="text-[11px] tracking-[0.18em] uppercase text-slate-600 font-semibold">{title}</div>
+      </div>
+      <div className="divide-y divide-slate-100">{children}</div>
+    </div>
+  );
+}
+
 export function SettingsTab() {
   const [s, setS] = useState(null);
   const [saving, setSaving] = useState(false);
+
   const load = async () => {
     try {
       const { data } = await axios.get(`${API}/admin/settings`);
@@ -98,10 +159,23 @@ export function SettingsTab() {
   useEffect(() => { load(); }, []);
   if (!s) return <div className="text-slate-500">Caricamento…</div>;
 
+  const setSection = (section, patch) => setS((prev) => ({ ...prev, [section]: { ...(prev[section] || {}), ...patch } }));
+
   const save = async () => {
     setSaving(true);
     try {
-      const { data } = await axios.put(`${API}/admin/settings`, s);
+      const payload = {
+        low_stock_threshold: s.low_stock_threshold,
+        test_prefix: s.test_prefix,
+        feedback_seconds: s.feedback_seconds,
+        scanner: s.scanner,
+        dashboard: s.dashboard,
+        magazzino: s.magazzino,
+        ricerca: s.ricerca,
+        movimenti: s.movimenti,
+        sicurezza: s.sicurezza,
+      };
+      const { data } = await axios.put(`${API}/admin/settings`, payload);
       setS(data);
       toast.success("Impostazioni salvate");
     } catch (e) { toast.error("Salvataggio fallito", { description: formatError(e) }); }
@@ -109,30 +183,247 @@ export function SettingsTab() {
   };
 
   return (
-    <div className="space-y-4 max-w-lg" data-testid="settings-tab">
-      <div>
-        <Label className="text-sm font-semibold">Soglia sotto-scorta</Label>
-        <div className="text-[11px] text-slate-500 mb-1">Prodotti con giacenza ≤ soglia (e &gt; 0) sono "sotto scorta".</div>
-        <Input type="number" min={0} max={1000} value={s.low_stock_threshold}
-          onChange={(e) => setS({ ...s, low_stock_threshold: parseInt(e.target.value || "0", 10) })}
-          className="h-11" data-testid="setting-low-stock" />
+    <div className="space-y-4 max-w-3xl" data-testid="settings-tab">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <SettingsSection title="Scanner" icon={ListMagnifyingGlass}>
+          <SettingSwitch
+            label="Focus automatico"
+            hint="Riporta sempre il cursore sul campo scanner"
+            checked={s.scanner?.autofocus}
+            onChange={(v) => setSection("scanner", { autofocus: v })}
+            testid="set-scanner-autofocus"
+          />
+          <SettingNumber label="Feedback verde (ms)" hint="Durata evidenza al match riuscito"
+            value={s.scanner?.feedback_green_ms} min={200} max={10000} step={100} unit="ms"
+            onChange={(v) => setSection("scanner", { feedback_green_ms: v })}
+            testid="set-scanner-green-ms" />
+          <SettingNumber label="Feedback rosso (ms)" hint="Durata evidenza in caso di errore"
+            value={s.scanner?.feedback_red_ms} min={200} max={10000} step={100} unit="ms"
+            onChange={(v) => setSection("scanner", { feedback_red_ms: v })}
+            testid="set-scanner-red-ms" />
+          <SettingSwitch label="Selezione automatica singolo risultato"
+            hint="Se la ricerca trova un solo prodotto lo seleziona subito"
+            checked={s.scanner?.autoselect_single_result}
+            onChange={(v) => setSection("scanner", { autoselect_single_result: v })}
+            testid="set-scanner-autoselect" />
+          <SettingSwitch label="Suono scanner"
+            hint="Beep al match riuscito (richiede audio browser abilitato)"
+            checked={s.scanner?.sound_enabled}
+            onChange={(v) => setSection("scanner", { sound_enabled: v })}
+            testid="set-scanner-sound" />
+        </SettingsSection>
+
+        <SettingsSection title="Dashboard" icon={ArrowClockwise}>
+          <SettingNumber label="Intervallo auto-refresh"
+            hint="0 = disattivato. Consigliato 30-120 secondi"
+            value={s.dashboard?.autorefresh_seconds} min={0} max={3600} step={5} unit="secondi"
+            onChange={(v) => setSection("dashboard", { autorefresh_seconds: v })}
+            testid="set-dash-autorefresh" />
+          <SettingNumber label="Numero ultimi movimenti mostrati"
+            hint="Nel widget 'Ultimi movimenti Notion'"
+            value={s.dashboard?.recent_movements_limit} min={1} max={100} step={1} unit="movimenti"
+            onChange={(v) => setSection("dashboard", { recent_movements_limit: v })}
+            testid="set-dash-recent-limit" />
+        </SettingsSection>
+
+        <SettingsSection title="Magazzino" icon={Warning}>
+          <SettingNumber label="Soglia minima predefinita"
+            hint="Prodotti con quantità ≤ soglia (e > 0) risultano sotto scorta"
+            value={s.magazzino?.low_stock_threshold ?? s.low_stock_threshold}
+            min={0} max={1000} step={1} unit="pezzi"
+            onChange={(v) => { setSection("magazzino", { low_stock_threshold: v }); setS((prev) => ({ ...prev, low_stock_threshold: v })); }}
+            testid="set-mag-low-threshold" />
+          <SettingSwitch label="Avviso sotto scorta"
+            hint="Mostra badge/toast quando un prodotto scende sotto soglia"
+            checked={s.magazzino?.warn_low_stock}
+            onChange={(v) => setSection("magazzino", { warn_low_stock: v })}
+            testid="set-mag-warn-low" />
+          <SettingSwitch label="Avviso esaurito"
+            hint="Mostra badge/toast quando un prodotto arriva a 0"
+            checked={s.magazzino?.warn_out_of_stock}
+            onChange={(v) => setSection("magazzino", { warn_out_of_stock: v })}
+            testid="set-mag-warn-oos" />
+        </SettingsSection>
+
+        <SettingsSection title="Ricerca" icon={MagnifyingGlass}>
+          <SettingSwitch label="Ricerca durante digitazione"
+            hint="Filtra la lista mentre digiti (usa sempre la cache locale F6)"
+            checked={s.ricerca?.search_on_type}
+            onChange={(v) => setSection("ricerca", { search_on_type: v })}
+            testid="set-ric-live" />
+          <SettingNumber label="Numero massimo risultati"
+            value={s.ricerca?.max_results} min={1} max={200} step={5} unit="risultati"
+            onChange={(v) => setSection("ricerca", { max_results: v })}
+            testid="set-ric-max" />
+          <SettingSwitch label="Ricerca parziale"
+            hint="Trova le corrispondenze anche a metà parola (contains)"
+            checked={s.ricerca?.partial_match}
+            onChange={(v) => setSection("ricerca", { partial_match: v })}
+            testid="set-ric-partial" />
+        </SettingsSection>
+
+        <SettingsSection title="Movimenti" icon={ClockCounterClockwise}>
+          <SettingNumber label="Numero movimenti visualizzati"
+            hint="Massimo record mostrati nella pagina Movimenti"
+            value={s.movimenti?.max_shown} min={10} max={1000} step={10} unit="movimenti"
+            onChange={(v) => setSection("movimenti", { max_shown: v })}
+            testid="set-mov-max" />
+          <SettingSwitch label="Apertura automatica sul mese corrente"
+            checked={s.movimenti?.auto_open_current_month}
+            onChange={(v) => setSection("movimenti", { auto_open_current_month: v })}
+            testid="set-mov-current" />
+        </SettingsSection>
+
+        <SettingsSection title="Sicurezza" icon={Gear}>
+          <SettingNumber label="Durata sessione (minuti)"
+            hint="Dopo questo tempo dal login l'utente deve rieffettuare l'accesso"
+            value={s.sicurezza?.session_ttl_minutes} min={15} max={43200} step={15} unit="minuti"
+            onChange={(v) => setSection("sicurezza", { session_ttl_minutes: v })}
+            testid="set-sec-session-ttl" />
+          <SettingNumber label="Logout automatico dopo inattività"
+            hint="Chiude la sessione se l'utente non interagisce"
+            value={s.sicurezza?.idle_logout_minutes} min={1} max={1440} step={1} unit="minuti"
+            onChange={(v) => setSection("sicurezza", { idle_logout_minutes: v })}
+            testid="set-sec-idle" />
+          <SettingNumber label="Tentativi di login massimi"
+            hint="Oltre questa soglia l'utente viene bloccato temporaneamente"
+            value={s.sicurezza?.max_login_attempts} min={3} max={20} step={1} unit="tentativi"
+            onChange={(v) => setSection("sicurezza", { max_login_attempts: v })}
+            testid="set-sec-max-attempts" />
+          <SettingNumber label="Durata blocco dopo troppi tentativi"
+            value={s.sicurezza?.lockout_minutes} min={1} max={1440} step={1} unit="minuti"
+            onChange={(v) => setSection("sicurezza", { lockout_minutes: v })}
+            testid="set-sec-lockout" />
+          <div className="pt-3 mt-1 text-[11px] text-slate-500 border-t border-slate-100">
+            L'obbligo di cambio password al primo accesso è <strong>sempre attivo</strong> per gli utenti creati dall'Admin.
+          </div>
+        </SettingsSection>
+
+        <SettingsSection title="Manutenzione / Test" icon={Broom}>
+          <div className="py-2">
+            <Label className="text-sm font-semibold text-slate-800">Prefisso dati di test</Label>
+            <div className="text-[11px] text-slate-500 mb-1">
+              Usato dal tab Cleanup per identificare dati fittizi da eliminare (mai su Notion).
+            </div>
+            <Input value={s.test_prefix}
+              onChange={(e) => setS({ ...s, test_prefix: e.target.value })}
+              className="h-11 font-mono-tight max-w-[220px]" data-testid="setting-test-prefix" />
+          </div>
+          <div className="py-2">
+            <Label className="text-sm font-semibold text-slate-800">Durata feedback (retro-compat)</Label>
+            <div className="text-[11px] text-slate-500 mb-1">Impostazione storica in secondi — sovrascritta dai valori ms del blocco Scanner.</div>
+            <Input type="number" min={1} max={30} value={s.feedback_seconds}
+              onChange={(e) => setS({ ...s, feedback_seconds: parseInt(e.target.value || "3", 10) })}
+              className="h-11 max-w-[140px] font-mono-tight" data-testid="setting-feedback-seconds" />
+          </div>
+        </SettingsSection>
       </div>
-      <div>
-        <Label className="text-sm font-semibold">Prefisso dati di test</Label>
-        <div className="text-[11px] text-slate-500 mb-1">Usato dal Cleanup per identificare dati fittizi.</div>
-        <Input value={s.test_prefix}
-          onChange={(e) => setS({ ...s, test_prefix: e.target.value })}
-          className="h-11 font-mono-tight" data-testid="setting-test-prefix" />
+
+      <div className="sticky bottom-3 z-10 flex justify-end">
+        <Button onClick={save} disabled={saving} className="h-11 et-btn-primary border-0 shadow-lg" data-testid="save-settings-btn">
+          {saving ? "Salvo…" : "Salva tutte le impostazioni"}
+        </Button>
       </div>
-      <div>
-        <Label className="text-sm font-semibold">Durata feedback scanner (secondi)</Label>
-        <Input type="number" min={1} max={30} value={s.feedback_seconds}
-          onChange={(e) => setS({ ...s, feedback_seconds: parseInt(e.target.value || "3", 10) })}
-          className="h-11" data-testid="setting-feedback-seconds" />
+    </div>
+  );
+}
+
+// ---------- Sessioni attive (F7) ----------
+export function SessionsTab() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busySid, setBusySid] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const { data } = await axios.get(`${API}/admin/sessions`);
+      setItems(data.items || []);
+    } catch (e) { toast.error("Errore", { description: formatError(e) }); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 20000); // refresh soft ogni 20s (solo su questa tab)
+    return () => clearInterval(t);
+  }, []);
+
+  const disconnect = async (sid) => {
+    if (!window.confirm("Disconnettere questa sessione? L'utente dovrà rieffettuare il login.")) return;
+    setBusySid(sid);
+    try {
+      await axios.delete(`${API}/admin/sessions/${sid}`);
+      toast.success("Sessione disconnessa");
+      load();
+    } catch (e) { toast.error("Errore", { description: formatError(e) }); }
+    finally { setBusySid(null); }
+  };
+
+  return (
+    <div className="space-y-3" data-testid="sessions-tab">
+      <div className="flex items-center justify-between">
+        <div className="text-xs uppercase tracking-wider text-slate-500">
+          {items.length} sessione{items.length === 1 ? "" : " attive"}
+        </div>
+        <Button variant="outline" size="sm" onClick={load} disabled={loading} data-testid="reload-sessions-btn">
+          <ArrowClockwise size={14} className={loading ? "animate-spin" : ""} />
+        </Button>
       </div>
-      <Button onClick={save} disabled={saving} className="h-11 et-btn-primary border-0" data-testid="save-settings-btn">
-        {saving ? "Salvo…" : "Salva impostazioni"}
-      </Button>
+      <div className="et-card-elevated overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="et-table">
+            <thead>
+              <tr>
+                <th>Utente</th>
+                <th>Stato</th>
+                <th>Ultimo accesso</th>
+                <th>Ultima attività</th>
+                <th className="text-right">Azione</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((s) => (
+                <tr key={s.sid} data-testid={`session-row-${s.sid}`}>
+                  <td>
+                    <div className="font-semibold text-slate-900">{s.full_name}</div>
+                    <div className="text-xs text-slate-500 font-mono-tight">@{s.username} · {s.role}</div>
+                  </td>
+                  <td>
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-semibold ${
+                        s.online
+                          ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                          : "bg-slate-100 text-slate-500 border border-slate-200"
+                      }`}
+                      data-testid={`session-status-${s.sid}`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${s.online ? "bg-emerald-500 animate-pulse" : "bg-slate-400"}`}></span>
+                      {s.online ? "Online" : "Offline"}
+                    </span>
+                  </td>
+                  <td className="text-xs font-mono-tight text-slate-600">{fmtDate(s.last_login)}</td>
+                  <td className="text-xs font-mono-tight text-slate-600">{fmtDate(s.last_activity)}</td>
+                  <td className="text-right">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => disconnect(s.sid)}
+                      disabled={busySid === s.sid}
+                      className="text-red-600 border-red-200 hover:bg-red-50"
+                      data-testid={`disconnect-session-${s.sid}`}
+                    >
+                      {busySid === s.sid ? "…" : "Disconnetti"}
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+              {items.length === 0 && !loading && (
+                <tr><td colSpan={5} className="px-3 py-6 text-center text-slate-400">Nessuna sessione attiva.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

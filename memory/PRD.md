@@ -4,41 +4,37 @@
 - **F0-F6** ✅ (scanner, cache O(1), Notion SSOT, conferma finale, mapping strict)
 - **Phase-2 Auth & RBAC** ✅ (15/02/2026)
   - JWT + bcrypt + MongoDB (users, audit_logs)
-  - Bootstrap sicuro primo admin (nessun autoseed) → Admin reale: **Riccardo Biuso** (`riccardo`)
-  - Ruoli operator|admin, 403 su rotte admin per operator
-  - Session invalidation via `password_version`
-  - `Preso da` in Spedizioni = full_name(JWT), non modificabile client-side
-  - Test: 94 passed, 1 skipped. Mapping strict §11: 8/8.
+  - Bootstrap sicuro primo admin → Admin reale: **Riccardo Biuso** (`riccardo`)
+  - Ruoli operator|admin, session invalidation via `password_version`
 - **Phase-3 P1 Admin Extra** ✅ (15/02/2026)
-  - Audit Log UI (`/admin` → tab Audit)
-  - Anomalie: delete singolo + clear all (admin only, con conferma)
-  - Storico Seriali: cerca SN → status + ultima entrata + ultima uscita
-  - Ricerca Globale Admin: prodotti + spedizioni + arrivi + status seriale
-  - Impostazioni: soglia sotto-scorta, prefisso TEST, durata feedback
-  - Cleanup dati TEST_: preview + conferma esplicita, mai tocca Notion
-  - Tutti i nuovi endpoint in `routes/admin_extra_routes.py`, JWT-admin (401 no auth verified)
+  - Audit Log, Anomalie delete, Storico Seriali, Ricerca globale, Cleanup TEST_
 - **Design System Unification (Ibrido premium)** ✅ (15/02/2026)
-  - Design tokens unificati in `index.css` (navy 950/900, amber 300/400, IBM Plex + Manrope, shadow soffuse)
-  - Header dark navy full-width con logo Elios (coerente con Login) su tutte le pagine + Admin
-  - Nav con active/hover amber (`.et-nav-link`)
-  - Card premium light (`.et-card`, `.et-card-elevated`) + tables (`.et-table`) con row-hover amber
-  - Pulsante primario `.et-btn-primary` (nero navy con accento amber su hover)
-  - Focus ring amber globale (input/button/textarea) via CSS override — coerente con Login
-  - Dashboard: KPI cards elevated + big Arrivi/Spedizioni card con semantic glow (emerald/amber su navy)
-  - Nessuna modifica a logiche, API, mapping Notion o autenticazione
+  - Design tokens navy/amber + IBM Plex/Manrope in `index.css` (utility `.et-*`)
+  - Header dark navy + nav accent amber su tutte le pagine
+- **F7 — Ottimizzazione + Impostazioni Admin estese** ✅ (15/02/2026)
+  - **Sessioni attive** in MongoDB `active_sessions` (sid nel JWT, `last_activity` tracciato ad ogni chiamata, NO device info)
+  - `GET/DELETE /api/admin/sessions` → tab Admin → Sessioni con Online/Offline (soglia 2 min) e "Disconnetti"
+  - Auto-logout idle configurabile lato client (`sicurezza.idle_logout_minutes`) — listener mouse/keyboard/touch/scroll
+  - Auto-expiry sessioni server-side quando `last_activity > idle_logout_minutes`
+  - **must_change_password** flag: creazione nuovo utente & reset admin lo impostano a `true`; `require_password_current` dep blocca ogni rotta tranne `change-my-password`; redirect frontend a `/force-change-password` via evento globale
+  - **Login attempts + lockout**: `login_attempts` collection, `max_login_attempts` e `lockout_minutes` da settings, ritorna 429 quando bloccato
+  - **Impostazioni estese** (nested nel settings store esistente): scanner (autofocus, feedback ms verde/rosso, autoselect, suono), dashboard (auto-refresh, recent limit), magazzino (soglia, warn low/oos), ricerca (live, max, partial), movimenti (max, current-month), sicurezza (session TTL, idle, max attempts, lockout)
+  - **Responsive CSS**: media queries `(hover:none) and (pointer:coarse)` → min-h 44px + font-size 16px (no zoom iOS) su input/button; smartphone verticale → tabs scroll orizzontale, dialog full-width, KPI grid 2 col; palmare industriale → text compatti; prefers-reduced-motion; anti scroll-orizzontale globale
 - PWA — solo alla fine
 
 ## File architettura
-- Backend: `server.py` (F1-F6 preservato) + `routes/{auth,admin_users,admin_extra}_routes.py`
-- Frontend: `AuthContext`, `ProtectedRoute`, `LoginPage`, `AdminUsersPage`, `AdminExtraTabs`, aggiornati `AdminPage/ChecklistPage/ArriviPage/AnomaliePage/AppLayout`
+- Backend: `server.py` (F1-F6 preservato) + `routes/{auth,admin_users,admin_extra}_routes.py`, `auth.py` con session helpers
+- Frontend: `AuthContext` con idle timer + must_change_password event, `ProtectedRoute`, `LoginPage`, `ForceChangePasswordPage` (F7), `AdminPage` (tab Sessioni), `AdminExtraTabs` (SettingsTab riorganizzata + SessionsTab)
 
 ## Regole invariate
-- Notion = SSOT (inventario, seriali, movimenti, arrivi, uscite)
-- MongoDB solo per: users, audit_logs, anomalies, history locale, settings
+- Notion = SSOT (inventario, seriali, movimenti, arrivi, uscite) — mai toccata dalle nuove feature F7
+- MongoDB solo per: users, audit_logs, anomalies, active_sessions, login_attempts, history locale, settings
 - Password mai in chiaro (bcrypt), mai su Notion, mai nei log/audit
-- Mapping strict §11: `SN`/`Item`=solo seriale, `Preso per`=solo cliente, `Preso da`=solo operatore
+- Mapping strict §11 invariato: `SN`/`Item`=solo seriale, `Preso per`=solo cliente, `Preso da`=solo operatore
 - Nessuna scrittura reale di movimenti Wallbox durante i test
+- JWT solo via Bearer header (mai cookie) — per-device via localStorage/sessionStorage
 
 ## Backlog
-- Export CSV/Excel (P2)
-- PWA installabilità (P3, ultima fase)
+- Export CSV/Excel storico Spedizioni/Arrivi (P1)
+- PWA installabilità (P2)
+- Stats operatore giornaliere/settimanali (idea)

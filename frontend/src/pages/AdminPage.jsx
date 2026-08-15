@@ -29,8 +29,9 @@ import {
   Broom,
   Gear,
   ListMagnifyingGlass,
+  UsersFour,
 } from "@phosphor-icons/react";
-import { AuditLogTab, SettingsTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab } from "./AdminExtraTabs";
+import { AuditLogTab, SettingsTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab, SessionsTab } from "./AdminExtraTabs";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -769,6 +770,9 @@ export default function AdminPage() {
             <TabsTrigger value="audit-log" data-testid="tab-audit-log">
               <ClockCounterClockwise size={16} className="mr-1" /> Audit
             </TabsTrigger>
+            <TabsTrigger value="sessions" data-testid="tab-sessions">
+              <UsersFour size={16} className="mr-1" /> Sessioni
+            </TabsTrigger>
             <TabsTrigger value="cleanup" data-testid="tab-cleanup">
               <Broom size={16} className="mr-1" /> Cleanup
             </TabsTrigger>
@@ -782,6 +786,7 @@ export default function AdminPage() {
           <TabsContent value="global-search"><GlobalSearchTab /></TabsContent>
           <TabsContent value="serial-history"><SerialHistoryTab /></TabsContent>
           <TabsContent value="audit-log"><AuditLogTab /></TabsContent>
+          <TabsContent value="sessions"><SessionsTab /></TabsContent>
           <TabsContent value="cleanup"><CleanupTestTab /></TabsContent>
           <TabsContent value="settings"><SettingsTab /></TabsContent>
         </Tabs>

@@ -106,6 +106,7 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             "role": body.role,
             "active": True,
             "password_version": 1,
+            "must_change_password": True,  # nuovo utente → cambio password obbligatorio al primo accesso
             "created_at": datetime.now(timezone.utc),
             "last_login": None,
         }
@@ -151,6 +152,9 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         if updates.get("active") is False:
             updates["password_version"] = int(existing.get("password_version", 1)) + 1
         await db.users.update_one({"_id": oid}, {"$set": updates})
+        # Se disattivato, elimina anche le sessioni attive
+        if updates.get("active") is False:
+            await auth_mod.invalidate_all_sessions_for_user(db, str(oid))
         updated = await db.users.find_one({"_id": oid})
         await _log_audit(admin, "user.update", user_id,
                          {k: v for k, v in updates.items() if k != "password_hash"})
@@ -169,8 +173,14 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         new_pv = int(existing.get("password_version", 1)) + 1
         await db.users.update_one(
             {"_id": oid},
-            {"$set": {"password_hash": new_hash, "password_version": new_pv}},
+            {"$set": {
+                "password_hash": new_hash,
+                "password_version": new_pv,
+                "must_change_password": True,  # forza cambio al primo login con la password resettata
+            }},
         )
+        # Invalida tutte le sessioni attive dell'utente resettato
+        await auth_mod.invalidate_all_sessions_for_user(db, str(oid))
         # Audit log — NEVER include the password itself
         await _log_audit(admin, "user.reset_password", user_id, {
             "target_username": existing.get("username"),
@@ -197,6 +207,8 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             {"_id": oid},
             {"$set": {"active": False, "password_version": new_pv}},
         )
+        # Elimina anche le sessioni attive
+        await auth_mod.invalidate_all_sessions_for_user(db, str(oid))
         await _log_audit(admin, "user.delete", user_id, {"username": existing.get("username")})
         return {"ok": True}
 

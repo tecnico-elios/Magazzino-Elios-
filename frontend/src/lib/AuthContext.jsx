@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
 import axios from "axios";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -7,12 +7,7 @@ const REMEMBER_KEY = "elios_remember";
 
 const AuthContext = createContext(null);
 
-// Storage strategy — per-device only:
-//  - "Rimani collegato" ON  → localStorage (persiste anche dopo chiusura browser)
-//  - "Rimani collegato" OFF → sessionStorage (muore alla chiusura del tab/browser)
-// Nessun cookie viene mai settato — i cookie possono essere sincronizzati
-// tra dispositivi via Chrome Sync o iCloud Keychain, mentre localStorage e
-// sessionStorage sono strettamente per-browser/per-device.
+// Storage strategy — per-device only (localStorage se Rimani collegato, sessionStorage altrimenti)
 function readStoredToken() {
   try {
     return sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY) || null;
@@ -20,10 +15,11 @@ function readStoredToken() {
     return null;
   }
 }
-
+function isRememberSet() {
+  try { return localStorage.getItem(REMEMBER_KEY) === "1"; } catch { return false; }
+}
 function writeStoredToken(token, remember) {
   try {
-    // Sempre pulisci entrambi prima di scrivere
     sessionStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(TOKEN_KEY);
     if (token) {
@@ -40,7 +36,7 @@ function writeStoredToken(token, remember) {
   } catch {}
 }
 
-// Global axios interceptor — attaches Bearer token to every request.
+// Interceptor per Bearer + auto-logout su 401
 axios.interceptors.request.use((config) => {
   const t = readStoredToken();
   if (t) {
@@ -52,7 +48,6 @@ axios.interceptors.request.use((config) => {
   return config;
 });
 
-// Global response interceptor — auto-logout on 401 (invalid/expired token)
 axios.interceptors.response.use(
   (r) => r,
   (err) => {
@@ -63,6 +58,16 @@ axios.interceptors.response.use(
         window.dispatchEvent(new Event("elios:auth-expired"));
       }
     }
+    // 403 password_change_required → redirect a /force-change-password
+    if (err?.response?.status === 403) {
+      const d = err?.response?.data?.detail;
+      const code = (typeof d === "object" && d) ? d.code : null;
+      if (code === "password_change_required" &&
+          !window.location.pathname.startsWith("/force-change-password") &&
+          !window.location.pathname.startsWith("/login")) {
+        window.dispatchEvent(new Event("elios:must-change-password"));
+      }
+    }
     return Promise.reject(err);
   }
 );
@@ -70,6 +75,8 @@ axios.interceptors.response.use(
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(undefined);
   const [bootstrap, setBootstrap] = useState(null);
+  const idleTimerRef = useRef(null);
+  const idleLimitMinRef = useRef(30); // aggiornato dopo il login dalle settings
 
   const refreshMe = useCallback(async () => {
     const t = readStoredToken();
@@ -99,36 +106,96 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  const applyRefreshedToken = useCallback((token) => {
+    if (!token) return;
+    writeStoredToken(token, isRememberSet());
+  }, []);
+
   const login = async (username, password, remember = false) => {
     const { data } = await axios.post(`${API}/auth/login`, { username, password, remember_me: !!remember });
     writeStoredToken(data.token, !!remember);
     setUser(data.user);
-    return data.user;
+    return { user: data.user, mustChangePassword: !!data.must_change_password };
   };
 
   const bootstrapFirstAdmin = async (payload) => {
     const { data } = await axios.post(`${API}/auth/bootstrap`, payload);
-    // Bootstrap = primo login → default a sessionStorage (session-scoped) per
-    // il device che ha creato l'admin. L'utente può poi loggarsi con "Rimani
-    // collegato" se vuole persistenza cross-restart.
     writeStoredToken(data.token, false);
     setUser(data.user);
     await refreshBootstrap();
     return data.user;
   };
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    // Best-effort: chiama /auth/logout per rimuovere la sessione lato server
+    try { await axios.post(`${API}/auth/logout`); } catch {}
     writeStoredToken(null, false);
     setUser(null);
   }, []);
+
+  // Idle-logout timer — resettato ad ogni activity (mouse/keyboard/touch)
+  const resetIdleTimer = useCallback(() => {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    const mins = Math.max(1, idleLimitMinRef.current || 30);
+    idleTimerRef.current = setTimeout(() => {
+      logout();
+      if (!window.location.pathname.startsWith("/login")) {
+        window.location.replace("/login?reason=idle");
+      }
+    }, mins * 60 * 1000);
+  }, [logout]);
+
+  const loadSecuritySettings = useCallback(async () => {
+    try {
+      const t = readStoredToken();
+      if (!t) return;
+      const { data } = await axios.get(`${API}/admin/settings`);
+      const m = data?.sicurezza?.idle_logout_minutes;
+      if (typeof m === "number" && m > 0) {
+        idleLimitMinRef.current = m;
+        resetIdleTimer();
+      }
+    } catch {
+      // Non-admin (403) o network — ignoriamo, il default 30 resta valido
+    }
+  }, [resetIdleTimer]);
 
   useEffect(() => {
     refreshMe();
     refreshBootstrap();
     const onExpired = () => setUser(null);
+    const onMustChange = () => {
+      if (!window.location.pathname.startsWith("/force-change-password")) {
+        window.location.replace("/force-change-password");
+      }
+    };
     window.addEventListener("elios:auth-expired", onExpired);
-    return () => window.removeEventListener("elios:auth-expired", onExpired);
+    window.addEventListener("elios:must-change-password", onMustChange);
+    return () => {
+      window.removeEventListener("elios:auth-expired", onExpired);
+      window.removeEventListener("elios:must-change-password", onMustChange);
+    };
   }, [refreshMe, refreshBootstrap]);
+
+  // Attiva idle timer + listener quando c'è un user autenticato
+  useEffect(() => {
+    if (!user) {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+      return;
+    }
+    loadSecuritySettings();
+    resetIdleTimer();
+    const events = ["mousemove", "keydown", "touchstart", "click", "scroll"];
+    const handler = () => resetIdleTimer();
+    events.forEach((e) => window.addEventListener(e, handler, { passive: true }));
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, handler));
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    };
+  }, [user, resetIdleTimer, loadSecuritySettings]);
 
   const value = {
     user,
@@ -138,9 +205,11 @@ export function AuthProvider({ children }) {
     bootstrapFirstAdmin,
     refreshMe,
     refreshBootstrap,
+    applyRefreshedToken,
     isAdmin: !!user && user.role === "admin",
     isOperator: !!user && user.role === "operator",
     isAuthenticated: !!user,
+    mustChangePassword: !!user?.must_change_password,
     isLoading: user === undefined,
   };
 

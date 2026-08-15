@@ -256,6 +256,80 @@ input[type='number'] {
     max-width: 100%;
 }
 
+/* ============================================================
+   Responsive tweaks (F7) — smartphone, tablet, palmare, PC
+   Punto d'ingresso unico per media queries condivise.
+   ============================================================ */
+
+/* Touch targets minimi 44x44 (Apple HIG / Material) su tutti i device touch */
+@media (hover: none) and (pointer: coarse) {
+    button, .et-btn-primary, [role="button"] {
+        min-height: 44px;
+    }
+    input[type="text"], input[type="password"], input[type="number"],
+    input[type="email"], input[type="search"], input:not([type]) {
+        min-height: 44px;
+        font-size: 16px !important; /* previene lo zoom automatico iOS */
+    }
+    select, textarea { min-height: 44px; font-size: 16px !important; }
+}
+
+/* Small screens (smartphone verticale): riduci padding orizzontali e testi enormi */
+@media (max-width: 640px) {
+    .et-header-dark { box-shadow: 0 4px 16px -8px rgba(2,6,23,0.5); }
+    .et-table thead th { padding: 8px 10px; font-size: 9px; }
+    .et-table tbody td { padding: 10px 10px; }
+    /* Dialog shadcn: full-width con padding coerente */
+    [data-radix-dialog-content] {
+        width: calc(100% - 24px) !important;
+        max-width: calc(100% - 24px) !important;
+    }
+    /* Riduci gap card grandi Arrivi/Spedizioni sulla dashboard */
+    .grid-dashboard-hero { gap: 12px !important; }
+    /* KPI grid: 2 colonne su xs invece di 4 */
+    .grid-cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    /* Rimuovi ombre pesanti su mobile per performance */
+    .shadow-lg, .shadow-xl { box-shadow: 0 2px 8px -2px rgba(15,23,42,0.15); }
+    /* Tabs list: consenti overflow scroll orizzontale invece di wrap */
+    [role="tablist"] {
+        flex-wrap: nowrap !important;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+    [role="tablist"]::-webkit-scrollbar { display: none; }
+}
+
+/* Palmare industriale tipico (larghezza 240-360 px, aspect ratio compatto) */
+@media (max-width: 480px) {
+    /* Ancora più compatto */
+    .et-page-heading { font-size: 1.5rem !important; line-height: 1.2; }
+    .et-table thead th { font-size: 8px; letter-spacing: 0.06em; }
+    .et-table tbody td { padding: 8px; font-size: 12px; }
+    /* Header interno con logo: mostra solo logo, nasconde eyebrow duplicato */
+    .et-header-dark .brand-subtitle { display: none; }
+}
+
+/* Landscape smartphone / tablet piccolo: mantieni tabelle scrollabili X */
+@media (orientation: landscape) and (max-height: 500px) {
+    .et-header-dark { position: relative !important; }
+    main { min-height: 0; }
+}
+
+/* Riduci animazioni per utenti che le hanno disabilitate (accessibilità + perf) */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+    }
+}
+
+/* Prevenzione scroll orizzontale globale */
+html, body {
+    max-width: 100%;
+    overflow-x: hidden;
+}
+
 @layer base {
     [data-debug-wrapper="true"] {
         display: contents !important;

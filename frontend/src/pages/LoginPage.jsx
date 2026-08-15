@@ -145,9 +145,13 @@ function LoginForm() {
     e.preventDefault();
     setBusy(true);
     try {
-      await login(username.trim().toLowerCase(), password, remember);
+      const result = await login(username.trim().toLowerCase(), password, remember);
       toast.success("Accesso effettuato");
-      navigate(from, { replace: true });
+      if (result?.mustChangePassword) {
+        navigate("/force-change-password", { replace: true });
+      } else {
+        navigate(from, { replace: true });
+      }
     } catch (err) {
       toast.error("Accesso negato", { description: formatError(err) });
     } finally {
