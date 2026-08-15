@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Button } from "./ui/button";
+import { Plus, Minus } from "@phosphor-icons/react";
 
 /**
  * QtyDialog — popup quantità riusabile per Arrivi/Spedizioni.
@@ -95,25 +96,64 @@ export default function QtyDialog({
           <Label htmlFor="qty-input" className="text-slate-700 text-sm font-semibold">
             {label}
           </Label>
-          <Input
-            id="qty-input"
-            ref={inputRef}
-            type="number"
-            min={1}
-            step="1"
-            value={qty}
-            onChange={(e) => setQty(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                confirm();
-              }
-            }}
-            className={`h-14 mt-2 text-2xl font-mono-tight font-bold text-center ${
-              overMax ? "border-red-500 text-red-600" : ""
-            }`}
-            data-testid="qty-input"
-          />
+          <div className="mt-2 flex items-stretch gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                const cur = parseInt(qty || "0", 10);
+                const next = Math.max(1, (isFinite(cur) ? cur : 1) - 1);
+                setQty(String(next));
+              }}
+              disabled={parseInt(qty || "0", 10) <= 1}
+              className="h-14 w-14 shrink-0 text-xl"
+              aria-label="Diminuisci di 1"
+              data-testid="qty-minus"
+            >
+              <Minus size={20} weight="bold" />
+            </Button>
+            <Input
+              id="qty-input"
+              ref={inputRef}
+              type="number"
+              min={1}
+              step="1"
+              value={qty}
+              onChange={(e) => setQty(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  confirm();
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  const cur = parseInt(qty || "0", 10);
+                  setQty(String(Math.max(1, (isFinite(cur) ? cur : 0) + 1)));
+                } else if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  const cur = parseInt(qty || "0", 10);
+                  setQty(String(Math.max(1, (isFinite(cur) ? cur : 1) - 1)));
+                }
+              }}
+              className={`h-14 flex-1 min-w-0 text-2xl font-mono-tight font-bold text-center ${
+                overMax ? "border-red-500 text-red-600" : ""
+              }`}
+              data-testid="qty-input"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                const cur = parseInt(qty || "0", 10);
+                const next = Math.max(1, (isFinite(cur) ? cur : 0) + 1);
+                setQty(String(next));
+              }}
+              className="h-14 w-14 shrink-0 text-xl"
+              aria-label="Aumenta di 1"
+              data-testid="qty-plus"
+            >
+              <Plus size={20} weight="bold" />
+            </Button>
+          </div>
           {overMax && (
             <div className="text-xs text-red-600 mt-2 font-semibold" data-testid="qty-over-max">
               🔴 GIACENZA INSUFFICIENTE — disponibili {maxAvailable}
