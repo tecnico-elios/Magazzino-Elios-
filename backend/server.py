@@ -846,7 +846,7 @@ async def history(limit: int = 20):
 
 
 # ---------- Arrivi (F2) ----------
-def build_arrivo_email(payload: ArrivoPayload) -> str:
+def build_arrivo_email(payload: ArrivoPayload, tz_name: str = "Europe/Rome") -> str:
     esc = html_lib.escape
     filled = [i for i in payload.items if i.quantity > 0]
     rows_html = []
@@ -876,7 +876,14 @@ def build_arrivo_email(payload: ArrivoPayload) -> str:
         if payload.notes and payload.notes.strip()
         else ""
     )
-    now_it = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    # F8 fix: usa il fuso orario configurato in Admin → Impostazioni → Fuso orario
+    # (default Europe/Rome). Prima era hardcoded UTC → l'operatore in Italia vedeva
+    # l'ora indietro di 1-2h rispetto all'orologio reale. ZoneInfo gestisce auto DST.
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ROME_TZ
+    now_it = datetime.now(timezone.utc).astimezone(tz).strftime("%H:%M")
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background:#f1f5f9;">
@@ -1049,7 +1056,11 @@ async def submit_arrivo(
 
     # 4) Email
     recipients = await get_recipients()
-    html_content = build_arrivo_email(payload)
+    # F8 fix: passa il fuso configurato all'email builder così l'orario di registrazione
+    # riflette l'ora reale del fuso Admin (non più UTC).
+    _settings = await admin_extra_routes.get_app_settings(db)
+    _tz_name = ((_settings.get("general") or {}).get("timezone")) or "Europe/Rome"
+    html_content = build_arrivo_email(payload, tz_name=_tz_name)
     subject = f"Arrivo — {payload.fornitore} — {payload.arrival_date}"
     sent = []
     errors = []
