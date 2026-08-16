@@ -422,7 +422,6 @@ export default function ArriviPage() {
         )}
 
         {/* Scanner — visibile solo dopo che l'operatore ha scelto un flusso o la lista contiene già righe */}
-        {(list.length > 0 || pending || initialAction) && (
         <ScannerBar
           onScanned={handleScannedCode}
           lastScan={lastScan}
@@ -432,62 +431,34 @@ export default function ArriviPage() {
               ? `In attesa dei seriali per: ${pending.name}`
               : initialAction === "rientro"
                 ? "Scansiona o inserisci il seriale già uscito da reintegrare"
-                : "Inserisci o scansiona un codice prodotto o un seriale — puoi anche selezionare manualmente qui sotto"
+                : "Inserisci o scansiona un codice prodotto o un seriale"
           }
         />
+        {/* Contesto: modello serializzato selezionato — SOLO banner, i picker piccoli sono
+            stati rimossi (F8: le card grandi sostituiscono i pulsanti piccoli duplicati). */}
+        {pending && (
+          <section className="bg-white border border-slate-200 rounded-md p-4">
+            <div
+              className="flex items-start gap-2 flex-wrap"
+              data-testid="pending-serialized-banner"
+            >
+              <Badge className="bg-emerald-600 hover:bg-emerald-700 whitespace-normal break-words max-w-full text-left leading-snug">
+                🎯 Modello: {pending.name}
+              </Badge>
+              <span className="text-xs text-slate-500 break-words">
+                Ora inserisci o scansiona il seriale uno alla volta — digitazione manuale, ENTER, CERCA o scanner sono equivalenti.
+              </span>
+              <button
+                type="button"
+                onClick={() => setPending(null)}
+                className="text-xs text-red-600 hover:underline"
+                data-testid="clear-pending-btn"
+              >
+                Rimuovi selezione
+              </button>
+            </div>
+          </section>
         )}
-        {/* Contesto: modello serializzato selezionato + selettore prodotto manuale */}
-        <section className="bg-white border border-slate-200 rounded-md p-4">
-          <div className="flex flex-wrap items-center gap-2 justify-between">
-            <div className="min-w-0 flex-1">
-              {pending ? (
-                <div
-                  className="flex items-start gap-2 flex-wrap"
-                  data-testid="pending-serialized-banner"
-                >
-                  <Badge className="bg-emerald-600 hover:bg-emerald-700 whitespace-normal break-words max-w-full text-left leading-snug">
-                    🎯 Modello: {pending.name}
-                  </Badge>
-                  <span className="text-xs text-slate-500 break-words">
-                    Ora inserisci o scansiona il seriale uno alla volta — digitazione manuale, ENTER, CERCA o scanner sono equivalenti.
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setPending(null)}
-                    className="text-xs text-red-600 hover:underline"
-                    data-testid="clear-pending-btn"
-                  >
-                    Rimuovi selezione
-                  </button>
-                </div>
-              ) : (
-                <div className="text-sm text-slate-500">
-                  Nessun modello selezionato. Inserisci o scansiona un barcode, oppure seleziona il prodotto manualmente.
-                </div>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setPicker({ filter: "serialized" })}
-                className="h-10"
-                data-testid="pick-serialized-btn"
-              >
-                <MagnifyingGlass size={16} className="mr-1" /> Prodotto a Seriale
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setPicker({ filter: "quantity" })}
-                className="h-10"
-                data-testid="pick-quantity-btn"
-              >
-                <MagnifyingGlass size={16} className="mr-1" /> Prodotto a Quantità
-              </Button>
-            </div>
-          </div>
-        </section>
 
         {/* Lista temporanea */}
         <section
