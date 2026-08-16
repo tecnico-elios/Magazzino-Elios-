@@ -14,23 +14,28 @@ import BarcodeScanner from "./BarcodeScanner";
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const SERVER_DEBOUNCE_MS = 400;
 
-// Cache impostazioni feedback (durate ms) — invalidata via evento globale.
-let _cachedFeedbackMs = null;
-async function fetchFeedbackMs() {
-  if (_cachedFeedbackMs) return _cachedFeedbackMs;
+// Cache impostazioni feedback + comportamenti scanner (durate ms, autofocus, autoselect,
+// ricerca live, max risultati) — invalidata via evento globale.
+let _cachedScannerCfg = null;
+async function fetchScannerCfg() {
+  if (_cachedScannerCfg) return _cachedScannerCfg;
   try {
     const { data } = await axios.get(`${API}/settings`);
-    _cachedFeedbackMs = {
+    _cachedScannerCfg = {
       green: Math.max(200, parseInt(data?.scanner?.feedback_green_ms || 3000, 10)),
       red: Math.max(200, parseInt(data?.scanner?.feedback_red_ms || 3000, 10)),
+      autofocus: data?.scanner?.autofocus !== false, // default true
+      autoselect: !!data?.scanner?.autoselect_single_result,
+      searchOnType: data?.ricerca?.search_on_type !== false, // default true
+      maxResults: Math.max(1, parseInt(data?.ricerca?.max_results || 8, 10)),
     };
   } catch {
-    _cachedFeedbackMs = { green: 3000, red: 3000 };
+    _cachedScannerCfg = { green: 3000, red: 3000, autofocus: true, autoselect: false, searchOnType: true, maxResults: 8 };
   }
-  return _cachedFeedbackMs;
+  return _cachedScannerCfg;
 }
 if (typeof window !== "undefined") {
-  window.addEventListener("elios:settings-changed", () => { _cachedFeedbackMs = null; });
+  window.addEventListener("elios:settings-changed", () => { _cachedScannerCfg = null; });
 }
 
 /**
@@ -50,20 +55,28 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
   const [open, setOpen] = useState(false); // dropdown visibility
   const [hoverIdx, setHoverIdx] = useState(-1);
   const [serverHit, setServerHit] = useState(null); // {item, status, ...} for SN/barcode found on Notion
+  const [cfg, setCfg] = useState({ autofocus: true, autoselect: false, searchOnType: true, maxResults: 8 });
   const inputRef = useRef(null);
   const containerRef = useRef(null);
   const { searchLocal } = useInventoryCtx();
 
   useEffect(() => {
-    if (inputRef.current) inputRef.current.focus();
+    fetchScannerCfg().then((c) => setCfg({
+      autofocus: c.autofocus, autoselect: c.autoselect,
+      searchOnType: c.searchOnType, maxResults: c.maxResults,
+    }));
   }, []);
 
-  // 3s auto-clear feedback — durata gestita da Admin → Impostazioni → Scanner (verde/rosso).
+  useEffect(() => {
+    if (cfg.autofocus && inputRef.current) inputRef.current.focus();
+  }, [cfg.autofocus]);
+
+  // Auto-clear feedback — durate configurabili da Admin → Impostazioni → Scanner.
   useEffect(() => {
     if (!lastScan || !onClearLastScan) return undefined;
     let cancelled = false;
     let timerId = null;
-    fetchFeedbackMs().then((ms) => {
+    fetchScannerCfg().then((ms) => {
       if (cancelled) return;
       const isOk = lastScan.type === "ok";
       const duration = isOk ? ms.green : ms.red;
@@ -88,8 +101,9 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
   const localSuggestions = useMemo(() => {
     const q = buffer.trim();
     if (q.length < 2) return [];
-    return searchLocal(q, 8);
-  }, [buffer, searchLocal]);
+    if (!cfg.searchOnType) return [];
+    return searchLocal(q, cfg.maxResults);
+  }, [buffer, searchLocal, cfg.searchOnType, cfg.maxResults]);
 
   // Debounced server-side lookup for potential SNs / barcodes not in local SKU cache
   useEffect(() => {

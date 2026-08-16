@@ -13,7 +13,7 @@ import {
 } from "@phosphor-icons/react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const REFRESH_MS = 60 * 1000; // silent refresh every 60s — non-blocking
+const DEFAULT_REFRESH_MS = 60 * 1000; // fallback se le impostazioni non sono caricate
 
 /**
  * DashboardPage — F5
@@ -42,8 +42,18 @@ export default function DashboardPage() {
 
   useEffect(() => {
     load();
-    const id = setInterval(() => load(true), REFRESH_MS);
-    return () => clearInterval(id);
+    let intervalId = null;
+    (async () => {
+      try {
+        const { data } = await axios.get(`${API}/settings`);
+        const sec = parseInt(data?.dashboard?.autorefresh_seconds ?? 0, 10);
+        const ms = sec > 0 ? sec * 1000 : DEFAULT_REFRESH_MS;
+        intervalId = setInterval(() => load(true), ms);
+      } catch {
+        intervalId = setInterval(() => load(true), DEFAULT_REFRESH_MS);
+      }
+    })();
+    return () => { if (intervalId) clearInterval(intervalId); };
   }, [load]);
 
   const totalProducts = kpi?.total_products ?? 0;

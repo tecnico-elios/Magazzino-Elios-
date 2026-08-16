@@ -58,7 +58,21 @@ export default function MovimentiPage() {
   const [error, setError] = useState(null);
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [maxShown, setMaxShown] = useState(500);
   const cacheRef = useRef(new Map()); // key: 'YYYY-MM' -> { items, at }
+
+  // Load Admin settings once — movimenti.max_shown + auto_open_current_month
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await axios.get(`${API}/settings`);
+        const limit = parseInt(data?.movimenti?.max_shown ?? 500, 10);
+        if (limit > 0) setMaxShown(limit);
+        const autoOpen = data?.movimenti?.auto_open_current_month !== false;
+        if (autoOpen) setMonthKey(currentMonthKey());
+      } catch {}
+    })();
+  }, []);
 
   const load = useCallback(
     async (key, { force = false } = {}) => {
@@ -73,7 +87,7 @@ export default function MovimentiPage() {
       setError(null);
       try {
         const { data } = await axios.get(`${API}/movimenti`, {
-          params: { month: key, limit: 500 },
+          params: { month: key, limit: maxShown },
         });
         const rows = data.items || [];
         cacheRef.current.set(key, { items: rows, at: Date.now() });
@@ -86,7 +100,7 @@ export default function MovimentiPage() {
         setLoading(false);
       }
     },
-    []
+    [maxShown]
   );
 
   useEffect(() => {

@@ -173,7 +173,6 @@ export function SettingsTab() {
       const payload = {
         low_stock_threshold: s.low_stock_threshold,
         test_prefix: s.test_prefix,
-        feedback_seconds: s.feedback_seconds,
         scanner: s.scanner,
         dashboard: s.dashboard,
         magazzino: s.magazzino,
@@ -317,13 +316,6 @@ export function SettingsTab() {
             <Input value={s.test_prefix}
               onChange={(e) => setS({ ...s, test_prefix: e.target.value })}
               className="h-11 font-mono-tight max-w-[220px]" data-testid="setting-test-prefix" />
-          </div>
-          <div className="py-2">
-            <Label className="text-sm font-semibold text-slate-800">Durata feedback (retro-compat)</Label>
-            <div className="text-[11px] text-slate-500 mb-1">Impostazione storica in secondi — sovrascritta dai valori ms del blocco Scanner.</div>
-            <Input type="number" min={1} max={30} value={s.feedback_seconds}
-              onChange={(e) => setS({ ...s, feedback_seconds: parseInt(e.target.value || "3", 10) })}
-              className="h-11 max-w-[140px] font-mono-tight" data-testid="setting-feedback-seconds" />
           </div>
         </SettingsSection>
       </div>
