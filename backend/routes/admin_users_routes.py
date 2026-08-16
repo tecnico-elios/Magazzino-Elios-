@@ -190,8 +190,21 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
 
     @router.delete("/{user_id}")
     async def delete_user(user_id: str, admin=Depends(deps.require_admin)):
-        """Soft-delete: setta active=False + bump password_version.
-        Non elimina fisicamente il record (per integrità audit log)."""
+        """HARD delete definitivo dell'utente.
+
+        Regole:
+          - Solo Admin (require_admin dependency).
+          - Non è possibile eliminare se stessi.
+          - Non è possibile eliminare l'ultimo Admin attivo.
+        Cancella:
+          - documento utente (username, password_hash, email, dati personali);
+          - sessioni attive (`active_sessions`) → impedisce qualsiasi ulteriore accesso.
+        Preserva la tracciabilità:
+          - `audit_logs` NON vengono cancellati; il campo `actor_username` viene
+            anonimizzato in "[utente eliminato]" e in `meta.target_username` idem,
+            mantenendo però `actor_id` / `target_user_id` per la tracciabilità.
+        NB: gli Arrivi/Spedizioni/Movimenti sono su Notion — non vengono toccati.
+        """
         oid = _oid(user_id)
         existing = await db.users.find_one({"_id": oid})
         if not existing:
@@ -199,17 +212,32 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         if str(existing["_id"]) == str(admin["_id"]):
             raise HTTPException(409, "Non puoi eliminare te stesso")
         if existing.get("role") == auth_mod.ROLE_ADMIN:
-            admins_count = await db.users.count_documents({"role": auth_mod.ROLE_ADMIN, "active": True})
-            if admins_count <= 1:
+            # Blocca eliminazione dell'ultimo Admin attivo (indipendentemente da active state).
+            active_admins = await db.users.count_documents({"role": auth_mod.ROLE_ADMIN, "active": True})
+            if existing.get("active", True) and active_admins <= 1:
                 raise HTTPException(409, "Impossibile eliminare l'ultimo Admin attivo")
-        new_pv = int(existing.get("password_version", 1)) + 1
-        await db.users.update_one(
-            {"_id": oid},
-            {"$set": {"active": False, "password_version": new_pv}},
-        )
-        # Elimina anche le sessioni attive
-        await auth_mod.invalidate_all_sessions_for_user(db, str(oid))
-        await _log_audit(admin, "user.delete", user_id, {"username": existing.get("username")})
-        return {"ok": True}
+        username = existing.get("username")
+        # 1) Anonimizza gli audit log dell'utente (mantiene actor_id/target_user_id).
+        try:
+            await db.audit_logs.update_many(
+                {"actor_id": str(oid)},
+                {"$set": {"actor_username": "[utente eliminato]"}},
+            )
+            await db.audit_logs.update_many(
+                {"target_user_id": str(oid), "meta.target_username": {"$exists": True}},
+                {"$set": {"meta.target_username": "[utente eliminato]"}},
+            )
+        except Exception as e:
+            logger.warning("audit anonymize failed: %s", e)
+        # 2) Elimina sessioni attive → revoca accesso immediato.
+        try:
+            await auth_mod.invalidate_all_sessions_for_user(db, str(oid))
+        except Exception as e:
+            logger.warning("session invalidation failed: %s", e)
+        # 3) Elimina definitivamente il record utente (username/hash/email/…).
+        await db.users.delete_one({"_id": oid})
+        # 4) Audit dell'operazione (usa placeholder per non conservare il vecchio username come dato personale).
+        await _log_audit(admin, "user.hard_delete", user_id, {"username": username})
+        return {"ok": True, "hard_deleted": True}
 
     return router

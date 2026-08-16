@@ -15,7 +15,7 @@ import {
   DialogFooter,
   DialogDescription,
 } from "../components/ui/dialog";
-import { UserPlus, Key, ArrowLeft, PencilSimple, Prohibit, ArrowClockwise } from "@phosphor-icons/react";
+import { UserPlus, Key, ArrowLeft, PencilSimple, Prohibit, ArrowClockwise, Trash } from "@phosphor-icons/react";
 import { fmtDateTime, useTz } from "../lib/tz";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -259,6 +259,76 @@ function ResetPwdDialog({ user, onClose, onDone }) {
   );
 }
 
+function DeleteUserDialog({ user, onClose, onDone }) {
+  const [confirmText, setConfirmText] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (user) setConfirmText(""); }, [user]);
+  if (!user) return null;
+  const canConfirm = confirmText.trim().toUpperCase() === "ELIMINA" && !busy;
+  const submit = async () => {
+    setBusy(true);
+    try {
+      await axios.delete(`${API}/admin/users/${user.id}`);
+      toast.success(`Utente ${user.username} eliminato definitivamente`);
+      onDone?.();
+      onClose();
+    } catch (e) {
+      toast.error("Eliminazione fallita", { description: formatError(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog open={!!user} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-md" data-testid="delete-user-dialog">
+        <DialogHeader>
+          <DialogTitle className="text-red-700 flex items-center gap-2">
+            <Trash size={20} weight="bold" /> Elimina definitivamente utente
+          </DialogTitle>
+          <DialogDescription className="text-slate-700">
+            Attenzione: stai per eliminare definitivamente <b>{user.full_name || user.username}</b> (@{user.username}) e i suoi dati di accesso. L'operazione <b>non può essere annullata</b>.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="rounded-md border border-red-200 bg-red-50 text-red-800 text-xs p-3 space-y-1">
+            <div>• account, credenziali e password/hash saranno rimossi</div>
+            <div>• le sessioni attive verranno revocate immediatamente</div>
+            <div>• lo storico Arrivi/Spedizioni/Movimenti/Audit resta intatto (username anonimizzato in "[utente eliminato]")</div>
+          </div>
+          <div>
+            <Label htmlFor="delete-confirm" className="text-sm font-semibold">
+              Per confermare, digita <span className="font-mono-tight text-red-700">ELIMINA</span>
+            </Label>
+            <Input
+              id="delete-confirm"
+              autoFocus
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && canConfirm) submit(); }}
+              placeholder="ELIMINA"
+              className="h-11 mt-1 font-mono-tight tracking-wider"
+              data-testid="delete-user-confirm-input"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy} data-testid="delete-user-cancel">
+            Annulla
+          </Button>
+          <Button
+            onClick={submit}
+            disabled={!canConfirm}
+            className="bg-red-600 hover:bg-red-700 text-white"
+            data-testid="delete-user-confirm"
+          >
+            <Trash size={16} className="mr-1" /> Elimina definitivamente
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function AdminUsersPage() {
   const { user: me, isAdmin, isLoading } = useAuth();
   useTz();
@@ -267,6 +337,7 @@ export default function AdminUsersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [resetTarget, setResetTarget] = useState(null);
   const [emailTarget, setEmailTarget] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -454,6 +525,17 @@ export default function AdminUsersPage() {
                         >
                           <Prohibit size={14} className="mr-1" /> {u.active ? "Disattiva" : "Riattiva"}
                         </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setDeleteTarget(u)}
+                          disabled={isMe}
+                          className="h-8 border-red-400 text-red-700 hover:bg-red-50"
+                          data-testid={`delete-${u.username}`}
+                          title="Elimina definitivamente"
+                        >
+                          <Trash size={14} className="mr-1" /> Elimina
+                        </Button>
                       </div>
                     </td>
                   </tr>
@@ -568,6 +650,16 @@ export default function AdminUsersPage() {
                   >
                     <Prohibit size={14} className="mr-1" /> {u.active ? "Disattiva" : "Riattiva"}
                   </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setDeleteTarget(u)}
+                    disabled={isMe}
+                    className="h-9 flex-1 border-red-400 text-red-700 hover:bg-red-50"
+                    data-testid={`m-delete-${u.username}`}
+                  >
+                    <Trash size={14} className="mr-1" /> Elimina
+                  </Button>
                 </div>
               </div>
             );
@@ -581,6 +673,7 @@ export default function AdminUsersPage() {
       <CreateUserDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreated={load} />
       <ResetPwdDialog user={resetTarget} onClose={() => setResetTarget(null)} onDone={load} />
       <EditEmailDialog user={emailTarget} onClose={() => setEmailTarget(null)} onDone={load} />
+      <DeleteUserDialog user={deleteTarget} onClose={() => setDeleteTarget(null)} onDone={load} />
     </div>
   );
 }
