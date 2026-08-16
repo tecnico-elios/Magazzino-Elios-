@@ -196,6 +196,15 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
     return pending.serials.every((s, i) => (s || "").trim() && validations[i]?.state === "ok");
   };
 
+  const emitRefocus = () => {
+    try { window.dispatchEvent(new Event("elios:refocus-scanner")); } catch { /* silent */ }
+  };
+
+  const handleCancel = () => {
+    onCancel?.();
+    emitRefocus();
+  };
+
   const submit = () => {
     if (!allValid()) {
       toast.error("Completa e valida tutti i seriali prima di continuare");
@@ -207,6 +216,7 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
       return;
     }
     onCommit(pending);
+    emitRefocus();
   };
 
   const badgeMode = mode === "spedizioni"
@@ -240,7 +250,7 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
             data-testid="collector-qty-plus">
             <Plus size={14} />
           </Button>
-          <Button type="button" variant="outline" onClick={onCancel} className="ml-2 h-11 border-red-300 text-red-600 hover:bg-red-50" data-testid="collector-cancel">
+          <Button type="button" variant="outline" onClick={handleCancel} className="ml-2 h-11 border-red-300 text-red-600 hover:bg-red-50" data-testid="collector-cancel">
             <X size={14} className="mr-1" /> Annulla
           </Button>
         </div>

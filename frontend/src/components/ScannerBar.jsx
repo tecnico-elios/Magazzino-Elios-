@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import {
-  Barcode,
   Camera,
   Crosshair,
   MagnifyingGlass,
@@ -71,6 +70,22 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
   useEffect(() => {
     if (cfg.autofocus && inputRef.current) inputRef.current.focus();
   }, [cfg.autofocus]);
+
+  // Refocus globale — richiamato da QtyDialog/SerialCollector al termine dei loro flussi.
+  // Evita di rubare il focus se l'utente sta ancora compilando un altro campo.
+  useEffect(() => {
+    const handler = () => {
+      if (typeof document === "undefined") return;
+      const ae = document.activeElement;
+      if (ae && ae !== inputRef.current) {
+        const tag = ae.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || ae.isContentEditable) return;
+      }
+      inputRef.current?.focus();
+    };
+    window.addEventListener("elios:refocus-scanner", handler);
+    return () => window.removeEventListener("elios:refocus-scanner", handler);
+  }, []);
 
   // Auto-clear feedback — durate configurabili da Admin → Impostazioni → Scanner.
   useEffect(() => {
@@ -166,6 +181,17 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
     if (s?.code) commit(s.code);
   };
 
+  // Trigger ricerca manuale — stessa logica dell'ENTER (usata dal pulsante 🔎 CERCA).
+  const triggerSearch = () => {
+    if (open && hoverIdx >= 0 && suggestions[hoverIdx]) {
+      selectSuggestion(suggestions[hoverIdx]);
+    } else if (cfg.autoselect && suggestions.length === 1) {
+      selectSuggestion(suggestions[0]);
+    } else {
+      commit(buffer);
+    }
+  };
+
   const onKeyDown = (e) => {
     if (e.key === "ArrowDown" && suggestions.length) {
       e.preventDefault();
@@ -205,9 +231,8 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
         Inserisci o scansiona prodotto
       </div>
 
-      <div className="flex items-center gap-2">
-        <Barcode size={24} className="text-slate-400 shrink-0" />
-        <div className="relative flex-1">
+      <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+        <div className="relative flex-1 min-w-0 w-full sm:w-auto">
           <input
             id="scanner-input"
             ref={inputRef}
@@ -333,21 +358,34 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
         </div>
         <button
           type="button"
-          onClick={() => inputRef.current?.focus()}
-          className="h-9 w-9 rounded-md border border-slate-200 text-slate-500 hover:text-slate-900 hover:border-slate-300 grid place-items-center shrink-0"
-          aria-label="Focus scanner"
-          data-testid="focus-btn"
+          onClick={triggerSearch}
+          className="h-11 px-4 rounded-md bg-slate-900 text-white hover:bg-slate-800 flex items-center gap-1.5 shrink-0 font-semibold text-sm"
+          data-testid="search-btn"
+          aria-label="Cerca"
+          title="Cerca (ENTER)"
         >
-          <Crosshair size={16} />
+          <MagnifyingGlass size={16} weight="bold" />
+          <span>CERCA</span>
         </button>
         <button
           type="button"
           onClick={() => setCameraOpen(true)}
-          className="h-9 px-3 rounded-md border border-slate-200 text-slate-600 hover:text-slate-900 hover:border-slate-300 flex items-center gap-1 shrink-0"
+          className="h-11 w-11 rounded-md border border-slate-200 text-slate-600 hover:text-slate-900 hover:border-slate-300 grid place-items-center shrink-0"
           data-testid="camera-btn"
+          aria-label="Apri fotocamera"
+          title="Fotocamera"
         >
-          <Camera size={14} />
-          <span className="text-sm">Fotocamera</span>
+          <Camera size={18} />
+        </button>
+        <button
+          type="button"
+          onClick={() => inputRef.current?.focus()}
+          className="h-11 w-11 rounded-md border border-slate-200 text-slate-500 hover:text-slate-900 hover:border-slate-300 grid place-items-center shrink-0"
+          aria-label="Focus barra"
+          title="Focus"
+          data-testid="focus-btn"
+        >
+          <Crosshair size={18} />
         </button>
       </div>
 

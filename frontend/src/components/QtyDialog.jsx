@@ -43,6 +43,15 @@ export default function QtyDialog({
   const overMax = typeof maxAvailable === "number" && n > maxAvailable;
   const canConfirm = validNumber && !overMax;
 
+  const emitRefocus = () => {
+    try { window.dispatchEvent(new Event("elios:refocus-scanner")); } catch { /* silent */ }
+  };
+
+  const handleClose = () => {
+    onClose?.();
+    emitRefocus();
+  };
+
   const confirm = () => {
     if (!validNumber) {
       toast.error("Quantità non valida");
@@ -53,6 +62,7 @@ export default function QtyDialog({
       return;
     }
     onConfirm(n);
+    emitRefocus();
   };
 
   const ctaClass =
@@ -65,7 +75,7 @@ export default function QtyDialog({
       className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
-      onClick={onClose}
+      onClick={handleClose}
       data-testid="qty-dialog"
     >
       <div
@@ -161,7 +171,7 @@ export default function QtyDialog({
           )}
         </div>
         <div className="mt-5 flex gap-2 justify-end">
-          <Button variant="outline" onClick={onClose} className="h-11" data-testid="qty-cancel">
+          <Button variant="outline" onClick={handleClose} className="h-11" data-testid="qty-cancel">
             Annulla
           </Button>
           <Button

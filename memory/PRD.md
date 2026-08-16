@@ -22,6 +22,12 @@
   - **Responsive CSS**: media queries `(hover:none) and (pointer:coarse)` → min-h 44px + font-size 16px (no zoom iOS) su input/button; smartphone verticale → tabs scroll orizzontale, dialog full-width, KPI grid 2 col; palmare industriale → text compatti; prefers-reduced-motion; anti scroll-orizzontale globale
 - PWA — solo alla fine
 
+## F8 — Barra di ricerca semplificata (Arrivi/Spedizioni) ✅ (16/02/2026)
+- Layout `[input] [🔎 CERCA] [📷] [🎯]` responsive con `flex-wrap`
+- Pulsante CERCA = stessa pipeline dell'ENTER (ricerca locale + lookup esistente, nessuna nuova chiamata Notion)
+- Fotocamera ridotta a icon-only, focus mantenuto
+- Evento globale `elios:refocus-scanner` emesso da QtyDialog (close/confirm) e SerialCollector (cancel/commit) → ScannerBar riporta il focus alla barra SOLO se nessun altro INPUT/TEXTAREA/SELECT/contentEditable è attivo (no focus-stealing)
+
 ## File architettura
 - Backend: `server.py` (F1-F6 preservato) + `routes/{auth,admin_users,admin_extra}_routes.py`, `auth.py` con session helpers
 - Frontend: `AuthContext` con idle timer + must_change_password event, `ProtectedRoute`, `LoginPage`, `ForceChangePasswordPage` (F7), `AdminPage` (tab Sessioni), `AdminExtraTabs` (SettingsTab riorganizzata + SessionsTab)
