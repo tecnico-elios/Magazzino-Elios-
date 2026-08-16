@@ -55,6 +55,8 @@ export default function ArriviPage() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmError, setConfirmError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  // F8 UI iniziale — 3 card grandi in stile Dashboard finché l'operatore non sceglie un flusso.
+  const [initialAction, setInitialAction] = useState(null);
 
   const focusScanner = () => {
     setTimeout(() => document.getElementById("scanner-input")?.focus(), 0);
@@ -280,6 +282,7 @@ export default function ArriviPage() {
       setPending(null);
       setLastScan(null);
       setShowConfirm(false);
+      setInitialAction(null);
       await refresh();
     } catch (e) {
       const msg = e?.response?.data?.detail || e?.message || "Errore invio";
@@ -366,7 +369,60 @@ export default function ArriviPage() {
           </div>
         </section>
 
-        {/* Scanner */}
+        {/* F8 — Card iniziali stile Dashboard. Visibili solo prima di iniziare un flusso.
+            Riutilizzano lo stesso styling delle card ARRIVI/SPEDIZIONI in DashboardPage. */}
+        {list.length === 0 && !pending && !initialAction && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4" data-testid="arrivi-initial-cards">
+            <button
+              type="button"
+              onClick={() => { setInitialAction("serial"); setPicker({ filter: "serialized" }); }}
+              data-testid="arrivi-card-seriale"
+              className="group relative overflow-hidden rounded-xl p-8 text-left text-white border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 hover:border-emerald-400/50 transition-all shadow-[0_10px_40px_-15px_rgba(2,6,23,0.5)] hover:shadow-[0_20px_60px_-15px_rgba(16,185,129,0.35)]"
+            >
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(16,185,129,0.18),transparent_55%)]" aria-hidden />
+              <div className="relative">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-emerald-500/15 border border-emerald-400/30 text-emerald-300">
+                  <ArrowSquareIn size={26} weight="bold" />
+                </div>
+                <div className="text-2xl sm:text-3xl font-display font-black mt-5 tracking-tight">PRODOTTO A SERIALE</div>
+                <div className="text-slate-300/80 text-sm mt-2">Registra un modello con seriali (nuovi o rientri)</div>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setInitialAction("quantity"); setPicker({ filter: "quantity" }); }}
+              data-testid="arrivi-card-quantita"
+              className="group relative overflow-hidden rounded-xl p-8 text-left text-white border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 hover:border-sky-400/50 transition-all shadow-[0_10px_40px_-15px_rgba(2,6,23,0.5)] hover:shadow-[0_20px_60px_-15px_rgba(56,189,248,0.30)]"
+            >
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(56,189,248,0.18),transparent_55%)]" aria-hidden />
+              <div className="relative">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-sky-500/15 border border-sky-400/30 text-sky-300">
+                  <Package size={26} weight="bold" />
+                </div>
+                <div className="text-2xl sm:text-3xl font-display font-black mt-5 tracking-tight">PRODOTTO A QUANTITÀ</div>
+                <div className="text-slate-300/80 text-sm mt-2">Registra pezzi con quantità (senza seriali)</div>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setInitialAction("rientro"); }}
+              data-testid="arrivi-card-reintegra"
+              className="group relative overflow-hidden rounded-xl p-8 text-left text-white border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 hover:border-amber-300/60 transition-all shadow-[0_10px_40px_-15px_rgba(2,6,23,0.5)] hover:shadow-[0_20px_60px_-15px_rgba(250,204,21,0.28)]"
+            >
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(250,204,21,0.18),transparent_55%)]" aria-hidden />
+              <div className="relative">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-amber-400/15 border border-amber-300/30 text-amber-300">
+                  <MagnifyingGlass size={26} weight="bold" />
+                </div>
+                <div className="text-2xl sm:text-3xl font-display font-black mt-5 tracking-tight">REINTEGRA SERIALE</div>
+                <div className="text-slate-300/80 text-sm mt-2">Scansiona un seriale già uscito per il rientro</div>
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* Scanner — visibile solo dopo che l'operatore ha scelto un flusso o la lista contiene già righe */}
+        {(list.length > 0 || pending || initialAction) && (
         <ScannerBar
           onScanned={handleScannedCode}
           lastScan={lastScan}
@@ -374,10 +430,12 @@ export default function ArriviPage() {
           hint={
             pending
               ? `In attesa dei seriali per: ${pending.name}`
-              : "Inserisci o scansiona un codice prodotto o un seriale — puoi anche selezionare manualmente qui sotto"
+              : initialAction === "rientro"
+                ? "Scansiona o inserisci il seriale già uscito da reintegrare"
+                : "Inserisci o scansiona un codice prodotto o un seriale — puoi anche selezionare manualmente qui sotto"
           }
         />
-
+        )}
         {/* Contesto: modello serializzato selezionato + selettore prodotto manuale */}
         <section className="bg-white border border-slate-200 rounded-md p-4">
           <div className="flex flex-wrap items-center gap-2 justify-between">
@@ -677,7 +735,7 @@ export default function ArriviPage() {
         <ProductPicker
           items={items}
           filter={picker.filter}
-          onClose={() => setPicker(null)}
+          onClose={() => { setPicker(null); setInitialAction(null); }}
           onSelect={(product) => {
             if (picker.filter === "serialized") {
               // NEW UX: chiedi la quantità e apri il collector
