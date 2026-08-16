@@ -379,6 +379,7 @@ export default function ArriviPage() {
           onScanned={handleScannedCode}
           lastScan={lastScan}
           onClearLastScan={() => setLastScan(null)}
+          searchLabel="INVIO"
           hint={
             pending
               ? `In attesa dei seriali per: ${pending.name}`

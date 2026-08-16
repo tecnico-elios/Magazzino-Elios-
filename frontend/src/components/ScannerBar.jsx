@@ -49,7 +49,7 @@ if (typeof window !== "undefined") {
  * SNs known to Notion (Entrate/Uscite). The result is shown as a top row in the
  * dropdown so operators can click it OR press Enter and get the same flow.
  */
-export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint }) {
+export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint, searchLabel }) {
   const [buffer, setBuffer] = useState("");
   const [cameraOpen, setCameraOpen] = useState(false);
   const [open, setOpen] = useState(false); // dropdown visibility
@@ -365,7 +365,7 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
           title="Cerca (ENTER)"
         >
           <MagnifyingGlass size={16} weight="bold" />
-          <span>CERCA</span>
+          <span>{searchLabel || "CERCA"}</span>
         </button>
         <button
           type="button"
