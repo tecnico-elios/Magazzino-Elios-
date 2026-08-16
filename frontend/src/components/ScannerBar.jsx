@@ -28,9 +28,10 @@ async function fetchScannerCfg() {
       autoselect: !!data?.scanner?.autoselect_single_result,
       searchOnType: data?.ricerca?.search_on_type !== false, // default true
       maxResults: Math.max(1, parseInt(data?.ricerca?.max_results || 8, 10)),
+      partial: data?.ricerca?.partial_match !== false, // default true
     };
   } catch {
-    _cachedScannerCfg = { green: 3000, red: 3000, autofocus: true, autoselect: false, searchOnType: true, maxResults: 8 };
+    _cachedScannerCfg = { green: 3000, red: 3000, autofocus: true, autoselect: false, searchOnType: true, maxResults: 8, partial: true };
   }
   return _cachedScannerCfg;
 }
@@ -55,7 +56,7 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
   const [open, setOpen] = useState(false); // dropdown visibility
   const [hoverIdx, setHoverIdx] = useState(-1);
   const [serverHit, setServerHit] = useState(null); // {item, status, ...} for SN/barcode found on Notion
-  const [cfg, setCfg] = useState({ autofocus: true, autoselect: false, searchOnType: true, maxResults: 8 });
+  const [cfg, setCfg] = useState({ autofocus: true, autoselect: false, searchOnType: true, maxResults: 8, partial: true });
   const inputRef = useRef(null);
   const containerRef = useRef(null);
   const { searchLocal } = useInventoryCtx();
@@ -63,7 +64,7 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
   useEffect(() => {
     fetchScannerCfg().then((c) => setCfg({
       autofocus: c.autofocus, autoselect: c.autoselect,
-      searchOnType: c.searchOnType, maxResults: c.maxResults,
+      searchOnType: c.searchOnType, maxResults: c.maxResults, partial: c.partial,
     }));
   }, []);
 
@@ -102,8 +103,8 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
     const q = buffer.trim();
     if (q.length < 2) return [];
     if (!cfg.searchOnType) return [];
-    return searchLocal(q, cfg.maxResults);
-  }, [buffer, searchLocal, cfg.searchOnType, cfg.maxResults]);
+    return searchLocal(q, cfg.maxResults, { partial: cfg.partial });
+  }, [buffer, searchLocal, cfg.searchOnType, cfg.maxResults, cfg.partial]);
 
   // Debounced server-side lookup for potential SNs / barcodes not in local SKU cache
   useEffect(() => {
@@ -185,6 +186,9 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint 
       e.preventDefault();
       if (open && hoverIdx >= 0 && suggestions[hoverIdx]) {
         selectSuggestion(suggestions[hoverIdx]);
+      } else if (cfg.autoselect && suggestions.length === 1) {
+        // Admin → Impostazioni → Scanner → "Selezione automatica singolo risultato"
+        selectSuggestion(suggestions[0]);
       } else {
         commit(buffer);
       }

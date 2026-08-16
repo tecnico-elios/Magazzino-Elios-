@@ -101,9 +101,10 @@ export function InventoryProvider({ children }) {
    * Returns up to `limit` results.
    */
   const searchLocal = useCallback(
-    (query, limit = 8) => {
+    (query, limit = 8, opts = {}) => {
       const q = (query || "").trim().toLowerCase();
       if (!q || q.length < 1) return [];
+      const partial = opts.partial !== false; // default true (retro-compat)
       const exact = [];
       const startsCode = [];
       const startsName = [];
@@ -115,7 +116,7 @@ export function InventoryProvider({ children }) {
         if (code === q) exact.push(it);
         else if (code && code.startsWith(q)) startsCode.push(it);
         else if (name.startsWith(q)) startsName.push(it);
-        else if (name.includes(q) || code.includes(q) || cat.includes(q))
+        else if (partial && (name.includes(q) || code.includes(q) || cat.includes(q)))
           substr.push(it);
       }
       return [...exact, ...startsCode, ...startsName, ...substr].slice(0, limit);

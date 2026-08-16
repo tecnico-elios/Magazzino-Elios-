@@ -25,6 +25,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [refreshedAt, setRefreshedAt] = useState(null);
+  const [warnCfg, setWarnCfg] = useState({ low: true, oos: true });
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -49,6 +50,10 @@ export default function DashboardPage() {
         const sec = parseInt(data?.dashboard?.autorefresh_seconds ?? 0, 10);
         const ms = sec > 0 ? sec * 1000 : DEFAULT_REFRESH_MS;
         intervalId = setInterval(() => load(true), ms);
+        setWarnCfg({
+          low: data?.magazzino?.warn_low_stock !== false,
+          oos: data?.magazzino?.warn_out_of_stock !== false,
+        });
       } catch {
         intervalId = setInterval(() => load(true), DEFAULT_REFRESH_MS);
       }
@@ -189,11 +194,13 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Sotto scorta + Esauriti */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <SottoScortaCard items={sottoScorta} />
-        <EsauritiCard items={esauriti} />
-      </div>
+      {/* Sotto scorta + Esauriti — gated da Admin → Impostazioni → Magazzino */}
+      {(warnCfg.low || warnCfg.oos) && (
+        <div className={`grid grid-cols-1 gap-4 ${warnCfg.low && warnCfg.oos ? "lg:grid-cols-2" : ""}`}>
+          {warnCfg.low && <SottoScortaCard items={sottoScorta} />}
+          {warnCfg.oos && <EsauritiCard items={esauriti} />}
+        </div>
+      )}
 
       {/* Ultimi movimenti */}
       <section
