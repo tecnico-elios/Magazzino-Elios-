@@ -63,6 +63,13 @@ export default function DashboardPage() {
     return () => { if (intervalId) clearInterval(intervalId); };
   }, [load]);
 
+  // F8 — Aggiorna i KPI quando l'utente clicca sul logo (evento globale da AppLayout).
+  useEffect(() => {
+    const onRefresh = () => load(true);
+    window.addEventListener("elios:refresh-dashboard", onRefresh);
+    return () => window.removeEventListener("elios:refresh-dashboard", onRefresh);
+  }, [load]);
+
   const totalProducts = kpi?.total_products ?? 0;
   const totalUnits = kpi?.total_units ?? 0;
   const arriviToday = kpi?.arrivi_today ?? 0;

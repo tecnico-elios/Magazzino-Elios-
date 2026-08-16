@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useState } from "react";
+import { toast } from "sonner";
 import {
   House,
   Package,
@@ -52,10 +53,28 @@ export default function AppLayout() {
     <div className="min-h-screen bg-slate-50 flex flex-col" data-testid="app-layout">
       <header className="et-header-dark sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
-          {/* Brand */}
-          <div className="flex items-center gap-3 min-w-0">
+          {/* Brand — click = refresh dati (cache inventario + KPI Dashboard). Non tocca form aperti. */}
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await refresh();
+                if (typeof window !== "undefined") {
+                  window.dispatchEvent(new Event("elios:refresh-dashboard"));
+                }
+                toast.success("Dati aggiornati");
+              } catch {
+                toast.error("Aggiornamento fallito");
+              }
+            }}
+            disabled={loading}
+            className="flex items-center gap-3 min-w-0 rounded-md hover:bg-white/5 active:bg-white/10 px-1 -mx-1 py-1 transition-colors disabled:opacity-60"
+            data-testid="brand-refresh-btn"
+            title="Aggiorna dati da Notion"
+            aria-label="Aggiorna dati da Notion"
+          >
             <EliosLogo size={30} />
-            <div className="min-w-0 hidden sm:block">
+            <div className="min-w-0 hidden sm:block text-left">
               <div className="text-[10px] tracking-[0.22em] uppercase text-amber-300/80 font-semibold">
                 Magazzino
               </div>
@@ -63,7 +82,7 @@ export default function AppLayout() {
                 Portale operativo
               </div>
             </div>
-          </div>
+          </button>
 
           {/* Right actions */}
           <div className="flex items-center gap-2 shrink-0">
