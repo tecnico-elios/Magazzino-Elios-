@@ -86,9 +86,29 @@ export default function BarcodeScanner({ open, onClose, onDetected, label }) {
 
       const config = { fps: 12, qrbox: { width: 260, height: 160 } };
 
+      // F8 — Migliora autofocus sui tablet (dove la fotocamera fatica a mettere a
+      // fuoco codici piccoli). Su smartphone/PC lasciamo la configurazione standard
+      // (già funzionante) per non alterare comportamenti collaudati.
+      // Note:
+      //  - `focusMode: continuous` è supportato da Chrome Android su molti tablet
+      //    e da iPadOS ≥ 15.4. Se non supportato viene ignorato → fallback autofocus.
+      //  - Rilevamento tablet: UA "Tablet" / iPad / Android non-Mobile / iPadOS 13+
+      //    (che si maschera da Macintosh ma con touch).
+      const ua = (typeof navigator !== "undefined" && navigator.userAgent) || "";
+      const isTablet =
+        /iPad|Tablet/i.test(ua) ||
+        (/Android/i.test(ua) && !/Mobile/i.test(ua)) ||
+        (typeof navigator !== "undefined" && navigator.maxTouchPoints > 1 && /Macintosh/i.test(ua));
+      const cameraConstraints = isTablet
+        ? {
+            facingMode: "environment",
+            advanced: [{ focusMode: "continuous" }, { focusMode: "auto" }],
+          }
+        : { facingMode: "environment" };
+
       inst
         .start(
-          { facingMode: "environment" },
+          cameraConstraints,
           config,
           (decodedText) => {
             if (detectedRef.current) return;
