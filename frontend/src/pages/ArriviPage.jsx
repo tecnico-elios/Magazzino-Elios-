@@ -402,7 +402,7 @@ export default function ArriviPage() {
                 <ArrowSquareIn size={22} weight="bold" />
               </div>
               <div className="text-lg sm:text-xl font-display font-black mt-3 tracking-tight">A SERIALE</div>
-              <div className="text-slate-300/80 text-xs mt-1">Modello con seriali (nuovi o rientri)</div>
+              <div className="text-slate-300/80 text-xs mt-1">Modello con seriali (nuovi)</div>
             </div>
           </button>
           <button
