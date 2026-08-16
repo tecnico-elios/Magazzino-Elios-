@@ -422,6 +422,7 @@ export default function ArriviPage() {
         )}
 
         {/* Scanner — visibile solo dopo che l'operatore ha scelto un flusso o la lista contiene già righe */}
+        {(list.length > 0 || pending || initialAction) && (
         <ScannerBar
           onScanned={handleScannedCode}
           lastScan={lastScan}
@@ -434,6 +435,7 @@ export default function ArriviPage() {
                 : "Inserisci o scansiona un codice prodotto o un seriale"
           }
         />
+        )}
         {/* Contesto: modello serializzato selezionato — SOLO banner, i picker piccoli sono
             stati rimossi (F8: le card grandi sostituiscono i pulsanti piccoli duplicati). */}
         {pending && (

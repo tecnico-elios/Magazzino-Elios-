@@ -429,6 +429,7 @@ export default function ChecklistPage() {
           </div>
         )}
 
+        {(list.length > 0 || pending || initialAction) && (
         <ScannerBar
           onScanned={handleScannedCode}
           lastScan={lastScan}
@@ -439,6 +440,7 @@ export default function ChecklistPage() {
               : "Inserisci o scansiona seriali o codici prodotto"
           }
         />
+        )}
 
         {/* Contesto: modello selezionato — SOLO banner, picker piccoli rimossi
             (F8: le card grandi sostituiscono i pulsanti piccoli duplicati). */}
