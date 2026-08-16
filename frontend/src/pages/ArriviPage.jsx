@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { useInventoryCtx } from "../lib/InventoryContext";
 import { useAuth } from "../lib/AuthContext";
 import ScannerBar from "../components/ScannerBar";
+import BarcodeScanner from "../components/BarcodeScanner";
 import QtyDialog from "../components/QtyDialog";
 import ProductPicker from "../components/ProductPicker";
 import ConfirmSubmitDialog from "../components/ConfirmSubmitDialog";
@@ -25,6 +26,7 @@ import {
   User,
   CalendarBlank,
   Barcode,
+  Camera,
   Plus,
   Minus,
 } from "@phosphor-icons/react";
@@ -57,6 +59,9 @@ export default function ArriviPage() {
   const [submitting, setSubmitting] = useState(false);
   // F8 UI iniziale — 3 card grandi in stile Dashboard finché l'operatore non sceglie un flusso.
   const [initialAction, setInitialAction] = useState(null);
+  // F8 — Popup dedicato "Reintegra Seriale" (input + camera + conferma).
+  // Riutilizza handleScannedCode per validazioni esistenti.
+  const [rientroDialog, setRientroDialog] = useState({ open: false, value: "", cameraOpen: false });
 
   const focusScanner = () => {
     setTimeout(() => document.getElementById("scanner-input")?.focus(), 0);
@@ -417,7 +422,7 @@ export default function ArriviPage() {
           </button>
           <button
             type="button"
-            onClick={() => { setInitialAction("rientro"); }}
+            onClick={() => { setRientroDialog({ open: true, value: "", cameraOpen: false }); }}
             data-testid="arrivi-card-reintegra"
             className="group relative overflow-hidden rounded-xl p-5 sm:p-6 text-left text-white border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 hover:border-amber-300/60 transition-all shadow-[0_10px_40px_-15px_rgba(2,6,23,0.5)] hover:shadow-[0_20px_60px_-15px_rgba(250,204,21,0.28)]"
           >
@@ -720,8 +725,7 @@ export default function ArriviPage() {
 
       <ConfirmSubmitDialog
         open={showConfirm}
-        kind="arrivo"
-        items={list.map((li) => ({
+        kind="arrivo"        items={list.map((li) => ({
           name: li.name,
           serialized: !!li.serialized,
           quantity: li.quantity,
@@ -743,6 +747,103 @@ export default function ArriviPage() {
         }}
         onConfirm={submit}
       />
+
+      {/* F8 — Popup Reintegra Seriale (input + camera). Riutilizza handleScannedCode
+          per le validazioni esistenti: SN "out" → apre rientroConfirm; altri stati
+          producono i messaggi di errore già gestiti nel lastScan. */}
+      {rientroDialog.open && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
+          data-testid="rientro-dialog"
+          onClick={() => setRientroDialog({ open: false, value: "", cameraOpen: false })}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 sm:p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 mb-4">
+              <div className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-amber-100 border border-amber-200 text-amber-600">
+                <MagnifyingGlass size={18} weight="bold" />
+              </div>
+              <div>
+                <div className="text-[11px] tracking-[0.18em] uppercase text-amber-600 font-semibold">Arrivi</div>
+                <h3 className="font-display text-lg sm:text-xl font-bold text-slate-900 leading-tight">Reintegra Seriale</h3>
+              </div>
+            </div>
+            <Label htmlFor="rientro-input" className="text-slate-700 text-sm font-semibold">
+              <Barcode size={14} className="inline mr-1" /> Seriale già uscito
+            </Label>
+            <div className="mt-1 flex items-center gap-2">
+              <Input
+                id="rientro-input"
+                data-testid="rientro-input"
+                autoFocus
+                value={rientroDialog.value}
+                onChange={(e) => setRientroDialog((d) => ({ ...d, value: e.target.value }))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    const v = (rientroDialog.value || "").trim();
+                    if (!v) return;
+                    setRientroDialog({ open: false, value: "", cameraOpen: false });
+                    handleScannedCode(v);
+                  }
+                }}
+                placeholder="Inserisci o scansiona seriale"
+                className="h-11 text-base font-mono-tight"
+              />
+              <button
+                type="button"
+                onClick={() => setRientroDialog((d) => ({ ...d, cameraOpen: true }))}
+                className="h-11 w-11 rounded-md border border-slate-200 text-slate-600 hover:text-slate-900 hover:border-slate-300 grid place-items-center shrink-0"
+                data-testid="rientro-camera-btn"
+                aria-label="Fotocamera"
+                title="Fotocamera"
+              >
+                <Camera size={18} />
+              </button>
+            </div>
+            <div className="text-[11px] text-slate-500 mt-2">
+              ENTER o CERCA per validare. Il seriale deve risultare già uscito su Notion — le verifiche esistenti si applicano.
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setRientroDialog({ open: false, value: "", cameraOpen: false })}
+                data-testid="rientro-cancel-btn"
+                className="h-11"
+              >
+                Annulla
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  const v = (rientroDialog.value || "").trim();
+                  if (!v) return;
+                  setRientroDialog({ open: false, value: "", cameraOpen: false });
+                  handleScannedCode(v);
+                }}
+                disabled={!(rientroDialog.value || "").trim()}
+                data-testid="rientro-confirm-btn"
+                className="h-11 bg-amber-500 hover:bg-amber-600 text-white"
+              >
+                <MagnifyingGlass size={16} className="mr-1" /> Verifica e reintegra
+              </Button>
+            </div>
+          </div>
+          <BarcodeScanner
+            open={rientroDialog.cameraOpen}
+            onClose={() => setRientroDialog((d) => ({ ...d, cameraOpen: false }))}
+            onDetected={(code) => {
+              const v = (code || "").trim();
+              setRientroDialog({ open: false, value: "", cameraOpen: false });
+              if (v) handleScannedCode(v);
+            }}
+            label="Inquadra il seriale"
+          />
+        </div>
+      )}
 
       {rientroConfirm && (
         <div
