@@ -60,24 +60,65 @@ DEFAULT_RECIPIENTS_SEED = [
 ]
 
 # ---------- Settings helpers ----------
-async def get_recipients() -> List[str]:
+def _normalize_recipient(entry: Any) -> Optional[Dict[str, Any]]:
+    """Normalizza un destinatario a `{email, enabled}`. Retro-compat con legacy list[str]."""
+    if isinstance(entry, str):
+        e = entry.strip().lower()
+        return {"email": e, "enabled": True} if e else None
+    if isinstance(entry, dict):
+        e = str(entry.get("email") or "").strip().lower()
+        if not e:
+            return None
+        enabled = entry.get("enabled")
+        return {"email": e, "enabled": True if enabled is None else bool(enabled)}
+    return None
+
+
+async def get_recipients_full() -> List[Dict[str, Any]]:
+    """Ritorna lista completa `[{email, enabled}]` per l'Admin UI.
+    Migra automaticamente il vecchio formato list[str] mantenendo enabled=True.
+    """
     doc = await db.settings.find_one({"_id": "recipients"}, {"_id": 0})
+    if doc and isinstance(doc.get("items"), list):
+        out = [r for r in (_normalize_recipient(x) for x in doc["items"]) if r]
+        return out
+    # Legacy: emails come list[str] → migra a items
     if doc and isinstance(doc.get("emails"), list):
-        return doc["emails"]
+        migrated = [r for r in (_normalize_recipient(x) for x in doc["emails"]) if r]
+        await db.settings.update_one(
+            {"_id": "recipients"},
+            {"$set": {"items": migrated}, "$unset": {"emails": ""}},
+            upsert=True,
+        )
+        return migrated
+    # Seed default (tutti attivi)
+    seed = [{"email": e, "enabled": True} for e in DEFAULT_RECIPIENTS_SEED]
     await db.settings.update_one(
         {"_id": "recipients"},
-        {"$set": {"emails": DEFAULT_RECIPIENTS_SEED}},
+        {"$set": {"items": seed}},
         upsert=True,
     )
-    return DEFAULT_RECIPIENTS_SEED
+    return seed
+
+
+async def get_recipients() -> List[str]:
+    """Ritorna SOLO le email dei destinatari ATTIVI — usata dai flussi di invio automatico."""
+    full = await get_recipients_full()
+    return [r["email"] for r in full if r.get("enabled", True)]
+
+
+async def set_recipients_full(items: List[Dict[str, Any]]) -> None:
+    """Salva la lista completa `[{email, enabled}]`."""
+    await db.settings.update_one(
+        {"_id": "recipients"},
+        {"$set": {"items": items}, "$unset": {"emails": ""}},
+        upsert=True,
+    )
 
 
 async def set_recipients(emails: List[str]) -> None:
-    await db.settings.update_one(
-        {"_id": "recipients"},
-        {"$set": {"emails": emails}},
-        upsert=True,
-    )
+    """Retro-compat: salva solo le email (tutte attive)."""
+    await set_recipients_full([{"email": e, "enabled": True} for e in emails])
 
 
 def resolve_serialized(item: Dict[str, Any]) -> Optional[bool]:
@@ -195,8 +236,15 @@ class ArrivoRecord(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
+class RecipientItem(BaseModel):
+    email: EmailStr
+    enabled: bool = True
+
+
 class RecipientsUpdate(BaseModel):
-    emails: List[EmailStr]
+    # Retro-compat: accetta sia list[str] (legacy) sia list[RecipientItem] (nuovo formato F8).
+    emails: Optional[List[EmailStr]] = None
+    items: Optional[List[RecipientItem]] = None
 
 
 class SerialOverrideUpdate(BaseModel):
@@ -1144,12 +1192,34 @@ async def admin_set_serial(update: SerialOverrideUpdate):
 
 @api_router.get("/admin/recipients", dependencies=[Depends(dep_require_admin)])
 async def admin_get_recipients():
-    return {"emails": await get_recipients()}
+    full = await get_recipients_full()
+    return {
+        # Nuovo formato — usato dalla UI Admin.
+        "items": full,
+        # Retro-compat con eventuali client vecchi: solo email attive.
+        "emails": [r["email"] for r in full if r.get("enabled", True)],
+    }
 
 
 @api_router.put("/admin/recipients", dependencies=[Depends(dep_require_admin)])
 async def admin_put_recipients(update: RecipientsUpdate):
-    emails = [str(e).strip() for e in update.emails if str(e).strip()]
+    # Nuovo formato items ha priorità; se assente, fallback su emails (retro-compat).
+    if update.items is not None:
+        cleaned: List[Dict[str, Any]] = []
+        seen = set()
+        for it in update.items:
+            e = str(it.email).strip().lower()
+            if not e or e in seen:
+                continue
+            seen.add(e)
+            cleaned.append({"email": e, "enabled": bool(it.enabled)})
+        if not cleaned:
+            raise HTTPException(400, "Inserisci almeno un destinatario")
+        await set_recipients_full(cleaned)
+        return {"status": "ok", "items": cleaned}
+    # Legacy path
+    emails_in = update.emails or []
+    emails = [str(e).strip().lower() for e in emails_in if str(e).strip()]
     if not emails:
         raise HTTPException(400, "Inserisci almeno un destinatario")
     unique = list(dict.fromkeys(emails))

@@ -15,6 +15,7 @@ import {
 } from "../components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { Badge } from "../components/ui/badge";
+import { Switch } from "../components/ui/switch";
 import {
   Plus,
   Trash,
@@ -276,7 +277,7 @@ function InventoryTab() {
 
 // ---------- Recipients tab ----------
 function RecipientsTab() {
-  const [emails, setEmails] = useState([]);
+  const [items, setItems] = useState([]); // [{email, enabled}]
   const [newEmail, setNewEmail] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -287,7 +288,12 @@ function RecipientsTab() {
       const { data } = await axios.get(`${API}/admin/recipients`, {
         headers: authHeaders(),
       });
-      setEmails(data.emails || []);
+      // Retro-compat: se il backend restituisce solo `emails` (vecchio formato) le
+      // trattiamo come attive.
+      const list = Array.isArray(data.items) && data.items.length
+        ? data.items.map((it) => ({ email: String(it.email || "").toLowerCase(), enabled: it.enabled !== false }))
+        : (data.emails || []).map((e) => ({ email: String(e).toLowerCase(), enabled: true }));
+      setItems(list);
     } catch (e) {
       toast.error("Errore caricamento", { description: e?.message });
     } finally {
@@ -306,20 +312,24 @@ function RecipientsTab() {
       toast.error("Email non valida");
       return;
     }
-    if (emails.includes(v)) {
+    if (items.some((it) => it.email === v)) {
       toast.error("Email già presente");
       return;
     }
-    setEmails((prev) => [...prev, v]);
+    setItems((prev) => [...prev, { email: v, enabled: true }]);
     setNewEmail("");
   };
 
   const removeEmail = (idx) => {
-    setEmails((prev) => prev.filter((_, i) => i !== idx));
+    setItems((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const toggleEnabled = (idx) => {
+    setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, enabled: !it.enabled } : it)));
   };
 
   const save = async () => {
-    if (emails.length === 0) {
+    if (items.length === 0) {
       toast.error("Inserisci almeno un destinatario");
       return;
     }
@@ -327,7 +337,7 @@ function RecipientsTab() {
     try {
       await axios.put(
         `${API}/admin/recipients`,
-        { emails },
+        { items },
         { headers: authHeaders() }
       );
       toast.success("Destinatari salvati");
@@ -346,7 +356,8 @@ function RecipientsTab() {
   return (
     <div className="space-y-4 max-w-2xl">
       <div className="text-sm text-slate-600">
-        Email a cui verrà inviata ogni spedizione registrata dal magazzino.
+        Email a cui verrà inviata ogni spedizione/arrivo registrato dal magazzino.
+        Usa il toggle per escludere temporaneamente un destinatario senza rimuoverlo.
       </div>
       <div className="flex gap-2">
         <Input
@@ -369,23 +380,42 @@ function RecipientsTab() {
       </div>
 
       <ul className="border border-slate-200 rounded-md divide-y divide-slate-200 bg-white">
-        {emails.map((em, idx) => (
-          <li key={em} className="flex items-center justify-between px-4 py-3">
-            <span className="font-mono-tight text-slate-900">{em}</span>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className="h-9 w-9 border-red-200 text-red-600 hover:bg-red-50"
-              onClick={() => removeEmail(idx)}
-              data-testid={`remove-recipient-${idx}`}
-              aria-label="Rimuovi"
-            >
-              <Trash size={16} />
-            </Button>
+        {items.map((it, idx) => (
+          <li
+            key={it.email}
+            className="flex items-center justify-between gap-3 px-3 sm:px-4 py-3 flex-wrap sm:flex-nowrap"
+            data-testid={`recipient-row-${idx}`}
+          >
+            <span className={`font-mono-tight text-sm sm:text-base break-all min-w-0 flex-1 ${it.enabled ? "text-slate-900" : "text-slate-400 line-through"}`}>
+              {it.email}
+            </span>
+            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+              <label className="flex items-center gap-2 text-xs sm:text-sm select-none cursor-pointer">
+                <Switch
+                  checked={it.enabled}
+                  onCheckedChange={() => toggleEnabled(idx)}
+                  data-testid={`toggle-recipient-${idx}`}
+                  aria-label={`Invio automatico ${it.enabled ? "attivo" : "disattivo"}`}
+                />
+                <span className={`font-semibold ${it.enabled ? "text-emerald-700" : "text-slate-400"}`}>
+                  {it.enabled ? "ON" : "OFF"}
+                </span>
+              </label>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 border-red-200 text-red-600 hover:bg-red-50 shrink-0"
+                onClick={() => removeEmail(idx)}
+                data-testid={`remove-recipient-${idx}`}
+                aria-label="Rimuovi"
+              >
+                <Trash size={16} />
+              </Button>
+            </div>
           </li>
         ))}
-        {emails.length === 0 && (
+        {items.length === 0 && (
           <li className="px-4 py-6 text-slate-500 text-center text-sm">
             Nessun destinatario configurato.
           </li>
