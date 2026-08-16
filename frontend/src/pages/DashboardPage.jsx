@@ -34,7 +34,8 @@ export default function DashboardPage() {
     try {
       const { data } = await axios.get(`${API}/dashboard/kpi`);
       setKpi(data);
-      setRefreshedAt(new Date(data.refreshed_at || Date.now()));
+      // Usa l'orologio del client — evita drift del clock del container/server.
+      setRefreshedAt(new Date());
       setError(null);
     } catch (e) {
       setError(e?.response?.data?.detail || e?.message || "Errore");

@@ -170,6 +170,9 @@ export default function ArriviPage() {
     }
 
     // (3) Server-side check: latest-movement status. Un rientro (out) è OK.
+    // Feedback immediato: la chiamata a Notion può richiedere ~1s → mostra spinner
+    // così l'operatore percepisce reattività istantanea.
+    setLastScan({ type: "warn", title: "🔎 Verifica in corso…", subtitle: `Codice ${code}`, code });
     try {
       const { data } = await axios.get(`${API}/inventory/lookup`, { params: { code } });
       if (data.status === "in_warehouse") {

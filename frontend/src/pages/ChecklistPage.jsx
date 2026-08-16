@@ -186,6 +186,9 @@ export default function ChecklistPage() {
     }
 
     // (3) Server verify — Spedizioni richiede: ultima movimentazione = ENTRATA
+    // Feedback immediato: la chiamata a Notion può richiedere ~1s → mostra spinner
+    // così l'operatore percepisce reattività istantanea.
+    setLastScan({ type: "warn", title: "🔎 Verifica in corso…", subtitle: `Codice ${code}`, code });
     try {
       const { data } = await axios.get(`${API}/inventory/lookup`, { params: { code } });
       if (data.status === "out") {

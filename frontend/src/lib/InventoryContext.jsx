@@ -45,9 +45,9 @@ export function InventoryProvider({ children }) {
         const { data } = await axios.get(`${API}/inventory`);
         setItems(data.items || []);
         setCategories(data.categories || []);
-        setRefreshedAt(
-          data.refreshed_at ? new Date(data.refreshed_at) : new Date()
-        );
+        // Usa l'orologio del client: evita drift del clock del container/server
+        // e riflette il momento reale in cui la sincronizzazione è avvenuta sul dispositivo.
+        setRefreshedAt(new Date());
       } catch (e) {
         setError(
           e?.response?.data?.detail ||
