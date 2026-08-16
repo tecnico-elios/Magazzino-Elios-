@@ -72,6 +72,21 @@ class SicurezzaSettings(BaseModel):
     lockout_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
 
 
+# Lista IANA supportata (fusi principali internazionali). L'ora legale/solare è gestita
+# automaticamente da ZoneInfo. Sono i tz mostrati nella UI Admin.
+SUPPORTED_TIMEZONES = [
+    "Europe/Rome", "Europe/London", "Europe/Paris", "Europe/Berlin",
+    "Europe/Madrid", "Europe/Lisbon",
+    "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
+    "Asia/Dubai", "Asia/Tokyo", "Australia/Sydney", "UTC",
+]
+
+
+class GeneralSettings(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    timezone: Optional[str] = Field(default=None, min_length=2, max_length=64)
+
+
 class SettingsBody(BaseModel):
     model_config = ConfigDict(extra="ignore")
     # Retro-compat flat fields (usati dal frontend F6)
@@ -85,6 +100,8 @@ class SettingsBody(BaseModel):
     ricerca: Optional[RicercaSettings] = None
     movimenti: Optional[MovimentiSettings] = None
     sicurezza: Optional[SicurezzaSettings] = None
+    # F8 general (timezone)
+    general: Optional[GeneralSettings] = None
 
 
 class CleanupConfirmBody(BaseModel):
@@ -132,6 +149,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         "max_login_attempts": 5,
         "lockout_minutes": 5,
     },
+    "general": {
+        "timezone": "Europe/Rome",         # IANA — gestisce auto ora legale/solare
+    },
 }
 
 
@@ -154,7 +174,7 @@ async def get_app_settings(db) -> Dict[str, Any]:
         "feedback_seconds": int(doc.get("feedback_seconds", DEFAULT_SETTINGS["feedback_seconds"])),
     }
     # Nested — merge default con quanto salvato
-    for section in ("scanner", "dashboard", "magazzino", "ricerca", "movimenti", "sicurezza"):
+    for section in ("scanner", "dashboard", "magazzino", "ricerca", "movimenti", "sicurezza", "general"):
         result[section] = _merge_section(DEFAULT_SETTINGS[section], doc.get(section))
     # Coerenza: mantieni magazzino.low_stock_threshold allineato al flat top-level
     result["magazzino"]["low_stock_threshold"] = result["low_stock_threshold"]
@@ -247,12 +267,21 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             ("ricerca", body.ricerca),
             ("movimenti", body.movimenti),
             ("sicurezza", body.sicurezza),
+            ("general", body.general),
         ]:
             if section_body is None:
                 continue
             section_dict = section_body.model_dump(exclude_none=True)
             if not section_dict:
                 continue
+            # F8: valida timezone IANA
+            if section_name == "general" and "timezone" in section_dict:
+                tz_name = section_dict["timezone"]
+                try:
+                    from zoneinfo import ZoneInfo
+                    ZoneInfo(tz_name)
+                except Exception:
+                    raise HTTPException(400, f"Fuso orario non valido: {tz_name}")
             current_doc = await db.settings.find_one({"_id": "app_settings"}) or {}
             merged = _merge_section(current_doc.get(section_name) or DEFAULT_SETTINGS[section_name], section_dict)
             updates[section_name] = merged

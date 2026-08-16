@@ -9,8 +9,10 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "../components/ui/dialog";
 import {
-  ClockCounterClockwise, MagnifyingGlass, Warning, Broom, Gear, ListMagnifyingGlass, Trash, ArrowClockwise,
+  ClockCounterClockwise, MagnifyingGlass, Warning, Broom, Gear, ListMagnifyingGlass, Trash, ArrowClockwise, Globe,
 } from "@phosphor-icons/react";
+
+import { fmtDateTime as fmtDate, useTz } from "../lib/tz";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -21,16 +23,7 @@ function formatError(err) {
   return err?.message || "Errore";
 }
 
-const fmtDate = (v) => {
-  if (!v) return "—";
-  try {
-    // Se manca il marker di timezone → il backend l'ha serializzata da datetime naive UTC.
-    // Aggiungiamo "Z" per farla parsare come UTC, poi convertiamo a Europe/Rome.
-    const s = typeof v === "string" && !/(Z|[+-]\d{2}:?\d{2})$/.test(v) && /^\d{4}-\d{2}-\d{2}T/.test(v)
-      ? v + "Z" : v;
-    return new Date(s).toLocaleString("it-IT", { timeZone: "Europe/Rome" });
-  } catch { return v; }
-};
+const fmtDateLegacy = (v) => fmtDate(v);
 
 // ---------- Audit Log ----------
 export function AuditLogTab() {
@@ -155,6 +148,7 @@ function SettingsSection({ title, icon: Icon, children }) {
 export function SettingsTab() {
   const [s, setS] = useState(null);
   const [saving, setSaving] = useState(false);
+  useTz();
 
   const load = async () => {
     try {
@@ -179,6 +173,7 @@ export function SettingsTab() {
         ricerca: s.ricerca,
         movimenti: s.movimenti,
         sicurezza: s.sicurezza,
+        general: s.general,
       };
       const { data } = await axios.put(`${API}/admin/settings`, payload);
       setS(data);
@@ -304,6 +299,38 @@ export function SettingsTab() {
             testid="set-sec-lockout" />
           <div className="pt-3 mt-1 text-[11px] text-slate-500 border-t border-slate-100">
             L'obbligo di cambio password al primo accesso è <strong>sempre attivo</strong> per gli utenti creati dall'Admin.
+          </div>
+        </SettingsSection>
+
+        <SettingsSection title="Fuso orario" icon={Globe}>
+          <div className="py-2">
+            <Label className="text-sm font-semibold text-slate-800">Fuso orario del gestionale</Label>
+            <div className="text-[11px] text-slate-500 mb-2">
+              Data e ora mostrate in tutto il gestionale (Arrivi, Spedizioni, Movimenti, Dashboard, Audit, Storico Seriali)
+              vengono formattate in questo fuso. L'ora legale/solare è gestita automaticamente.
+              L'ora viene generata dal server e non dipende dall'orologio del dispositivo.
+            </div>
+            <select
+              value={s.general?.timezone || "Europe/Rome"}
+              onChange={(e) => setSection("general", { timezone: e.target.value })}
+              className="h-11 w-full max-w-sm rounded-md border border-slate-200 bg-white px-3 text-sm font-mono-tight focus:outline-none focus:border-slate-500"
+              data-testid="setting-timezone"
+            >
+              <option value="Europe/Rome">Europe/Rome — Italia (predefinito)</option>
+              <option value="Europe/London">Europe/London — Regno Unito</option>
+              <option value="Europe/Paris">Europe/Paris — Francia</option>
+              <option value="Europe/Berlin">Europe/Berlin — Germania</option>
+              <option value="Europe/Madrid">Europe/Madrid — Spagna</option>
+              <option value="Europe/Lisbon">Europe/Lisbon — Portogallo</option>
+              <option value="America/New_York">America/New_York — USA Est</option>
+              <option value="America/Chicago">America/Chicago — USA Centro</option>
+              <option value="America/Denver">America/Denver — USA Montagna</option>
+              <option value="America/Los_Angeles">America/Los_Angeles — USA Ovest</option>
+              <option value="Asia/Dubai">Asia/Dubai — Emirati</option>
+              <option value="Asia/Tokyo">Asia/Tokyo — Giappone</option>
+              <option value="Australia/Sydney">Australia/Sydney</option>
+              <option value="UTC">UTC — Tempo universale</option>
+            </select>
           </div>
         </SettingsSection>
 

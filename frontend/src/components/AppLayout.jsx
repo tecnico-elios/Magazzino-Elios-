@@ -17,6 +17,7 @@ import { useInventoryCtx } from "../lib/InventoryContext";
 import { useAuth } from "../lib/AuthContext";
 import ChangeMyPasswordDialog from "./ChangeMyPasswordDialog";
 import EliosLogo from "./EliosLogo";
+import { fmtTime, useTz } from "../lib/tz";
 
 const BASE_NAV = [
   { to: "/", label: "Dashboard", icon: House, end: true, testid: "nav-dashboard" },
@@ -178,7 +179,7 @@ export default function AppLayout() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 text-[10px] text-slate-300/60 pb-1">
             Ultimo sync Notion:{" "}
             <span className="font-mono-tight text-amber-300/70">
-              {refreshedAt.toLocaleTimeString("it-IT", { timeZone: "Europe/Rome" })}
+              {fmtTime(refreshedAt)}
             </span>
           </div>
         )}

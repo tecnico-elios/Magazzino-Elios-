@@ -1198,6 +1198,30 @@ async def get_settings_public():
     return await get_app_settings(db)
 
 
+@api_router.get("/time")
+async def get_server_time():
+    """Ritorna l'ora del server nel tz configurato (Admin → Impostazioni → Fuso orario).
+    Il frontend usa questo endpoint per non dipendere dall'orologio locale.
+    """
+    from routes.admin_extra_routes import get_app_settings
+    settings = await get_app_settings(db)
+    tz_name = (settings.get("general") or {}).get("timezone") or "Europe/Rome"
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz_name = "Europe/Rome"
+        tz = ROME_TZ
+    now_utc = datetime.now(timezone.utc)
+    now_local = now_utc.astimezone(tz)
+    return {
+        "tz": tz_name,
+        "utc_iso": now_utc.isoformat(),
+        "local_iso": now_local.isoformat(),
+        "local_date": now_local.date().isoformat(),
+        "local_datetime": now_local.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
 @api_router.get("/admin/notion-exits", dependencies=[Depends(dep_require_admin)])
 async def admin_notion_exits(
     cliente: Optional[str] = None,

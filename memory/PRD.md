@@ -22,6 +22,14 @@
   - **Responsive CSS**: media queries `(hover:none) and (pointer:coarse)` → min-h 44px + font-size 16px (no zoom iOS) su input/button; smartphone verticale → tabs scroll orizzontale, dialog full-width, KPI grid 2 col; palmare industriale → text compatti; prefers-reduced-motion; anti scroll-orizzontale globale
 - PWA — solo alla fine
 
+## F8 — Fuso orario configurabile + barra ricerca semplificata ✅ (16/02/2026)
+- **Fuso orario Admin**: nuova sezione `general.timezone` nel settings store esistente (default `Europe/Rome`), UI select in Admin → Impostazioni con 14 fusi IANA (Europe/Rome, London, Paris, Berlin, Madrid, Lisbon; America/New_York, Chicago, Denver, Los_Angeles; Asia/Dubai, Tokyo; Australia/Sydney; UTC). Ora legale/solare gestita automaticamente da ZoneInfo.
+- Nuovo endpoint pubblico autenticato `GET /api/time` → `{tz, utc_iso, local_iso, local_date, local_datetime}`: ora generata dal server, indipendente dall'orologio del dispositivo.
+- Nuovo helper centrale `frontend/src/lib/tz.js` (`getConfiguredTz`, `fetchServerToday`, `fmtDateTime`, `fmtTime`, `useTz`) con cache + invalidazione su `elios:settings-changed`.
+- 6 punti di visualizzazione data/ora convertiti al tz dinamico: `AppLayout` (Ultimo sync), `DashboardPage`, `AnomaliePage`, `AdminPage.HistoryTab`, `AdminUsersPage`, `AdminExtraTabs` (Audit).
+- 3 default form data aggiornati a server-time: `ArriviPage.arrivalDate`, `ChecklistPage.shippingDate`, `MovimentiPage.monthKey`.
+- Dati storici già salvati NON toccati — solo la formattazione lato client cambia.
+
 ## F8 — Barra di ricerca semplificata (Arrivi/Spedizioni) ✅ (16/02/2026)
 - Layout `[input] [🔎 CERCA] [📷] [🎯]` responsive con `flex-wrap`
 - Pulsante CERCA = stessa pipeline dell'ENTER (ricerca locale + lookup esistente, nessuna nuova chiamata Notion)

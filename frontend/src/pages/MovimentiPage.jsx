@@ -13,6 +13,7 @@ import {
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
+import { fetchServerToday } from "../lib/tz";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const CACHE_TTL_MS = 60 * 1000; // 60s — refresh forced by button
@@ -65,11 +66,14 @@ export default function MovimentiPage() {
   useEffect(() => {
     (async () => {
       try {
+        // F8: derivo il mese corrente dall'ora del server nel tz configurato.
+        const serverDate = await fetchServerToday();
+        const serverMonth = serverDate ? serverDate.slice(0, 7) : currentMonthKey();
         const { data } = await axios.get(`${API}/settings`);
         const limit = parseInt(data?.movimenti?.max_shown ?? 500, 10);
         if (limit > 0) setMaxShown(limit);
         const autoOpen = data?.movimenti?.auto_open_current_month !== false;
-        if (autoOpen) setMonthKey(currentMonthKey());
+        if (autoOpen) setMonthKey(serverMonth);
       } catch {}
     })();
   }, []);

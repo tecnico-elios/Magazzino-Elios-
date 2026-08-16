@@ -13,6 +13,7 @@ import { Label } from "../components/ui/label";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import { Badge } from "../components/ui/badge";
+import { fetchServerToday } from "../lib/tz";
 import {
   ArrowSquareOut,
   Trash,
@@ -37,6 +38,11 @@ export default function ChecklistPage() {
   const [cliente, setCliente] = useState("");
   const [shippingDate, setShippingDate] = useState(todayISO());
   const [notes, setNotes] = useState("");
+
+  // F8 — Sostituisce la data locale con quella del server nel tz configurato.
+  useEffect(() => {
+    fetchServerToday().then((d) => d && setShippingDate(d));
+  }, []);
 
   const [list, setList] = useState([]); // {id, name, serialized, unit, quantity, serials[]}
   const [lastScan, setLastScan] = useState(null);

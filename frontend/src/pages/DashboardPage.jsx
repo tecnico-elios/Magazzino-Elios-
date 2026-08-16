@@ -11,6 +11,7 @@ import {
   Warning,
   ArrowClockwise,
 } from "@phosphor-icons/react";
+import { fmtTime, useTz } from "../lib/tz";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const DEFAULT_REFRESH_MS = 60 * 1000; // fallback se le impostazioni non sono caricate
@@ -21,6 +22,7 @@ const DEFAULT_REFRESH_MS = 60 * 1000; // fallback se le impostazioni non sono ca
  * Notion is the SSOT — no duplicate data source. Cache TTL 60s server-side.
  */
 export default function DashboardPage() {
+  useTz();
   const [kpi, setKpi] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -265,7 +267,7 @@ export default function DashboardPage() {
         <div className="text-[10px] text-slate-400 text-center">
           Ultimo aggiornamento KPI:{" "}
           <span className="font-mono-tight">
-            {refreshedAt.toLocaleTimeString("it-IT", { timeZone: "Europe/Rome" })}
+              {fmtTime(refreshedAt)}
           </span>{" "}
           — auto-refresh silenzioso ogni 60s
         </div>

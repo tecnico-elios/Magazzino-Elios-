@@ -16,6 +16,7 @@ import {
   DialogDescription,
 } from "../components/ui/dialog";
 import { UserPlus, Key, ArrowLeft, PencilSimple, Prohibit, ArrowClockwise } from "@phosphor-icons/react";
+import { fmtDateTime, useTz } from "../lib/tz";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -260,6 +261,7 @@ function ResetPwdDialog({ user, onClose, onDone }) {
 
 export default function AdminUsersPage() {
   const { user: me, isAdmin, isLoading } = useAuth();
+  useTz();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
@@ -306,14 +308,7 @@ export default function AdminUsersPage() {
     }
   };
 
-  const fmtDate = (v) => {
-    if (!v) return "—";
-    try {
-      const s = typeof v === "string" && !/(Z|[+-]\d{2}:?\d{2})$/.test(v) && /^\d{4}-\d{2}-\d{2}T/.test(v)
-        ? v + "Z" : v;
-      return new Date(s).toLocaleString("it-IT", { timeZone: "Europe/Rome" });
-    } catch { return v; }
-  };
+  const fmtDate = (v) => fmtDateTime(v);
 
   return (
     <div className="min-h-screen bg-slate-50" data-testid="admin-users-page">

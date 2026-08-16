@@ -6,6 +6,7 @@ import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { useAuth } from "../lib/AuthContext";
+import { fmtDateTime, useTz } from "../lib/tz";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -18,6 +19,7 @@ const KIND_LABEL = {
 
 export default function AnomaliePage() {
   const { isAdmin } = useAuth();
+  useTz();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -139,13 +141,7 @@ export default function AnomaliePage() {
                 ) : filtered.map((a, idx) => (
                   <tr key={a.id || idx} className="hover:bg-slate-50" data-testid={`anom-row-${idx}`}>
                     <td className="px-3 py-2 font-mono-tight text-xs text-slate-600 whitespace-nowrap">
-                      {a.created_at ? (() => {
-                        const v = a.created_at;
-                        const s = typeof v === "string" && !/(Z|[+-]\d{2}:?\d{2})$/.test(v) && /^\d{4}-\d{2}-\d{2}T/.test(v)
-                          ? v + "Z" : v;
-                        try { return new Date(s).toLocaleString("it-IT", { timeZone: "Europe/Rome" }); }
-                        catch { return "—"; }
-                      })() : "—"}
+                      {fmtDateTime(a.created_at)}
                     </td>
                     <td className="px-3 py-2">
                       <Badge variant="outline" className="border-amber-300 text-amber-800 bg-amber-50">

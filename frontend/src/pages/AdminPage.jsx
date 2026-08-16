@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
+import { fmtDateTime as fmtTz, useTz } from "../lib/tz";
 import {
   Card,
   CardContent,
@@ -407,6 +408,7 @@ function RecipientsTab() {
 
 // ---------- History tab (with filters + PDF + Notion exits) ----------
 function HistoryTab() {
+  useTz();
   const [items, setItems] = useState([]);
   const [notionExits, setNotionExits] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -486,14 +488,7 @@ function HistoryTab() {
     loadNotion(empty);
   };
 
-  const fmtDateTime = (iso) => {
-    if (!iso) return "";
-    try {
-      return new Date(iso).toLocaleString("it-IT");
-    } catch {
-      return iso;
-    }
-  };
+  const fmtDateTime = (iso) => fmtTz(iso);
 
   return (
     <div className="space-y-4">

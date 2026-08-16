@@ -13,6 +13,7 @@ import { Label } from "../components/ui/label";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import { Badge } from "../components/ui/badge";
+import { fetchServerToday } from "../lib/tz";
 import {
   ArrowSquareIn,
   Trash,
@@ -40,6 +41,10 @@ export default function ArriviPage() {
   const [arrivalDate, setArrivalDate] = useState(todayISO());
   const [notes, setNotes] = useState("");
 
+  // F8 — Sostituisce la data locale con quella del server nel tz configurato.
+  useEffect(() => {
+    fetchServerToday().then((d) => d && setArrivalDate(d));
+  }, []);
   const [list, setList] = useState([]); // {id, name, serialized, unit, quantity, serials[]}
   const [lastScan, setLastScan] = useState(null);
   const [qtyDialog, setQtyDialog] = useState(null); // {item}
