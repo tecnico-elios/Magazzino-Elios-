@@ -34,10 +34,6 @@ import {
   UsersFour,
 } from "@phosphor-icons/react";
 import { AuditLogTab, SettingsTab, SettingsGeneralTab, SettingsMagazzinoTab, SettingsScannerTab, SettingsSicurezzaTab, SettingsArriviTab, SettingsSpedizioniTab, ProductsAdminTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab, SessionsTab, InventorySourceTab, ManutenzioneTab, NotionSettingsTab } from "./AdminExtraTabs";
-// Note: AuditLogTab importato ma non renderizzato — tab rimossa su richiesta utente.
-// eslint-disable-next-line no-unused-vars
-const _AuditLogTab_unused = AuditLogTab;
-
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // Auth is now handled by AuthContext + axios interceptor (Bearer token).
@@ -860,15 +856,6 @@ export default function AdminPage() {
             className="mb-6 h-auto flex flex-nowrap w-full max-w-full justify-start overflow-x-auto scrollbar-thin bg-transparent p-0 gap-1 sm:bg-muted sm:p-1 sm:flex-wrap sm:overflow-visible"
             data-testid="admin-tabs-list"
           >
-            <TabsTrigger value="inventory" data-testid="tab-inventory" className="shrink-0">
-              <Package size={16} className="mr-1" /> Prodotti
-            </TabsTrigger>
-            <TabsTrigger value="recipients" data-testid="tab-recipients" className="shrink-0">
-              <Envelope size={16} className="mr-1" /> Notifiche
-            </TabsTrigger>
-            <TabsTrigger value="history" data-testid="tab-history" className="shrink-0">
-              <ClockCounterClockwise size={16} className="mr-1" /> Storico
-            </TabsTrigger>
             <TabsTrigger value="products" data-testid="tab-products" className="shrink-0">
               <Package size={16} className="mr-1" /> Gestione Prodotti
             </TabsTrigger>
@@ -902,9 +889,6 @@ export default function AdminPage() {
             <TabsTrigger value="maintenance" data-testid="tab-maintenance" className="shrink-0">
               <ArrowsClockwise size={16} className="mr-1" /> Sistema / Manutenzione
             </TabsTrigger>
-            <TabsTrigger value="inventory" data-testid="tab-inventory" className="shrink-0">
-              <Package size={16} className="mr-1" /> Inventario (avanzato)
-            </TabsTrigger>
             <TabsTrigger value="history" data-testid="tab-history" className="shrink-0">
               <ClockCounterClockwise size={16} className="mr-1" /> Storico
             </TabsTrigger>
@@ -932,7 +916,6 @@ export default function AdminPage() {
           <TabsContent value="inventory-source"><InventorySourceTab /></TabsContent>
           <TabsContent value="audit"><AuditLogTab /></TabsContent>
           <TabsContent value="maintenance"><ManutenzioneTab /></TabsContent>
-          <TabsContent value="inventory"><InventoryTab /></TabsContent>
           <TabsContent value="history"><HistoryTab /></TabsContent>
           <TabsContent value="global-search"><GlobalSearchTab /></TabsContent>
           <TabsContent value="serial-history"><SerialHistoryTab /></TabsContent>

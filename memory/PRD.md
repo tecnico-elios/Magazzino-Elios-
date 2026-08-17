@@ -74,6 +74,13 @@
 - Frontend: nuova tab Admin `ManutenzioneTab` con stato Notion (pallino verde/rosso), count prodotti in cache, timestamp ultimo check, bottoni "Sincronizza ora" / "Svuota cache" / "Verifica stato".
 - Nota: gli altri punti F9 (Admin restructure per area, tipizzazione notifiche per evento) sono già stati esplicitamente rifiutati (P2) o richiedono scelta operativa dell'utente — non toccati per evitare regressioni.
 
+## F8 — Fix Admin Tab duplicati + rimozione "Inventario (avanzato)" ✅ (17/02/2026)
+- Rimossi 3 tab DUPLICATI in AdminPage TabsList: `value="inventory"` (era listato 2 volte come "Prodotti" e come "Inventario avanzato"), `value="recipients"` (2×), `value="history"` (2×). React DOM warning risolto.
+- Rimosso completamente il tab **"Inventario (avanzato)"** da Admin (vietato dall'utente: "non posso avere 2 voci inventario e inventario avanzato"). Voce unica ora è solo la pagina principale `/inventario` in AppLayout NAV.
+- Riordino tab Admin secondo §2 del prompt F8: Gestione Prodotti → Generali → Magazzino → Scanner → Arrivi → Spedizioni → Notifiche → Notion → Fonte Inventario → Registro Attività → Sistema/Manutenzione → (avanzati: Storico, Ricerca, Storico SN, Sessioni, Cleanup TEST).
+- Rimosso commento morto `_AuditLogTab_unused` (tab Audit ora è renderizzata come "Registro Attività").
+- Nessuna modifica a Notion, flussi Arrivi/Spedizioni, card operative, ScannerBar, ProductPicker, QtyDialog, SerialCollector.
+
 ## F8 — P0+P1 Prompt Definitivo ✅ (16/02/2026)
 - **Rinomina card operative**: Arrivi → "RICEVI SERIALI / RICEVI QUANTITÀ / REINTEGRA SERIALE"; Spedizioni → "SPEDISCI SERIALI / SPEDISCI QUANTITÀ" (nessun cambio dimensioni/stile).
 - **Account master `tecnico@eliostech.org` protetto a livello backend**: `auth.is_master_user()` + guardie 403 in `PATCH /admin/users/{id}` (role/active), `POST /admin/users/{id}/reset-password`, `DELETE /admin/users/{id}` (hard delete), `DELETE /admin/sessions/{sid}` (force-logout). UI Admin nasconde/disabilita i relativi pulsanti + badge "🔒 master".
