@@ -33,7 +33,7 @@ import {
   ListMagnifyingGlass,
   UsersFour,
 } from "@phosphor-icons/react";
-import { AuditLogTab, SettingsTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab, SessionsTab, InventorySourceTab, ManutenzioneTab } from "./AdminExtraTabs";
+import { AuditLogTab, SettingsTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab, SessionsTab, InventorySourceTab, ManutenzioneTab, NotionSettingsTab } from "./AdminExtraTabs";
 // Note: AuditLogTab importato ma non renderizzato — tab rimossa su richiesta utente.
 // eslint-disable-next-line no-unused-vars
 const _AuditLogTab_unused = AuditLogTab;
@@ -291,8 +291,23 @@ function RecipientsTab() {
       // Retro-compat: se il backend restituisce solo `emails` (vecchio formato) le
       // trattiamo come attive.
       const list = Array.isArray(data.items) && data.items.length
-        ? data.items.map((it) => ({ email: String(it.email || "").toLowerCase(), enabled: it.enabled !== false }))
-        : (data.emails || []).map((e) => ({ email: String(e).toLowerCase(), enabled: true }));
+        ? data.items.map((it) => ({
+            email: String(it.email || "").toLowerCase(),
+            enabled: it.enabled !== false,
+            events: {
+              arrivi: (it.events?.arrivi ?? true) === true,
+              spedizioni: (it.events?.spedizioni ?? true) === true,
+              sotto_scorta: (it.events?.sotto_scorta ?? true) === true,
+              esauriti: (it.events?.esauriti ?? true) === true,
+              anomalie: (it.events?.anomalie ?? true) === true,
+              errori_notion: (it.events?.errori_notion ?? true) === true,
+            },
+          }))
+        : (data.emails || []).map((e) => ({
+            email: String(e).toLowerCase(),
+            enabled: true,
+            events: { arrivi: true, spedizioni: true, sotto_scorta: true, esauriti: true, anomalie: true, errori_notion: true },
+          }));
       setItems(list);
     } catch (e) {
       toast.error("Errore caricamento", { description: e?.message });
@@ -316,7 +331,11 @@ function RecipientsTab() {
       toast.error("Email già presente");
       return;
     }
-    setItems((prev) => [...prev, { email: v, enabled: true }]);
+    setItems((prev) => [...prev, {
+      email: v,
+      enabled: true,
+      events: { arrivi: true, spedizioni: true, sotto_scorta: true, esauriti: true, anomalie: true, errori_notion: true },
+    }]);
     setNewEmail("");
   };
 
@@ -326,6 +345,12 @@ function RecipientsTab() {
 
   const toggleEnabled = (idx) => {
     setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, enabled: !it.enabled } : it)));
+  };
+
+  const toggleEvent = (idx, ev) => {
+    setItems((prev) => prev.map((it, i) =>
+      i === idx ? { ...it, events: { ...(it.events || {}), [ev]: !it.events?.[ev] } } : it
+    ));
   };
 
   const save = async () => {
@@ -383,35 +408,67 @@ function RecipientsTab() {
         {items.map((it, idx) => (
           <li
             key={it.email}
-            className="flex items-center justify-between gap-3 px-3 sm:px-4 py-3 flex-wrap sm:flex-nowrap"
+            className="flex flex-col gap-2 px-3 sm:px-4 py-3"
             data-testid={`recipient-row-${idx}`}
           >
-            <span className={`font-mono-tight text-sm sm:text-base break-all min-w-0 flex-1 ${it.enabled ? "text-slate-900" : "text-slate-400 line-through"}`}>
-              {it.email}
-            </span>
-            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-              <label className="flex items-center gap-2 text-xs sm:text-sm select-none cursor-pointer">
-                <Switch
-                  checked={it.enabled}
-                  onCheckedChange={() => toggleEnabled(idx)}
-                  data-testid={`toggle-recipient-${idx}`}
-                  aria-label={`Invio automatico ${it.enabled ? "attivo" : "disattivo"}`}
-                />
-                <span className={`font-semibold ${it.enabled ? "text-emerald-700" : "text-slate-400"}`}>
-                  {it.enabled ? "ON" : "OFF"}
-                </span>
-              </label>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="h-9 w-9 border-red-200 text-red-600 hover:bg-red-50 shrink-0"
-                onClick={() => removeEmail(idx)}
-                data-testid={`remove-recipient-${idx}`}
-                aria-label="Rimuovi"
-              >
-                <Trash size={16} />
-              </Button>
+            <div className="flex items-center justify-between gap-3 flex-wrap sm:flex-nowrap">
+              <span className={`font-mono-tight text-sm sm:text-base break-all min-w-0 flex-1 ${it.enabled ? "text-slate-900" : "text-slate-400 line-through"}`}>
+                {it.email}
+              </span>
+              <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                <label className="flex items-center gap-2 text-xs sm:text-sm select-none cursor-pointer">
+                  <Switch
+                    checked={it.enabled}
+                    onCheckedChange={() => toggleEnabled(idx)}
+                    data-testid={`toggle-recipient-${idx}`}
+                    aria-label={`Invio automatico ${it.enabled ? "attivo" : "disattivo"}`}
+                  />
+                  <span className={`font-semibold ${it.enabled ? "text-emerald-700" : "text-slate-400"}`}>
+                    {it.enabled ? "ON" : "OFF"}
+                  </span>
+                </label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 border-red-200 text-red-600 hover:bg-red-50 shrink-0"
+                  onClick={() => removeEmail(idx)}
+                  data-testid={`remove-recipient-${idx}`}
+                  aria-label="Rimuovi"
+                >
+                  <Trash size={16} />
+                </Button>
+              </div>
+            </div>
+            {/* F9 §28 — Selezione tipi evento per destinatario. Ora tipizzati e wired al backend. */}
+            <div className={`flex flex-wrap gap-1.5 ${it.enabled ? "" : "opacity-40"}`}>
+              {[
+                { key: "arrivi", label: "Arrivi" },
+                { key: "spedizioni", label: "Spedizioni" },
+                { key: "sotto_scorta", label: "Sotto scorta" },
+                { key: "esauriti", label: "Esauriti" },
+                { key: "anomalie", label: "Anomalie" },
+                { key: "errori_notion", label: "Errori Notion" },
+              ].map((ev) => {
+                const on = it.events?.[ev.key] !== false;
+                return (
+                  <button
+                    key={ev.key}
+                    type="button"
+                    onClick={() => it.enabled && toggleEvent(idx, ev.key)}
+                    disabled={!it.enabled}
+                    className={`px-2 h-7 rounded-full border text-[11px] font-semibold transition-colors ${
+                      on
+                        ? "bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100"
+                        : "bg-slate-100 border-slate-200 text-slate-400 hover:bg-slate-200"
+                    }`}
+                    data-testid={`event-${ev.key}-${idx}`}
+                    title={on ? `Riceve: ${ev.label}` : `Non riceve: ${ev.label}`}
+                  >
+                    {on ? "●" : "○"} {ev.label}
+                  </button>
+                );
+              })}
             </div>
           </li>
         ))}
@@ -807,7 +864,7 @@ export default function AdminPage() {
               <Package size={16} className="mr-1" /> Prodotti
             </TabsTrigger>
             <TabsTrigger value="recipients" data-testid="tab-recipients" className="shrink-0">
-              <Envelope size={16} className="mr-1" /> Destinatari
+              <Envelope size={16} className="mr-1" /> Notifiche
             </TabsTrigger>
             <TabsTrigger value="history" data-testid="tab-history" className="shrink-0">
               <ClockCounterClockwise size={16} className="mr-1" /> Storico
@@ -830,6 +887,9 @@ export default function AdminPage() {
             <TabsTrigger value="inventory-source" data-testid="tab-inventory-source" className="shrink-0">
               <Package size={16} className="mr-1" /> Fonte Inventario
             </TabsTrigger>
+            <TabsTrigger value="notion" data-testid="tab-notion" className="shrink-0">
+              <ArrowsClockwise size={16} className="mr-1" /> Notion
+            </TabsTrigger>
             <TabsTrigger value="maintenance" data-testid="tab-maintenance" className="shrink-0">
               <ArrowsClockwise size={16} className="mr-1" /> Manutenzione
             </TabsTrigger>
@@ -843,6 +903,7 @@ export default function AdminPage() {
           <TabsContent value="cleanup"><CleanupTestTab /></TabsContent>
           <TabsContent value="settings"><SettingsTab /></TabsContent>
           <TabsContent value="inventory-source"><InventorySourceTab /></TabsContent>
+          <TabsContent value="notion"><NotionSettingsTab /></TabsContent>
           <TabsContent value="maintenance"><ManutenzioneTab /></TabsContent>
         </Tabs>
       </main>

@@ -897,3 +897,63 @@ export function ManutenzioneTab() {
   );
 }
 
+// ---------- Impostazioni Notion (F9 §27) ----------
+// Sezione diagnostica read-only: mostra stato integrazione. Nessuna modifica strutturale a Notion.
+export function NotionSettingsTab() {
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const load = async () => {
+    setLoading(true);
+    try {
+      const { data } = await axios.get(`${API}/admin/maintenance/status`);
+      setStatus(data);
+    } catch (_) {} finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+  return (
+    <div className="space-y-4 max-w-3xl" data-testid="notion-settings-tab">
+      <div>
+        <h3 className="font-display text-lg font-bold text-slate-900">Impostazioni Notion</h3>
+        <p className="text-sm text-slate-600 mt-1">
+          Configurazione dell'integrazione Notion. Il gestionale si adatta alla struttura Notion esistente.
+          Nessuna operazione qui modifica database, proprietà o mapping su Notion.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="et-card-elevated p-4">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Stato connessione</div>
+          <div className="flex items-center gap-2 mt-1">
+            <span className={`w-2.5 h-2.5 rounded-full ${status?.ok ? "bg-emerald-500" : "bg-red-500"}`} aria-hidden />
+            <span className="font-semibold text-slate-900">{loading ? "…" : status?.ok ? "Attiva" : "Non attiva"}</span>
+          </div>
+          <div className="text-xs text-slate-500 mt-1">
+            Token: {status?.notion_configured ? "Configurato" : "Mancante"}
+          </div>
+        </div>
+        <div className="et-card-elevated p-4">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Database mappati</div>
+          <ul className="text-xs text-slate-700 mt-1 space-y-0.5">
+            <li>• Inventario ({status?.inventory_items || 0} items)</li>
+            <li>• Entrate / Consegne (storico Arrivi)</li>
+            <li>• Uscite / Spedizioni (storico Spedizioni)</li>
+          </ul>
+        </div>
+      </div>
+      <div className="rounded-md border border-blue-200 bg-blue-50 text-blue-900 text-xs p-3 space-y-1">
+        <div><b>Colonne utilizzate</b> (già esistenti su Notion — non modificate dal gestionale):</div>
+        <ul className="list-disc pl-4 space-y-0.5">
+          <li>Colonna 13 → quantità in arrivo (Arrivi)</li>
+          <li>Colonna 16 → seriali (prodotti serializzati) oppure codice prodotto (prodotti a quantità)</li>
+        </ul>
+      </div>
+      <div className="rounded-md border border-amber-200 bg-amber-50 text-amber-900 text-xs p-3">
+        <b>Sicurezza struttura:</b> qualsiasi modifica strutturale (creazione/rinomina/eliminazione colonne o
+        database) va effettuata direttamente su Notion. Il gestionale non altera mai la struttura.
+      </div>
+      <div className="text-xs text-slate-500 font-mono-tight">
+        Ultimo check: {status?.checked_at ? new Date(status.checked_at).toLocaleString("it-IT") : "—"}
+      </div>
+    </div>
+  );
+}
+

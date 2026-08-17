@@ -59,24 +59,35 @@ DEFAULT_RECIPIENTS_SEED = [
     if r.strip()
 ]
 
+# Eventi notifica supportati (F9 §28). enabled=True conserva retro-compat.
+NOTIFICATION_EVENTS = ["arrivi", "spedizioni", "sotto_scorta", "esauriti", "anomalie", "errori_notion"]
+DEFAULT_EVENTS = {ev: True for ev in NOTIFICATION_EVENTS}
+
+
 # ---------- Settings helpers ----------
 def _normalize_recipient(entry: Any) -> Optional[Dict[str, Any]]:
-    """Normalizza un destinatario a `{email, enabled}`. Retro-compat con legacy list[str]."""
+    """Normalizza un destinatario a `{email, enabled, events{...}}`. Retro-compat con legacy list[str]."""
     if isinstance(entry, str):
         e = entry.strip().lower()
-        return {"email": e, "enabled": True} if e else None
+        return {"email": e, "enabled": True, "events": dict(DEFAULT_EVENTS)} if e else None
     if isinstance(entry, dict):
         e = str(entry.get("email") or "").strip().lower()
         if not e:
             return None
         enabled = entry.get("enabled")
-        return {"email": e, "enabled": True if enabled is None else bool(enabled)}
+        events_in = entry.get("events") or {}
+        events = {ev: bool(events_in.get(ev, True)) for ev in NOTIFICATION_EVENTS}
+        return {
+            "email": e,
+            "enabled": True if enabled is None else bool(enabled),
+            "events": events,
+        }
     return None
 
 
 async def get_recipients_full() -> List[Dict[str, Any]]:
-    """Ritorna lista completa `[{email, enabled}]` per l'Admin UI.
-    Migra automaticamente il vecchio formato list[str] mantenendo enabled=True.
+    """Ritorna lista completa `[{email, enabled, events}]` per l'Admin UI.
+    Migra automaticamente il vecchio formato list[str] mantenendo enabled=True e tutti gli eventi ON.
     """
     doc = await db.settings.find_one({"_id": "recipients"}, {"_id": 0})
     if doc and isinstance(doc.get("items"), list):
@@ -91,8 +102,8 @@ async def get_recipients_full() -> List[Dict[str, Any]]:
             upsert=True,
         )
         return migrated
-    # Seed default (tutti attivi)
-    seed = [{"email": e, "enabled": True} for e in DEFAULT_RECIPIENTS_SEED]
+    # Seed default (tutti attivi, tutti gli eventi ON)
+    seed = [{"email": e, "enabled": True, "events": dict(DEFAULT_EVENTS)} for e in DEFAULT_RECIPIENTS_SEED]
     await db.settings.update_one(
         {"_id": "recipients"},
         {"$set": {"items": seed}},
@@ -102,13 +113,30 @@ async def get_recipients_full() -> List[Dict[str, Any]]:
 
 
 async def get_recipients() -> List[str]:
-    """Ritorna SOLO le email dei destinatari ATTIVI — usata dai flussi di invio automatico."""
+    """Retro-compat: SOLO email dei destinatari ATTIVI (indipendente dal tipo evento).
+    Preferisci `get_recipients_for_event(event)` per il filtro tipizzato F9.
+    """
     full = await get_recipients_full()
     return [r["email"] for r in full if r.get("enabled", True)]
 
 
+async def get_recipients_for_event(event: str) -> List[str]:
+    """Ritorna le email attive che hanno il flag `events[event]` ON. Fallback: se manca
+    il campo events (record vecchio) si considera ON per retro-compat.
+    """
+    full = await get_recipients_full()
+    out = []
+    for r in full:
+        if not r.get("enabled", True):
+            continue
+        events = r.get("events")
+        if events is None or events.get(event, True):
+            out.append(r["email"])
+    return out
+
+
 async def set_recipients_full(items: List[Dict[str, Any]]) -> None:
-    """Salva la lista completa `[{email, enabled}]`."""
+    """Salva la lista completa `[{email, enabled, events}]`."""
     await db.settings.update_one(
         {"_id": "recipients"},
         {"$set": {"items": items}, "$unset": {"emails": ""}},
@@ -117,8 +145,8 @@ async def set_recipients_full(items: List[Dict[str, Any]]) -> None:
 
 
 async def set_recipients(emails: List[str]) -> None:
-    """Retro-compat: salva solo le email (tutte attive)."""
-    await set_recipients_full([{"email": e, "enabled": True} for e in emails])
+    """Retro-compat: salva solo le email (tutte attive, tutti gli eventi ON)."""
+    await set_recipients_full([{"email": e, "enabled": True, "events": dict(DEFAULT_EVENTS)} for e in emails])
 
 
 def resolve_serialized(item: Dict[str, Any]) -> Optional[bool]:
@@ -236,13 +264,24 @@ class ArrivoRecord(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
+class NotificationEvents(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    arrivi: bool = True
+    spedizioni: bool = True
+    sotto_scorta: bool = True
+    esauriti: bool = True
+    anomalie: bool = True
+    errori_notion: bool = True
+
+
 class RecipientItem(BaseModel):
     email: EmailStr
     enabled: bool = True
+    events: Optional[NotificationEvents] = None
 
 
 class RecipientsUpdate(BaseModel):
-    # Retro-compat: accetta sia list[str] (legacy) sia list[RecipientItem] (nuovo formato F8).
+    # Retro-compat: accetta sia list[str] (legacy) sia list[RecipientItem] (nuovo formato F8/F9).
     emails: Optional[List[EmailStr]] = None
     items: Optional[List[RecipientItem]] = None
 
@@ -678,7 +717,8 @@ async def submit_checklist(
         raise HTTPException(502, f"Impossibile aggiornare il magazzino. Riprova. ({e})")
 
     # 4) Send email(s) — email failure does not invalidate the shipment
-    recipients = await get_recipients()
+    # F9 §28: filtra per evento "spedizioni"
+    recipients = await get_recipients_for_event("spedizioni")
     html_content = build_html_email(payload, movements)
     subject = f"Spedizione — {payload.structure} — {payload.shipping_date}"
     sent = []
@@ -1103,7 +1143,8 @@ async def submit_arrivo(
     notion_service.invalidate_inventory_cache()
 
     # 4) Email
-    recipients = await get_recipients()
+    # F9 §28: filtra per evento "arrivi"
+    recipients = await get_recipients_for_event("arrivi")
     # F8 fix: passa il fuso configurato all'email builder così l'orario di registrazione
     # riflette l'ora reale del fuso Admin (non più UTC).
     _settings = await admin_extra_routes.get_app_settings(db)
@@ -1212,7 +1253,9 @@ async def admin_put_recipients(update: RecipientsUpdate):
             if not e or e in seen:
                 continue
             seen.add(e)
-            cleaned.append({"email": e, "enabled": bool(it.enabled)})
+            ev_in = it.events.model_dump() if it.events is not None else DEFAULT_EVENTS
+            events = {ev: bool(ev_in.get(ev, True)) for ev in NOTIFICATION_EVENTS}
+            cleaned.append({"email": e, "enabled": bool(it.enabled), "events": events})
         if not cleaned:
             raise HTTPException(400, "Inserisci almeno un destinatario")
         await set_recipients_full(cleaned)

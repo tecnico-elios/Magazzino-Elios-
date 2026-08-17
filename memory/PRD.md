@@ -53,6 +53,12 @@
 - PWA installabilità (P2)
 - Stats operatore giornaliere/settimanali (idea)
 
+## F9 — Notifiche tipizzate + Admin restructure light + Impostazioni Notion ✅ (16/02/2026)
+- **Notifiche tipizzate (§28)**: ogni destinatario ha ora 6 flag evento (`arrivi`, `spedizioni`, `sotto_scorta`, `esauriti`, `anomalie`, `errori_notion`). Backend: `NotificationEvents` pydantic model, `get_recipients_for_event(event)` helper, `submit_arrivo` e `submit_shipment` filtrano rispettivamente per `arrivi` e `spedizioni`. Migrazione automatica retro-compat: destinatari esistenti hanno tutti gli eventi ON.
+- **UI RecipientsTab**: chip cliccabili sotto ogni email (Arrivi/Spedizioni/Sotto scorta/Esauriti/Anomalie/Errori Notion). Toggle ON/OFF colorato emerald/slate. Automaticamente disabilitati se il destinatario è disattivato.
+- **Admin restructure light (§21-27)**: rinominata tab "Destinatari" → **"Notifiche"**. Aggiunta nuova tab **"Notion"** dedicata (diagnostica read-only) separata da "Manutenzione". Nessun refactor invasivo — le tabs esistenti sono mantenute e riorganizzate.
+- **Impostazioni Notion (§27)**: nuova `NotionSettingsTab` con stato connessione, database mappati (Inventario/Entrate/Uscite), documentazione colonne 13 e 16 (già esistenti su Notion — non modificate dal gestionale), note sicurezza struttura.
+
 ## F9 — Sistema/Manutenzione (Notion status + Sincronizza/Svuota cache) ✅ (16/02/2026)
 - Backend: `POST /api/admin/maintenance/refresh-cache` (invalida + ricarica inventario da Notion) e `GET /api/admin/maintenance/status` (stato Notion + count items). Nessuna scrittura su Notion.
 - Frontend: nuova tab Admin `ManutenzioneTab` con stato Notion (pallino verde/rosso), count prodotti in cache, timestamp ultimo check, bottoni "Sincronizza ora" / "Svuota cache" / "Verifica stato".
