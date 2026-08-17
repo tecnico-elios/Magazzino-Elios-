@@ -33,7 +33,7 @@ import {
   ListMagnifyingGlass,
   UsersFour,
 } from "@phosphor-icons/react";
-import { AuditLogTab, SettingsTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab, SessionsTab, InventorySourceTab } from "./AdminExtraTabs";
+import { AuditLogTab, SettingsTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab, SessionsTab, InventorySourceTab, ManutenzioneTab } from "./AdminExtraTabs";
 // Note: AuditLogTab importato ma non renderizzato — tab rimossa su richiesta utente.
 // eslint-disable-next-line no-unused-vars
 const _AuditLogTab_unused = AuditLogTab;
@@ -830,6 +830,9 @@ export default function AdminPage() {
             <TabsTrigger value="inventory-source" data-testid="tab-inventory-source" className="shrink-0">
               <Package size={16} className="mr-1" /> Fonte Inventario
             </TabsTrigger>
+            <TabsTrigger value="maintenance" data-testid="tab-maintenance" className="shrink-0">
+              <ArrowsClockwise size={16} className="mr-1" /> Manutenzione
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="inventory"><InventoryTab /></TabsContent>
           <TabsContent value="recipients"><RecipientsTab /></TabsContent>
@@ -840,6 +843,7 @@ export default function AdminPage() {
           <TabsContent value="cleanup"><CleanupTestTab /></TabsContent>
           <TabsContent value="settings"><SettingsTab /></TabsContent>
           <TabsContent value="inventory-source"><InventorySourceTab /></TabsContent>
+          <TabsContent value="maintenance"><ManutenzioneTab /></TabsContent>
         </Tabs>
       </main>
     </div>

@@ -488,4 +488,44 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             "serial_status": sn_hit,
         }
 
+    # ---------- Sistema / Manutenzione (F9) ----------
+    @router.post("/maintenance/refresh-cache")
+    async def refresh_cache():
+        """Svuota la cache Inventario e forza un reload da Notion.
+        Non modifica dati né su Notion né in MongoDB.
+        """
+        try:
+            notion_service.invalidate_inventory_cache()
+            items = await notion_service.list_inventory(force_refresh=True)
+            return {
+                "ok": True,
+                "items_count": len(items),
+                "at": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as e:
+            logger.error("refresh-cache failed: %s", e)
+            raise HTTPException(502, f"Errore rinfresco cache: {e}")
+
+    @router.get("/maintenance/status")
+    async def maintenance_status():
+        """Stato integrazione Notion + cache. Read-only, safe."""
+        try:
+            configured = notion_service.is_configured()
+            items = await notion_service.list_inventory() if configured else []
+            return {
+                "notion_configured": configured,
+                "inventory_items": len(items),
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "ok": configured,
+            }
+        except Exception as e:
+            logger.warning("maintenance-status error: %s", e)
+            return {
+                "notion_configured": notion_service.is_configured(),
+                "inventory_items": 0,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "ok": False,
+                "error": str(e),
+            }
+
     return router

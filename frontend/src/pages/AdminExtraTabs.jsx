@@ -796,3 +796,104 @@ export function InventorySourceTab() {
     </div>
   );
 }
+
+// ---------- Sistema / Manutenzione (F9 §33) ----------
+export function ManutenzioneTab() {
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadStatus = async () => {
+    setLoading(true);
+    try {
+      const { data } = await axios.get(`${API}/admin/maintenance/status`);
+      setStatus(data);
+    } catch (e) { toast.error("Errore", { description: formatError(e) }); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { loadStatus(); }, []);
+
+  const doRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const { data } = await axios.post(`${API}/admin/maintenance/refresh-cache`);
+      toast.success(`Cache aggiornata — ${data.items_count} prodotti caricati`);
+      if (typeof window !== "undefined") window.dispatchEvent(new Event("elios:refresh-dashboard"));
+      await loadStatus();
+    } catch (e) { toast.error("Rinfresco fallito", { description: formatError(e) }); }
+    finally { setRefreshing(false); }
+  };
+
+  return (
+    <div className="space-y-4 max-w-3xl" data-testid="maintenance-tab">
+      <div>
+        <h3 className="font-display text-lg font-bold text-slate-900">Sistema e Manutenzione</h3>
+        <p className="text-sm text-slate-600 mt-1">
+          Stato integrazione Notion e strumenti di manutenzione sicuri. Nessuna operazione qui modifica dati su Notion.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="et-card-elevated p-4">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Notion API</div>
+          <div className="flex items-center gap-2 mt-1">
+            <span className={`w-2.5 h-2.5 rounded-full ${status?.ok ? "bg-emerald-500" : "bg-red-500"}`} aria-hidden />
+            <span className="font-semibold text-slate-900">
+              {loading ? "…" : status?.ok ? "Connessa" : "Non connessa"}
+            </span>
+          </div>
+          <div className="text-xs text-slate-500 mt-1">
+            {status?.notion_configured === false ? "NOTION_TOKEN non configurato" : status?.error || "OK"}
+          </div>
+        </div>
+        <div className="et-card-elevated p-4">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Cache Inventario</div>
+          <div className="font-semibold text-slate-900 mt-1">
+            {loading ? "…" : `${status?.inventory_items || 0} prodotti`}
+          </div>
+          <div className="text-xs text-slate-500 mt-1 font-mono-tight">
+            {status?.checked_at ? fmtDate(status.checked_at) : "—"}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Button
+          onClick={doRefresh}
+          disabled={refreshing || !status?.notion_configured}
+          className="h-11 bg-blue-600 hover:bg-blue-700"
+          data-testid="btn-refresh-cache"
+        >
+          <ArrowClockwise size={16} className={`mr-1 ${refreshing ? "animate-spin" : ""}`} />
+          {refreshing ? "Sincronizzo…" : "Sincronizza ora"}
+        </Button>
+        <Button
+          onClick={doRefresh}
+          variant="outline"
+          disabled={refreshing}
+          className="h-11 border-slate-300"
+          data-testid="btn-clear-cache"
+          title="Svuota la cache e ricarica da Notion"
+        >
+          <Broom size={16} className="mr-1" />
+          Svuota cache
+        </Button>
+        <Button
+          onClick={loadStatus}
+          variant="outline"
+          disabled={loading}
+          className="h-11 border-slate-300"
+          data-testid="btn-check-status"
+        >
+          Verifica stato
+        </Button>
+      </div>
+
+      <div className="rounded-md border border-amber-200 bg-amber-50 text-amber-900 text-xs p-3">
+        <b>Nota:</b> "Sincronizza ora" e "Svuota cache" invalidano la cache locale e ricaricano l'Inventario da Notion.
+        Nessuna scrittura viene effettuata su Notion. Nessun dato viene eliminato.
+      </div>
+    </div>
+  );
+}
+

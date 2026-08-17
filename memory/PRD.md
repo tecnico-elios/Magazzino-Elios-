@@ -53,6 +53,11 @@
 - PWA installabilità (P2)
 - Stats operatore giornaliere/settimanali (idea)
 
+## F9 — Sistema/Manutenzione (Notion status + Sincronizza/Svuota cache) ✅ (16/02/2026)
+- Backend: `POST /api/admin/maintenance/refresh-cache` (invalida + ricarica inventario da Notion) e `GET /api/admin/maintenance/status` (stato Notion + count items). Nessuna scrittura su Notion.
+- Frontend: nuova tab Admin `ManutenzioneTab` con stato Notion (pallino verde/rosso), count prodotti in cache, timestamp ultimo check, bottoni "Sincronizza ora" / "Svuota cache" / "Verifica stato".
+- Nota: gli altri punti F9 (Admin restructure per area, tipizzazione notifiche per evento) sono già stati esplicitamente rifiutati (P2) o richiedono scelta operativa dell'utente — non toccati per evitare regressioni.
+
 ## F8 — P0+P1 Prompt Definitivo ✅ (16/02/2026)
 - **Rinomina card operative**: Arrivi → "RICEVI SERIALI / RICEVI QUANTITÀ / REINTEGRA SERIALE"; Spedizioni → "SPEDISCI SERIALI / SPEDISCI QUANTITÀ" (nessun cambio dimensioni/stile).
 - **Account master `tecnico@eliostech.org` protetto a livello backend**: `auth.is_master_user()` + guardie 403 in `PATCH /admin/users/{id}` (role/active), `POST /admin/users/{id}/reset-password`, `DELETE /admin/users/{id}` (hard delete), `DELETE /admin/sessions/{sid}` (force-logout). UI Admin nasconde/disabilita i relativi pulsanti + badge "🔒 master".
