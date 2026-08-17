@@ -74,6 +74,19 @@
 - Frontend: nuova tab Admin `ManutenzioneTab` con stato Notion (pallino verde/rosso), count prodotti in cache, timestamp ultimo check, bottoni "Sincronizza ora" / "Svuota cache" / "Verifica stato".
 - Nota: gli altri punti F9 (Admin restructure per area, tipizzazione notifiche per evento) sono già stati esplicitamente rifiutati (P2) o richiedono scelta operativa dell'utente — non toccati per evitare regressioni.
 
+## F8 — Inventario Gestionale ATTIVABILE (§14-20) ✅ (17/02/2026)
+- **Backend nuovo servizio** `inventory_local.py` (400 righe) — MongoDB-backed che replica esattamente l'interfaccia pubblica di `notion_service`: `is_configured/invalidate_inventory_cache/list_inventory/get_item/update_tipo_gestione/latest_serial_status/create_receipt/create_pick/archive_page/list_receipts_all/list_exits`. Interfacce 100% allineate → nessuna condizione nel resto del codice.
+- **Router selezione fonte** `inventory_router.py`: `get_svc(db)` restituisce il modulo attivo (`notion_service` | `inventory_local`) leggendo `settings.general.inventory_source` (default `"notion"`).
+- **`server.py`**: sostituite tutte le chiamate `notion_service.X` → `svc.X` con `svc = await _get_inv_svc(db)` in `/inventory`, `/inventory/lookup`, `/checklist/send` (spedizioni), `/arrivi/send`, `/movimenti`, `/dashboard/kpi`, `/admin/inventory`, `/admin/inventory/tipo-gestione`, `/admin/inventory/serial`. Notion rimane invariato: se fonte=notion, nulla cambia.
+- **Nuove Mongo collections**: `products`, `product_serials`, `local_receipts`, `local_picks` con indici unici su `code` e `(product_id, serial_lower)`.
+- **CRUD Prodotti** (Admin JWT): `GET/POST/PATCH/DELETE /api/admin/products` + `GET/POST/DELETE /api/admin/products/{id}/serials/{serial}`. Audit log su create/update/delete.
+- **Switch fonte** `POST /api/admin/inventory/source {source: 'notion'|'gestionale', confirm: true}` — richiede conferma esplicita, audit log.
+- **Import da Notion** `POST /api/admin/inventory/import-from-notion` — copia Prodotti+Quantità da Notion → collezione locale (idempotente su codice, no duplicati). Notion NON modificato. Audit log.
+- **Frontend `ProductsAdminTab`** — CRUD completo con form (nome/codice/categoria/gestione/quantità/unità/soglia/note/attivo), dialog seriali per prodotti A Seriale (aggiungi/rimuovi), pulsante "Importa da Notion" con conferma. Search inline. Badge disponibilità.
+- **Frontend `InventorySourceTab`** — Card interattive con switch attivo (Notion ↔ Gestionale), dialog conferma modale con messaggio chiaro, bottone GESTIONALE disabilitato se 0 prodotti locali (obbliga import prima). `elios:settings-changed` dispatch per refresh cache.
+- **Regole preservate**: Notion mai modificato dall'import né dalle scritture quando fonte=gestionale; le due fonti non sono mai attive contemporaneamente; una sola voce menu "Inventario" (la pagina cambia comportamento in base alla fonte).
+- **Verificato**: `/api/inventory` 200, `/api/movimenti` 200, `/api/dashboard/kpi` 200, `/api/admin/products` 401 (auth), interfacce `notion_service`↔`inventory_local` allineate al 100% via reflection Python. Frontend compila (0 errori).
+
 ## F8 — Fix Admin Tab duplicati + rimozione "Inventario (avanzato)" ✅ (17/02/2026)
 - Rimossi 3 tab DUPLICATI in AdminPage TabsList: `value="inventory"` (era listato 2 volte come "Prodotti" e come "Inventario avanzato"), `value="recipients"` (2×), `value="history"` (2×). React DOM warning risolto.
 - Rimosso completamente il tab **"Inventario (avanzato)"** da Admin (vietato dall'utente: "non posso avere 2 voci inventario e inventario avanzato"). Voce unica ora è solo la pagina principale `/inventario` in AppLayout NAV.

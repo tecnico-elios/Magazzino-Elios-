@@ -85,6 +85,7 @@ SUPPORTED_TIMEZONES = [
 class GeneralSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
     timezone: Optional[str] = Field(default=None, min_length=2, max_length=64)
+    inventory_source: Optional[str] = Field(default=None, pattern="^(notion|gestionale)$")
 
 
 class SettingsBody(BaseModel):
@@ -151,6 +152,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     },
     "general": {
         "timezone": "Europe/Rome",         # IANA — gestisce auto ora legale/solare
+        "inventory_source": "notion",       # 'notion' | 'gestionale' — switch fonte inventario
     },
 }
 
@@ -527,5 +529,253 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
                 "ok": False,
                 "error": str(e),
             }
+
+    # ---------- Inventario Gestionale: prodotti locali (F8/§16) ----------
+    import uuid as _uuid
+    import inventory_local
+
+    class ProductCreate(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        name: str = Field(min_length=1, max_length=200)
+        code: str = Field(min_length=1, max_length=100)
+        category: Optional[str] = None
+        tipo_gestione: str = Field(pattern="^(a_seriale|a_quantita)$")
+        quantity: Optional[float] = 0
+        unit: Optional[str] = "pz"
+        threshold: Optional[int] = 0
+        notes: Optional[str] = None
+        active: Optional[bool] = True
+
+    class ProductUpdate(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+        code: Optional[str] = Field(default=None, min_length=1, max_length=100)
+        category: Optional[str] = None
+        tipo_gestione: Optional[str] = Field(default=None, pattern="^(a_seriale|a_quantita)$")
+        quantity: Optional[float] = None
+        unit: Optional[str] = None
+        threshold: Optional[int] = None
+        notes: Optional[str] = None
+        active: Optional[bool] = None
+
+    class SerialInput(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        serial: str = Field(min_length=1, max_length=200)
+
+    def _now_iso() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    @router.get("/products")
+    async def list_products():
+        out: List[Dict[str, Any]] = []
+        async for doc in db.products.find({}):
+            doc.pop("_id", None)
+            if doc.get("tipo_gestione") == "a_seriale":
+                avail = await db.product_serials.count_documents({"product_id": doc["id"], "status": "available"})
+                shipped = await db.product_serials.count_documents({"product_id": doc["id"], "status": "shipped"})
+                doc["available"] = avail
+                doc["shipped"] = shipped
+            out.append(doc)
+        out.sort(key=lambda p: (p.get("name") or "").lower())
+        return {"items": out, "count": len(out)}
+
+    @router.post("/products")
+    async def create_product(body: ProductCreate, current_user=Depends(deps.require_admin)):
+        exists = await db.products.find_one({"code": body.code})
+        if exists:
+            raise HTTPException(409, f"Codice '{body.code}' già in uso")
+        doc = {
+            "id": str(_uuid.uuid4()),
+            "name": body.name,
+            "code": body.code,
+            "category": body.category,
+            "tipo_gestione": body.tipo_gestione,
+            "quantity": float(body.quantity or 0) if body.tipo_gestione == "a_quantita" else 0,
+            "unit": body.unit or "pz",
+            "threshold": int(body.threshold or 0),
+            "notes": body.notes,
+            "active": body.active if body.active is not None else True,
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+        }
+        await db.products.insert_one(doc)
+        await db.audit_logs.insert_one({
+            "at": datetime.now(timezone.utc),
+            "actor_id": str(current_user["_id"]),
+            "actor_username": current_user.get("username"),
+            "action": "product.create",
+            "meta": {"product_id": doc["id"], "code": doc["code"]},
+        })
+        doc.pop("_id", None)
+        return doc
+
+    @router.patch("/products/{product_id}")
+    async def update_product(product_id: str, body: ProductUpdate, current_user=Depends(deps.require_admin)):
+        updates = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
+        if not updates:
+            raise HTTPException(400, "Nessun campo da aggiornare")
+        updates["updated_at"] = _now_iso()
+        if "code" in updates:
+            other = await db.products.find_one({"code": updates["code"], "id": {"$ne": product_id}})
+            if other:
+                raise HTTPException(409, f"Codice '{updates['code']}' già in uso")
+        r = await db.products.update_one({"id": product_id}, {"$set": updates})
+        if r.matched_count == 0:
+            raise HTTPException(404, "Prodotto non trovato")
+        await db.audit_logs.insert_one({
+            "at": datetime.now(timezone.utc),
+            "actor_id": str(current_user["_id"]),
+            "actor_username": current_user.get("username"),
+            "action": "product.update",
+            "meta": {"product_id": product_id, "changes": list(updates.keys())},
+        })
+        doc = await db.products.find_one({"id": product_id})
+        doc.pop("_id", None)
+        return doc
+
+    @router.delete("/products/{product_id}")
+    async def delete_product(product_id: str, current_user=Depends(deps.require_admin)):
+        r = await db.products.delete_one({"id": product_id})
+        if r.deleted_count == 0:
+            raise HTTPException(404, "Prodotto non trovato")
+        await db.product_serials.delete_many({"product_id": product_id})
+        await db.audit_logs.insert_one({
+            "at": datetime.now(timezone.utc),
+            "actor_id": str(current_user["_id"]),
+            "actor_username": current_user.get("username"),
+            "action": "product.delete",
+            "meta": {"product_id": product_id},
+        })
+        return {"ok": True}
+
+    @router.get("/products/{product_id}/serials")
+    async def list_product_serials(product_id: str):
+        prod = await db.products.find_one({"id": product_id})
+        if not prod:
+            raise HTTPException(404, "Prodotto non trovato")
+        out: List[Dict[str, Any]] = []
+        async for row in db.product_serials.find({"product_id": product_id}).sort("created_at", -1):
+            row.pop("_id", None)
+            out.append(row)
+        return {"items": out, "count": len(out)}
+
+    @router.post("/products/{product_id}/serials")
+    async def add_product_serial(product_id: str, body: SerialInput, current_user=Depends(deps.require_admin)):
+        prod = await db.products.find_one({"id": product_id})
+        if not prod:
+            raise HTTPException(404, "Prodotto non trovato")
+        if prod.get("tipo_gestione") != "a_seriale":
+            raise HTTPException(400, "Prodotto non a seriale")
+        sn = body.serial.strip()
+        exists = await db.product_serials.find_one({"serial_lower": sn.lower(), "product_id": product_id})
+        if exists:
+            raise HTTPException(409, f"Seriale '{sn}' già registrato")
+        await db.product_serials.insert_one({
+            "product_id": product_id,
+            "serial": sn,
+            "serial_lower": sn.lower(),
+            "status": "available",
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+        })
+        return {"ok": True, "serial": sn}
+
+    @router.delete("/products/{product_id}/serials/{serial}")
+    async def delete_product_serial(product_id: str, serial: str, current_user=Depends(deps.require_admin)):
+        r = await db.product_serials.delete_one({
+            "product_id": product_id,
+            "serial_lower": serial.strip().lower(),
+        })
+        if r.deleted_count == 0:
+            raise HTTPException(404, "Seriale non trovato")
+        return {"ok": True}
+
+    # ---------- Fonte Inventario: switch + import da Notion (F8/§19-20) ----------
+    class SourceSwitch(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        source: str = Field(pattern="^(notion|gestionale)$")
+        confirm: bool = False
+
+    @router.post("/inventory/source")
+    async def switch_inventory_source(body: SourceSwitch, current_user=Depends(deps.require_admin)):
+        """Cambio fonte inventario (Notion ↔ Gestionale). Richiede `confirm=true`."""
+        if not body.confirm:
+            raise HTTPException(400, "Conferma esplicita mancante (confirm=true)")
+        # Aggiorna solo general.inventory_source, preserva timezone
+        doc = await db.settings.find_one({"_id": "app_settings"}) or {}
+        gen = doc.get("general") or {}
+        gen["inventory_source"] = body.source
+        await db.settings.update_one(
+            {"_id": "app_settings"},
+            {"$set": {"general": gen}},
+            upsert=True,
+        )
+        # Invalida cache Notion se stiamo passando a gestionale (evita risultati stantii)
+        try:
+            notion_service.invalidate_inventory_cache()
+        except Exception:
+            pass
+        await db.audit_logs.insert_one({
+            "at": datetime.now(timezone.utc),
+            "actor_id": str(current_user["_id"]),
+            "actor_username": current_user.get("username"),
+            "action": "inventory.source.switch",
+            "meta": {"source": body.source},
+        })
+        return {"ok": True, "source": body.source}
+
+    @router.post("/inventory/import-from-notion")
+    async def import_from_notion(current_user=Depends(deps.require_admin)):
+        """Importa prodotti+quantità+seriali da Notion nell'Inventario Gestionale locale.
+        Non modifica Notion. I prodotti locali esistenti (stesso codice) NON vengono duplicati.
+        """
+        if not notion_service.is_configured():
+            raise HTTPException(503, "Notion non configurato")
+        try:
+            notion_service.invalidate_inventory_cache()
+            items = await notion_service.list_inventory(force_refresh=True)
+        except Exception as e:
+            raise HTTPException(502, f"Impossibile leggere Notion: {e}")
+        created = 0
+        updated = 0
+        for it in items:
+            code = (it.get("code") or "").strip()
+            if not code:
+                continue
+            tipo = it.get("tipo_gestione")
+            if tipo not in ("a_seriale", "a_quantita"):
+                # Skip prodotti senza tipo gestione
+                continue
+            existing = await db.products.find_one({"code": code})
+            payload = {
+                "name": it.get("name") or code,
+                "code": code,
+                "category": it.get("category"),
+                "tipo_gestione": tipo,
+                "unit": it.get("unit") or "pz",
+                "updated_at": _now_iso(),
+            }
+            if tipo == "a_quantita":
+                payload["quantity"] = float(it.get("quantity") or 0)
+            if existing:
+                await db.products.update_one({"id": existing["id"]}, {"$set": payload})
+                updated += 1
+            else:
+                payload["id"] = str(_uuid.uuid4())
+                payload["created_at"] = _now_iso()
+                payload["active"] = True
+                payload["threshold"] = 0
+                if tipo == "a_seriale":
+                    payload["quantity"] = 0
+                await db.products.insert_one(payload)
+                created += 1
+        await db.audit_logs.insert_one({
+            "at": datetime.now(timezone.utc),
+            "actor_id": str(current_user["_id"]),
+            "actor_username": current_user.get("username"),
+            "action": "inventory.import.notion",
+            "meta": {"created": created, "updated": updated},
+        })
+        return {"ok": True, "created": created, "updated": updated, "total": created + updated}
 
     return router

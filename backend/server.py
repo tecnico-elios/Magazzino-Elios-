@@ -17,6 +17,8 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 import notion_service
+import inventory_local
+from inventory_router import get_svc as _get_inv_svc, get_source as _get_inv_source
 import auth as auth_mod
 from routes import auth_routes, admin_users_routes, admin_extra_routes
 try:
@@ -456,21 +458,23 @@ async def root():
 
 @api_router.get("/inventory")
 async def inventory():
-    """Fresh read of Notion Inventario — Tipo Gestione (Notion SSOT) attached."""
-    if not notion_service.is_configured():
-        raise HTTPException(503, "Integrazione Notion non configurata")
+    """Fresh read of current Inventory (Notion or Gestionale — switch via Admin)."""
+    svc = await _get_inv_svc(db)
+    if not svc.is_configured():
+        raise HTTPException(503, "Fonte inventario non configurata")
     try:
-        items = await notion_service.list_inventory(force_refresh=True)
+        items = await svc.list_inventory(force_refresh=True)
     except httpx.HTTPStatusError as e:
-        raise HTTPException(502, f"Notion HTTP {e.response.status_code}: {e.response.text[:200]}")
+        raise HTTPException(502, f"Sorgente HTTP {e.response.status_code}: {e.response.text[:200]}")
     except Exception as e:
-        raise HTTPException(502, f"Impossibile leggere Notion: {e}")
+        raise HTTPException(502, f"Impossibile leggere inventario: {e}")
     for it in items:
         annotate_item(it)
     categories = sorted({(it.get("category") or "Senza categoria") for it in items})
     return {
         "items": items,
         "categories": categories,
+        "source": await _get_inv_source(db),
         "refreshed_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -487,12 +491,13 @@ async def inventory_lookup(code: str):
     code_clean = (code or "").strip()
     if not code_clean:
         raise HTTPException(400, "Codice mancante")
-    if not notion_service.is_configured():
-        raise HTTPException(503, "Integrazione Notion non configurata")
+    svc = await _get_inv_svc(db)
+    if not svc.is_configured():
+        raise HTTPException(503, "Fonte inventario non configurata")
     try:
-        items = await notion_service.list_inventory()
+        items = await svc.list_inventory()
     except Exception as e:
-        raise HTTPException(502, f"Errore lettura Notion: {e}")
+        raise HTTPException(502, f"Errore lettura inventario: {e}")
     code_lower = code_clean.lower()
 
     # 1) Match on Codice prodotto (SKU)
@@ -506,9 +511,9 @@ async def inventory_lookup(code: str):
                 "code": code_clean,
             }
 
-    # 2) SN → latest-movement status (Notion SSOT)
+    # 2) SN → latest-movement status
     try:
-        st = await notion_service.latest_serial_status(code_clean)
+        st = await svc.latest_serial_status(code_clean)
     except Exception as e:
         raise HTTPException(502, f"Errore ricerca seriale: {e}")
 
@@ -570,16 +575,17 @@ async def submit_checklist(
     payload.operator = f"{current_user.get('first_name','')} {current_user.get('last_name','')}".strip() or current_user.get("username") or ""
     payload.taken_by = payload.operator
     validate_checklist_basic(payload)
-    if not notion_service.is_configured():
-        raise HTTPException(503, "Integrazione Notion non configurata")
+    svc = await _get_inv_svc(db)
+    if not svc.is_configured():
+        raise HTTPException(503, "Fonte inventario non configurata")
 
     filled = [i for i in payload.items if i.quantity > 0]
 
-    # 1) Re-read fresh stock from Notion
+    # 1) Re-read fresh stock from source
     fresh_map: Dict[str, Dict[str, Any]] = {}
     for it in filled:
         try:
-            fresh_map[it.page_id] = await notion_service.get_item(it.page_id)
+            fresh_map[it.page_id] = await svc.get_item(it.page_id)
         except Exception as e:
             raise HTTPException(502, f"Impossibile aggiornare il magazzino. Riprova. ({it.name}: {e})")
 
@@ -622,7 +628,7 @@ async def submit_checklist(
                 continue
             seen_serials.add(sn_key)
             try:
-                st = await notion_service.latest_serial_status(sn_c)
+                st = await svc.latest_serial_status(sn_c)
             except Exception as e:
                 raise HTTPException(502, f"Errore verifica stato seriale: {e}")
             if st["status"] == "unseen":
@@ -681,7 +687,7 @@ async def submit_checklist(
             operator_name = (payload.taken_by or payload.operator or "").strip()
             if it.serialized and it.serials:
                 for s in it.serials:
-                    pid = await notion_service.create_pick(
+                    pid = await svc.create_pick(
                         item_page_id=it.page_id,
                         sn_title=s.strip(),
                         quantity=1,
@@ -692,7 +698,7 @@ async def submit_checklist(
                     tracker_ids.append(pid)
             else:
                 # A Quantità: nessun seriale → title = SOLO nome prodotto (nessuna concatenazione)
-                pid = await notion_service.create_pick(
+                pid = await svc.create_pick(
                     item_page_id=it.page_id,
                     sn_title=it.name,
                     quantity=it.quantity,
@@ -713,7 +719,7 @@ async def submit_checklist(
     except Exception as e:
         # Best-effort rollback
         for pid in tracker_ids:
-            await notion_service.archive_page(pid)
+            await svc.archive_page(pid)
         raise HTTPException(502, f"Impossibile aggiornare il magazzino. Riprova. ({e})")
 
     # 4) Send email(s) — email failure does not invalidate the shipment
@@ -782,12 +788,12 @@ async def list_movimenti(
     limit: int = 500,
     month: Optional[str] = None,  # 'YYYY-MM' → filtra server-side su Notion
 ):
-    """Unified movements view — LIVE da Notion Entrate + Uscite.
-    Se `month` è passato (YYYY-MM), il filtro avviene DIRETTAMENTE su Notion via
-    Data Consegna / Data Uscita — nessun download dello storico completo.
-    Mongo NON è la fonte."""
-    if not notion_service.is_configured():
-        raise HTTPException(503, "Integrazione Notion non configurata")
+    """Unified movements view — LIVE dalla sorgente attiva (Notion o Gestionale).
+    Se `month` è passato (YYYY-MM), il filtro avviene DIRETTAMENTE alla sorgente.
+    Mongo NON è mai la fonte quando la sorgente è Notion."""
+    svc = await _get_inv_svc(db)
+    if not svc.is_configured():
+        raise HTTPException(503, "Fonte inventario non configurata")
 
     date_from = date_to = None
     if month:
@@ -804,10 +810,10 @@ async def list_movimenti(
             raise HTTPException(400, "Parametro 'month' non valido (formato atteso: YYYY-MM)")
 
     try:
-        entrate = await notion_service.list_receipts_all(date_from=date_from, date_to=date_to)
-        uscite = await notion_service.list_exits(date_from=date_from, date_to=date_to)
+        entrate = await svc.list_receipts_all(date_from=date_from, date_to=date_to)
+        uscite = await svc.list_exits(date_from=date_from, date_to=date_to)
     except Exception as e:
-        raise HTTPException(502, f"Impossibile leggere Notion: {e}")
+        raise HTTPException(502, f"Impossibile leggere inventario: {e}")
     items: List[Dict[str, Any]] = []
     for r in entrate:
         items.append({
@@ -836,17 +842,16 @@ async def list_movimenti(
 
 @api_router.get("/dashboard/kpi")
 async def dashboard_kpi():
-    """F5: aggregated KPIs — LIVE from Notion. No secondary source of truth.
-    Reads use the short-lived (60s) inventory cache to stay fast — Notion write
-    paths (arrivi/spedizioni/admin) invalidate the cache so KPIs stay correct."""
-    if not notion_service.is_configured():
-        raise HTTPException(503, "Integrazione Notion non configurata")
+    """Aggregated KPIs — LIVE dalla sorgente attiva (Notion o Gestionale)."""
+    svc = await _get_inv_svc(db)
+    if not svc.is_configured():
+        raise HTTPException(503, "Fonte inventario non configurata")
     try:
-        items = await notion_service.list_inventory()
-        entrate = await notion_service.list_receipts_all()
-        uscite = await notion_service.list_exits()
+        items = await svc.list_inventory()
+        entrate = await svc.list_receipts_all()
+        uscite = await svc.list_exits()
     except Exception as e:
-        raise HTTPException(502, f"Impossibile leggere Notion: {e}")
+        raise HTTPException(502, f"Impossibile leggere inventario: {e}")
 
     for it in items:
         annotate_item(it)
@@ -1038,8 +1043,9 @@ async def submit_arrivo(
 ):
     payload.operator = f"{current_user.get('first_name','')} {current_user.get('last_name','')}".strip() or current_user.get("username") or ""
     validate_arrivo_basic(payload)
-    if not notion_service.is_configured():
-        raise HTTPException(503, "Integrazione Notion non configurata")
+    svc = await _get_inv_svc(db)
+    if not svc.is_configured():
+        raise HTTPException(503, "Fonte inventario non configurata")
 
     filled = [i for i in payload.items if i.quantity > 0]
 
@@ -1047,9 +1053,9 @@ async def submit_arrivo(
     fresh_arr: Dict[str, Dict[str, Any]] = {}
     for it in filled:
         try:
-            fresh_arr[it.page_id] = await notion_service.get_item(it.page_id)
+            fresh_arr[it.page_id] = await svc.get_item(it.page_id)
         except Exception as e:
-            raise HTTPException(502, f"Impossibile leggere Notion ({it.name}): {e}")
+            raise HTTPException(502, f"Impossibile leggere inventario ({it.name}): {e}")
     not_configured = [
         fresh_arr[it.page_id].get("name") or it.name
         for it in filled
@@ -1090,7 +1096,7 @@ async def submit_arrivo(
                 continue
             seen.add(key)
             try:
-                st = await notion_service.latest_serial_status(sn_c)
+                st = await svc.latest_serial_status(sn_c)
             except Exception as e:
                 raise HTTPException(502, f"Errore verifica stato seriale: {e}")
             if st["status"] == "in_warehouse":
@@ -1118,7 +1124,7 @@ async def submit_arrivo(
             #   Item (title) = SOLO seriale (o nome prodotto per A Quantità — MAI concatenato)
             if it.serialized and it.serials:
                 for s in it.serials:
-                    pid = await notion_service.create_receipt(
+                    pid = await svc.create_receipt(
                         item_page_id=it.page_id,
                         sn_title=s.strip(),
                         quantity=1,
@@ -1127,7 +1133,7 @@ async def submit_arrivo(
                     receipts_ids.append(pid)
             else:
                 # A Quantità: nessun seriale → title = SOLO nome prodotto (nessuna concatenazione)
-                pid = await notion_service.create_receipt(
+                pid = await svc.create_receipt(
                     item_page_id=it.page_id,
                     sn_title=it.name,
                     quantity=it.quantity,
@@ -1136,11 +1142,11 @@ async def submit_arrivo(
                 receipts_ids.append(pid)
     except Exception as e:
         for pid in receipts_ids:
-            await notion_service.archive_page(pid)
+            await svc.archive_page(pid)
         raise HTTPException(502, f"Impossibile registrare l'arrivo. Riprova. ({e})")
 
     # 3) Invalidate cached inventory so subsequent reads show updated stock
-    notion_service.invalidate_inventory_cache()
+    svc.invalidate_inventory_cache()
 
     # 4) Email
     # F9 §28: filtra per evento "arrivi"
@@ -1193,12 +1199,13 @@ async def admin_login(req: LoginRequest):
 
 @api_router.get("/admin/inventory", dependencies=[Depends(dep_require_admin)])
 async def admin_inventory():
-    if not notion_service.is_configured():
-        raise HTTPException(503, "Integrazione Notion non configurata")
-    items = await notion_service.list_inventory(force_refresh=True)
+    svc = await _get_inv_svc(db)
+    if not svc.is_configured():
+        raise HTTPException(503, "Fonte inventario non configurata")
+    items = await svc.list_inventory(force_refresh=True)
     for it in items:
         annotate_item(it)
-    return {"items": items}
+    return {"items": items, "source": await _get_inv_source(db)}
 
 
 class TipoGestioneUpdate(BaseModel):
@@ -1208,26 +1215,28 @@ class TipoGestioneUpdate(BaseModel):
 
 @api_router.put("/admin/inventory/tipo-gestione", dependencies=[Depends(dep_require_admin)])
 async def admin_set_tipo_gestione(update: TipoGestioneUpdate):
-    """F5: Update Notion `Tipo gestione` DIRECTLY. Notion = SSOT. Invalidates cache."""
+    """Update `Tipo gestione` DIRECTLY (Notion o DB locale a seconda della sorgente)."""
     if update.tipo_gestione not in ("a_seriale", "a_quantita"):
         raise HTTPException(400, "tipo_gestione deve essere 'a_seriale' o 'a_quantita'")
+    svc = await _get_inv_svc(db)
     try:
-        await notion_service.update_tipo_gestione(update.page_id, update.tipo_gestione)
+        await svc.update_tipo_gestione(update.page_id, update.tipo_gestione)
     except httpx.HTTPStatusError as e:
-        raise HTTPException(502, f"Notion HTTP {e.response.status_code}: {e.response.text[:200]}")
+        raise HTTPException(502, f"HTTP {e.response.status_code}: {e.response.text[:200]}")
     except Exception as e:
-        raise HTTPException(502, f"Impossibile aggiornare Notion: {e}")
+        raise HTTPException(502, f"Impossibile aggiornare: {e}")
     return {"status": "ok", "page_id": update.page_id, "tipo_gestione": update.tipo_gestione}
 
 
 @api_router.put("/admin/inventory/serial", dependencies=[Depends(dep_require_admin)])
 async def admin_set_serial(update: SerialOverrideUpdate):
-    """DEPRECATED — proxies to Notion Tipo gestione. Kept for backward compat."""
+    """DEPRECATED — proxies to Tipo gestione sulla sorgente attiva."""
     tipo = "a_seriale" if update.serialized else "a_quantita"
+    svc = await _get_inv_svc(db)
     try:
-        await notion_service.update_tipo_gestione(update.page_id, tipo)
+        await svc.update_tipo_gestione(update.page_id, tipo)
     except Exception as e:
-        raise HTTPException(502, f"Impossibile aggiornare Notion: {e}")
+        raise HTTPException(502, f"Impossibile aggiornare: {e}")
     return {"status": "ok"}
 
 
@@ -1402,6 +1411,14 @@ async def _phase2_startup_indexes():
     try:
         await db.users.create_index("username", unique=True)
         await db.audit_logs.create_index([("at", -1)])
+        # Inventory Gestionale (fonte alternativa a Notion)
+        inventory_local.set_db(db)
+        await db.products.create_index("id", unique=True)
+        await db.products.create_index("code")
+        await db.product_serials.create_index([("product_id", 1), ("serial_lower", 1)], unique=True)
+        await db.product_serials.create_index("serial_lower")
+        await db.local_receipts.create_index([("data_consegna", -1)])
+        await db.local_picks.create_index([("data_uscita", -1)])
     except Exception as e:
         logging.error(f"MongoDB index creation failed: {e}")
 
