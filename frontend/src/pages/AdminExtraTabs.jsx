@@ -145,7 +145,7 @@ function SettingsSection({ title, icon: Icon, children }) {
   );
 }
 
-export function SettingsTab() {
+export function SettingsTab({ filter, saveLabel }) {
   const [s, setS] = useState(null);
   const [saving, setSaving] = useState(false);
   useTz();
@@ -185,9 +185,12 @@ export function SettingsTab() {
     finally { setSaving(false); }
   };
 
+  const show = (name) => !filter || filter.includes(name);
+
   return (
     <div className="space-y-4 max-w-3xl" data-testid="settings-tab">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {show("scanner") && (
         <SettingsSection title="Scanner" icon={ListMagnifyingGlass}>
           <SettingSwitch
             label="Focus automatico"
@@ -215,7 +218,9 @@ export function SettingsTab() {
             onChange={(v) => setSection("scanner", { sound_enabled: v })}
             testid="set-scanner-sound" />
         </SettingsSection>
+        )}
 
+        {show("dashboard") && (
         <SettingsSection title="Dashboard" icon={ArrowClockwise}>
           <SettingNumber label="Intervallo auto-refresh"
             hint="0 = disattivato. Consigliato 30-120 secondi"
@@ -228,7 +233,9 @@ export function SettingsTab() {
             onChange={(v) => setSection("dashboard", { recent_movements_limit: v })}
             testid="set-dash-recent-limit" />
         </SettingsSection>
+        )}
 
+        {show("magazzino") && (
         <SettingsSection title="Magazzino" icon={Warning}>
           <SettingNumber label="Soglia minima predefinita"
             hint="Prodotti con quantità ≤ soglia (e > 0) risultano sotto scorta"
@@ -247,7 +254,9 @@ export function SettingsTab() {
             onChange={(v) => setSection("magazzino", { warn_out_of_stock: v })}
             testid="set-mag-warn-oos" />
         </SettingsSection>
+        )}
 
+        {show("ricerca") && (
         <SettingsSection title="Ricerca" icon={MagnifyingGlass}>
           <SettingSwitch label="Ricerca durante digitazione"
             hint="Filtra la lista mentre digiti (usa sempre la cache locale F6)"
@@ -264,7 +273,9 @@ export function SettingsTab() {
             onChange={(v) => setSection("ricerca", { partial_match: v })}
             testid="set-ric-partial" />
         </SettingsSection>
+        )}
 
+        {show("movimenti") && (
         <SettingsSection title="Movimenti" icon={ClockCounterClockwise}>
           <SettingNumber label="Numero movimenti visualizzati"
             hint="Massimo record mostrati nella pagina Movimenti"
@@ -276,7 +287,9 @@ export function SettingsTab() {
             onChange={(v) => setSection("movimenti", { auto_open_current_month: v })}
             testid="set-mov-current" />
         </SettingsSection>
+        )}
 
+        {show("sicurezza") && (
         <SettingsSection title="Sicurezza" icon={Gear}>
           <SettingNumber label="Durata sessione (minuti)"
             hint="Dopo questo tempo dal login l'utente deve rieffettuare l'accesso"
@@ -301,7 +314,9 @@ export function SettingsTab() {
             L'obbligo di cambio password al primo accesso è <strong>sempre attivo</strong> per gli utenti creati dall'Admin.
           </div>
         </SettingsSection>
+        )}
 
+        {show("general") && (
         <SettingsSection title="Fuso orario" icon={Globe}>
           <div className="py-2">
             <Label className="text-sm font-semibold text-slate-800">Fuso orario del gestionale</Label>
@@ -333,7 +348,9 @@ export function SettingsTab() {
             </select>
           </div>
         </SettingsSection>
+        )}
 
+        {show("test_prefix") && (
         <SettingsSection title="Manutenzione / Test" icon={Broom}>
           <div className="py-2">
             <Label className="text-sm font-semibold text-slate-800">Prefisso dati di test</Label>
@@ -345,12 +362,67 @@ export function SettingsTab() {
               className="h-11 font-mono-tight max-w-[220px]" data-testid="setting-test-prefix" />
           </div>
         </SettingsSection>
+        )}
       </div>
 
       <div className="sticky bottom-3 z-10 flex justify-end">
         <Button onClick={save} disabled={saving} className="h-11 et-btn-primary border-0 shadow-lg" data-testid="save-settings-btn">
-          {saving ? "Salvo…" : "Salva tutte le impostazioni"}
+          {saving ? "Salvo…" : (saveLabel || "Salva impostazioni")}
         </Button>
+      </div>
+    </div>
+  );
+}
+
+// F9 §21 — Wrapper per singola area. Riutilizzano SettingsTab con filtro sezioni.
+export const SettingsGeneralTab = () => <SettingsTab filter={["general"]} saveLabel="Salva Impostazioni Generali" />;
+export const SettingsMagazzinoTab = () => <SettingsTab filter={["magazzino", "ricerca", "movimenti"]} saveLabel="Salva Impostazioni Magazzino" />;
+export const SettingsScannerTab = () => <SettingsTab filter={["scanner", "dashboard"]} saveLabel="Salva Scanner e Acquisizione" />;
+export const SettingsSicurezzaTab = () => <SettingsTab filter={["sicurezza", "test_prefix"]} saveLabel="Salva Sicurezza" />;
+
+// F9 §7 — Impostazioni Arrivi (info-only: le regole sono già cablate nella logica esistente).
+export function SettingsArriviTab() {
+  return (
+    <div className="space-y-3 max-w-3xl" data-testid="settings-arrivi-tab">
+      <h3 className="font-display text-lg font-bold text-slate-900">Impostazioni Arrivi</h3>
+      <p className="text-sm text-slate-600">Le regole operative degli Arrivi sono cablate nel gestionale per garantire integrità.</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="et-card-elevated p-4"><b>Ricevi Seriali</b><ul className="text-xs mt-2 space-y-1"><li>✓ Prodotto obbligatorio prima del seriale</li><li>✓ Seriali nuovi consentiti</li><li>✓ Scansione continua</li><li>✓ INVIO = acquisisci</li><li>✓ Conferma finale scrive su Notion</li></ul></div>
+        <div className="et-card-elevated p-4"><b>Ricevi Quantità</b><ul className="text-xs mt-2 space-y-1"><li>✓ Codice obbligatorio</li><li>✓ Verifica su Inventario Notion</li><li>✓ Quantità obbligatoria</li><li>✓ Lista temporanea prima della conferma</li></ul></div>
+        <div className="et-card-elevated p-4"><b>Reintegra Seriale</b><ul className="text-xs mt-2 space-y-1"><li>✓ Popup dedicato</li><li>✓ Manuale / scanner / fotocamera</li><li>✓ Verifica su Inventario Notion</li></ul></div>
+      </div>
+      <div className="rounded-md border border-blue-200 bg-blue-50 text-blue-900 text-xs p-3">Alla <b>Conferma Arrivo</b>: aggiornamento Inventario Notion + registrazione Entrate.</div>
+    </div>
+  );
+}
+
+// F9 §8 — Impostazioni Spedizioni (info-only).
+export function SettingsSpedizioniTab() {
+  return (
+    <div className="space-y-3 max-w-3xl" data-testid="settings-spedizioni-tab">
+      <h3 className="font-display text-lg font-bold text-slate-900">Impostazioni Spedizioni</h3>
+      <p className="text-sm text-slate-600">Le regole operative delle Spedizioni sono cablate nel gestionale per garantire integrità.</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="et-card-elevated p-4"><b>Spedisci Seriali</b><ul className="text-xs mt-2 space-y-1"><li>✓ Verifica seriale presente in Inventario</li><li>✓ Blocco duplicati</li><li>✓ Blocco seriale già spedito</li><li>✓ Scansione continua</li></ul></div>
+        <div className="et-card-elevated p-4"><b>Spedisci Quantità</b><ul className="text-xs mt-2 space-y-1"><li>✓ Verifica disponibilità</li><li>✓ Blocco quantità insufficiente</li><li>✓ Lista temporanea prima della conferma</li></ul></div>
+      </div>
+      <div className="rounded-md border border-blue-200 bg-blue-50 text-blue-900 text-xs p-3">Alla <b>Conferma Spedizione</b>: aggiornamento Inventario Notion + registrazione Uscite.</div>
+    </div>
+  );
+}
+
+// F9 §21 — Gestione Prodotti (predisposizione — dipende dalla futura fonte Gestionale).
+export function ProductsAdminTab() {
+  return (
+    <div className="space-y-3 max-w-3xl" data-testid="products-admin-tab">
+      <h3 className="font-display text-lg font-bold text-slate-900">Gestione Prodotti</h3>
+      <p className="text-sm text-slate-600">
+        Attualmente i prodotti sono gestiti direttamente su <b>Notion</b> (fonte attiva). La creazione
+        di prodotti dall'app sarà disponibile quando verrà attivata la fonte <b>GESTIONALE</b>.
+      </p>
+      <div className="rounded-md border border-amber-200 bg-amber-50 text-amber-900 text-xs p-3">
+        Per aggiungere/modificare prodotti: aprire il database Inventario su Notion. Il gestionale
+        legge automaticamente le modifiche dopo un refresh cache.
       </div>
     </div>
   );

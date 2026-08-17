@@ -271,6 +271,93 @@ function ResetPwdDialog({ user, onClose, onDone }) {
   );
 }
 
+// F9 §2 — Editor permessi configurabili per RESPONSABILE.
+// I moduli operativi (dashboard/arrivi/spedizioni/inventario/movimenti/anomalie) sono
+// impliciti (ereditati dall'OPERATORE) e mostrati come "sempre attivi". I moduli extra
+// sono opzionali e configurabili qui.
+const PERMISSION_MODULES = [
+  { key: "gestione_prodotti", label: "Gestione Prodotti", implicit: false },
+  { key: "gestione_utenti", label: "Gestione Utenti", implicit: false },
+  { key: "impostazioni", label: "Impostazioni", implicit: false },
+  { key: "notifiche", label: "Notifiche", implicit: false },
+  { key: "registro_attivita", label: "Registro Attività", implicit: false },
+  { key: "manutenzione", label: "Manutenzione", implicit: false },
+];
+const IMPLICIT_MODULES = ["Dashboard", "Inventario", "Arrivi", "Spedizioni", "Movimenti", "Anomalie"];
+
+function PermissionsDialog({ user, onClose, onDone }) {
+  const [perms, setPerms] = useState([]);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (user) setPerms(Array.isArray(user.permissions) ? user.permissions : []);
+  }, [user]);
+  if (!user) return null;
+  const toggle = (k) => setPerms((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]));
+  const save = async () => {
+    setSaving(true);
+    try {
+      await axios.patch(`${API}/admin/users/${user.id}`, { permissions: perms });
+      toast.success("Permessi aggiornati");
+      onDone?.();
+      onClose();
+    } catch (e) {
+      toast.error("Salvataggio fallito", { description: formatError(e) });
+    } finally { setSaving(false); }
+  };
+  return (
+    <Dialog open={!!user} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-lg" data-testid="permissions-dialog">
+        <DialogHeader>
+          <DialogTitle>Permessi — {user.full_name || user.username}</DialogTitle>
+          <DialogDescription>
+            Configura i moduli extra accessibili al ruolo <b>Responsabile</b>. I moduli operativi
+            base sono sempre disponibili.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">Sempre attivi (ereditati)</div>
+            <div className="flex flex-wrap gap-1.5">
+              {IMPLICIT_MODULES.map((m) => (
+                <span key={m} className="px-2 h-7 rounded-full bg-slate-100 border border-slate-200 text-[11px] font-semibold text-slate-600 inline-flex items-center">
+                  ● {m}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">Permessi extra configurabili</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+              {PERMISSION_MODULES.map((m) => {
+                const on = perms.includes(m.key);
+                return (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => toggle(m.key)}
+                    className={`px-3 h-10 rounded-md border text-sm font-semibold text-left transition-colors ${
+                      on ? "bg-emerald-50 border-emerald-300 text-emerald-800" : "bg-white border-slate-200 text-slate-500"
+                    }`}
+                    data-testid={`perm-${m.key}`}
+                  >
+                    {on ? "✓" : "○"} {m.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={saving}>Annulla</Button>
+          <Button onClick={save} disabled={saving} className="bg-blue-600 hover:bg-blue-700 text-white" data-testid="perm-save">
+            {saving ? "Salvo…" : "Salva permessi"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function DeleteUserDialog({ user, onClose, onDone }) {
   const [confirmText, setConfirmText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -350,6 +437,7 @@ export default function AdminUsersPage() {
   const [resetTarget, setResetTarget] = useState(null);
   const [emailTarget, setEmailTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [permTarget, setPermTarget] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -539,6 +627,17 @@ export default function AdminUsersPage() {
                         <Button
                           size="sm"
                           variant="outline"
+                          onClick={() => setPermTarget(u)}
+                          disabled={isMaster || u.role !== "responsabile"}
+                          className="h-8"
+                          data-testid={`perm-${u.username}`}
+                          title={u.role !== "responsabile" ? "Solo per Responsabile" : "Permessi configurabili"}
+                        >
+                          <PencilSimple size={14} className="mr-1" /> Permessi
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
                           onClick={() => setResetTarget(u)}
                           className="h-8"
                           data-testid={`reset-${u.username}`}
@@ -725,6 +824,7 @@ export default function AdminUsersPage() {
       <ResetPwdDialog user={resetTarget} onClose={() => setResetTarget(null)} onDone={load} />
       <EditEmailDialog user={emailTarget} onClose={() => setEmailTarget(null)} onDone={load} />
       <DeleteUserDialog user={deleteTarget} onClose={() => setDeleteTarget(null)} onDone={load} />
+      <PermissionsDialog user={permTarget} onClose={() => setPermTarget(null)} onDone={load} />
     </div>
   );
 }

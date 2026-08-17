@@ -33,6 +33,35 @@ from fastapi import HTTPException, Depends, Header, Request
 
 logger = logging.getLogger(__name__)
 
+# F9 — Moduli disponibili per la gestione permessi configurabili del ruolo RESPONSABILE.
+# ADMIN ha tutti i permessi implicitamente. OPERATOR usa i default operativi.
+# RESPONSABILE eredita i permessi dell'OPERATOR e può ricevere permessi aggiuntivi da questa lista.
+PERMISSION_MODULES = [
+    "dashboard", "inventario", "arrivi", "spedizioni", "movimenti",
+    "anomalie", "gestione_prodotti", "gestione_utenti", "impostazioni",
+    "notifiche", "registro_attivita", "manutenzione",
+]
+
+
+def has_permission(user_doc, module: str) -> bool:
+    """True se l'utente ha il permesso `module`. ADMIN sempre True. Master idem.
+    RESPONSABILE: True se `permissions` contiene il modulo.
+    OPERATOR: True solo per i moduli operativi base (dashboard/arrivi/spedizioni/inventario/movimenti/anomalie).
+    """
+    if not user_doc:
+        return False
+    role = user_doc.get("role")
+    if role == ROLE_ADMIN or is_master_user(user_doc):
+        return True
+    if role == ROLE_RESPONSABILE:
+        perms = user_doc.get("permissions") or []
+        # Responsabile eredita dall'operatore + eventuali permessi extra
+        base = {"dashboard", "arrivi", "spedizioni", "inventario", "movimenti", "anomalie"}
+        return module in base or module in set(perms)
+    # OPERATOR
+    return module in {"dashboard", "arrivi", "spedizioni", "inventario", "movimenti", "anomalie"}
+
+
 JWT_ALGORITHM = "HS256"
 ROLE_ADMIN = "admin"
 ROLE_RESPONSABILE = "responsabile"
@@ -146,6 +175,7 @@ def public_user(doc: Dict[str, Any]) -> Dict[str, Any]:
         "must_change_password": bool(doc.get("must_change_password", False)),
         "last_login": doc.get("last_login"),
         "created_at": doc.get("created_at"),
+        "permissions": doc.get("permissions") or [],
     }
 
 

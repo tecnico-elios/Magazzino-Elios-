@@ -53,6 +53,16 @@
 - PWA installabilità (P2)
 - Stats operatore giornaliere/settimanali (idea)
 
+## F9 — Admin restructure completo (12 tab per area) ✅ (16/02/2026)
+- Admin ora mostra tab separati per ogni area richiesta: Generali · Magazzino · Scanner · Arrivi · Spedizioni · Notifiche · Notion · Fonte Inventario · Registro Attività · Manutenzione · Gestione Prodotti (predisposizione) — più tab avanzati esistenti (Inventario, Storico, Ricerca, Storico SN, Sessioni, Cleanup TEST).
+- Split `SettingsTab` via prop `filter` (senza duplicare load/save logic): wrapper `SettingsGeneralTab` / `SettingsMagazzinoTab` / `SettingsScannerTab` mostrano solo le loro sezioni.
+- Nuove tab info-only per area operativa: `SettingsArriviTab`, `SettingsSpedizioniTab`, `ProductsAdminTab` (documentano regole cablate).
+- Landing su "Impostazioni Generali" (default).
+
+## F9 — Permessi configurabili RESPONSABILE ✅ (16/02/2026)
+- Backend `auth.PERMISSION_MODULES` (12 moduli) + `has_permission(user, module)` + salvataggio `permissions` in user doc via `PATCH /admin/users/{id}`.
+- Frontend `PermissionsDialog` con checkbox per moduli extra (Gestione Prodotti/Utenti, Impostazioni, Notifiche, Registro, Manutenzione). Base operativa (Dashboard/Arrivi/Spedizioni/Inventario/Movimenti/Anomalie) sempre attiva.
+
 ## F9 — Notifiche tipizzate + Admin restructure light + Impostazioni Notion ✅ (16/02/2026)
 - **Notifiche tipizzate (§28)**: ogni destinatario ha ora 6 flag evento (`arrivi`, `spedizioni`, `sotto_scorta`, `esauriti`, `anomalie`, `errori_notion`). Backend: `NotificationEvents` pydantic model, `get_recipients_for_event(event)` helper, `submit_arrivo` e `submit_shipment` filtrano rispettivamente per `arrivi` e `spedizioni`. Migrazione automatica retro-compat: destinatari esistenti hanno tutti gli eventi ON.
 - **UI RecipientsTab**: chip cliccabili sotto ogni email (Arrivi/Spedizioni/Sotto scorta/Esauriti/Anomalie/Errori Notion). Toggle ON/OFF colorato emerald/slate. Automaticamente disabilitati se il destinatario è disattivato.

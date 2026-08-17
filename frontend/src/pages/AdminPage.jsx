@@ -33,7 +33,7 @@ import {
   ListMagnifyingGlass,
   UsersFour,
 } from "@phosphor-icons/react";
-import { AuditLogTab, SettingsTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab, SessionsTab, InventorySourceTab, ManutenzioneTab, NotionSettingsTab } from "./AdminExtraTabs";
+import { AuditLogTab, SettingsTab, SettingsGeneralTab, SettingsMagazzinoTab, SettingsScannerTab, SettingsSicurezzaTab, SettingsArriviTab, SettingsSpedizioniTab, ProductsAdminTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab, SessionsTab, InventorySourceTab, ManutenzioneTab, NotionSettingsTab } from "./AdminExtraTabs";
 // Note: AuditLogTab importato ma non renderizzato — tab rimossa su richiesta utente.
 // eslint-disable-next-line no-unused-vars
 const _AuditLogTab_unused = AuditLogTab;
@@ -855,7 +855,7 @@ export default function AdminPage() {
         </div>
       </header>
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
-        <Tabs defaultValue="inventory">
+        <Tabs defaultValue="settings-general">
           <TabsList
             className="mb-6 h-auto flex flex-nowrap w-full max-w-full justify-start overflow-x-auto scrollbar-thin bg-transparent p-0 gap-1 sm:bg-muted sm:p-1 sm:flex-wrap sm:overflow-visible"
             data-testid="admin-tabs-list"
@@ -865,6 +865,45 @@ export default function AdminPage() {
             </TabsTrigger>
             <TabsTrigger value="recipients" data-testid="tab-recipients" className="shrink-0">
               <Envelope size={16} className="mr-1" /> Notifiche
+            </TabsTrigger>
+            <TabsTrigger value="history" data-testid="tab-history" className="shrink-0">
+              <ClockCounterClockwise size={16} className="mr-1" /> Storico
+            </TabsTrigger>
+            <TabsTrigger value="products" data-testid="tab-products" className="shrink-0">
+              <Package size={16} className="mr-1" /> Gestione Prodotti
+            </TabsTrigger>
+            <TabsTrigger value="settings-general" data-testid="tab-general" className="shrink-0">
+              <Gear size={16} className="mr-1" /> Generali
+            </TabsTrigger>
+            <TabsTrigger value="settings-magazzino" data-testid="tab-magazzino" className="shrink-0">
+              <Warning size={16} className="mr-1" /> Magazzino
+            </TabsTrigger>
+            <TabsTrigger value="settings-scanner" data-testid="tab-scanner" className="shrink-0">
+              <ListMagnifyingGlass size={16} className="mr-1" /> Scanner
+            </TabsTrigger>
+            <TabsTrigger value="settings-arrivi" data-testid="tab-set-arrivi" className="shrink-0">
+              <Gear size={16} className="mr-1" /> Arrivi
+            </TabsTrigger>
+            <TabsTrigger value="settings-spedizioni" data-testid="tab-set-spedizioni" className="shrink-0">
+              <Gear size={16} className="mr-1" /> Spedizioni
+            </TabsTrigger>
+            <TabsTrigger value="recipients" data-testid="tab-recipients" className="shrink-0">
+              <Envelope size={16} className="mr-1" /> Notifiche
+            </TabsTrigger>
+            <TabsTrigger value="notion" data-testid="tab-notion" className="shrink-0">
+              <ArrowsClockwise size={16} className="mr-1" /> Notion
+            </TabsTrigger>
+            <TabsTrigger value="inventory-source" data-testid="tab-inventory-source" className="shrink-0">
+              <Package size={16} className="mr-1" /> Fonte Inventario
+            </TabsTrigger>
+            <TabsTrigger value="audit" data-testid="tab-audit" className="shrink-0">
+              <ClockCounterClockwise size={16} className="mr-1" /> Registro Attività
+            </TabsTrigger>
+            <TabsTrigger value="maintenance" data-testid="tab-maintenance" className="shrink-0">
+              <ArrowsClockwise size={16} className="mr-1" /> Sistema / Manutenzione
+            </TabsTrigger>
+            <TabsTrigger value="inventory" data-testid="tab-inventory" className="shrink-0">
+              <Package size={16} className="mr-1" /> Inventario (avanzato)
             </TabsTrigger>
             <TabsTrigger value="history" data-testid="tab-history" className="shrink-0">
               <ClockCounterClockwise size={16} className="mr-1" /> Storico
@@ -879,32 +918,26 @@ export default function AdminPage() {
               <UsersFour size={16} className="mr-1" /> Sessioni
             </TabsTrigger>
             <TabsTrigger value="cleanup" data-testid="tab-cleanup" className="shrink-0">
-              <Broom size={16} className="mr-1" /> Cleanup
-            </TabsTrigger>
-            <TabsTrigger value="settings" data-testid="tab-settings" className="shrink-0">
-              <Gear size={16} className="mr-1" /> Impostazioni
-            </TabsTrigger>
-            <TabsTrigger value="inventory-source" data-testid="tab-inventory-source" className="shrink-0">
-              <Package size={16} className="mr-1" /> Fonte Inventario
-            </TabsTrigger>
-            <TabsTrigger value="notion" data-testid="tab-notion" className="shrink-0">
-              <ArrowsClockwise size={16} className="mr-1" /> Notion
-            </TabsTrigger>
-            <TabsTrigger value="maintenance" data-testid="tab-maintenance" className="shrink-0">
-              <ArrowsClockwise size={16} className="mr-1" /> Manutenzione
+              <Broom size={16} className="mr-1" /> Cleanup TEST
             </TabsTrigger>
           </TabsList>
-          <TabsContent value="inventory"><InventoryTab /></TabsContent>
+          <TabsContent value="products"><ProductsAdminTab /></TabsContent>
+          <TabsContent value="settings-general"><SettingsGeneralTab /></TabsContent>
+          <TabsContent value="settings-magazzino"><SettingsMagazzinoTab /></TabsContent>
+          <TabsContent value="settings-scanner"><SettingsScannerTab /></TabsContent>
+          <TabsContent value="settings-arrivi"><SettingsArriviTab /></TabsContent>
+          <TabsContent value="settings-spedizioni"><SettingsSpedizioniTab /></TabsContent>
           <TabsContent value="recipients"><RecipientsTab /></TabsContent>
+          <TabsContent value="notion"><NotionSettingsTab /></TabsContent>
+          <TabsContent value="inventory-source"><InventorySourceTab /></TabsContent>
+          <TabsContent value="audit"><AuditLogTab /></TabsContent>
+          <TabsContent value="maintenance"><ManutenzioneTab /></TabsContent>
+          <TabsContent value="inventory"><InventoryTab /></TabsContent>
           <TabsContent value="history"><HistoryTab /></TabsContent>
           <TabsContent value="global-search"><GlobalSearchTab /></TabsContent>
           <TabsContent value="serial-history"><SerialHistoryTab /></TabsContent>
           <TabsContent value="sessions"><SessionsTab /></TabsContent>
           <TabsContent value="cleanup"><CleanupTestTab /></TabsContent>
-          <TabsContent value="settings"><SettingsTab /></TabsContent>
-          <TabsContent value="inventory-source"><InventorySourceTab /></TabsContent>
-          <TabsContent value="notion"><NotionSettingsTab /></TabsContent>
-          <TabsContent value="maintenance"><ManutenzioneTab /></TabsContent>
         </Tabs>
       </main>
     </div>

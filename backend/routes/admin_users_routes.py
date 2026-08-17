@@ -44,6 +44,7 @@ class UpdateUserBody(BaseModel):
     role: Optional[str] = None
     active: Optional[bool] = None
     email: Optional[str] = Field(default=None, max_length=200)
+    permissions: Optional[List[str]] = None
 
 
 class ResetPasswordBody(BaseModel):
@@ -152,6 +153,11 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
                     if admins_count <= 1:
                         raise HTTPException(409, "Impossibile disattivare l'ultimo Admin attivo")
             updates["active"] = bool(body.active)
+        if body.permissions is not None:
+            # F9 — Permessi configurabili per RESPONSABILE. Filtra solo moduli ammessi.
+            valid = set(auth_mod.PERMISSION_MODULES)
+            perms = [p for p in body.permissions if p in valid]
+            updates["permissions"] = perms
         if not updates:
             raise HTTPException(400, "Nessun campo da aggiornare")
         # Deactivation must invalidate active sessions → bump password_version
