@@ -19,6 +19,8 @@ import { UserPlus, Key, ArrowLeft, PencilSimple, Prohibit, ArrowClockwise, Trash
 import { fmtDateTime, useTz } from "../lib/tz";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const MASTER_EMAIL = "tecnico@eliostech.org";
+const isMasterUser = (u) => String(u?.email || "").trim().toLowerCase() === MASTER_EMAIL;
 
 function formatError(err) {
   const d = err?.response?.data?.detail;
@@ -118,7 +120,7 @@ function CreateUserDialog({ open, onClose, onCreated }) {
           </div>
           <div>
             <Label>Ruolo</Label>
-            <div className="flex gap-2 mt-1">
+            <div className="flex gap-2 mt-1 flex-wrap">
               <button
                 type="button"
                 onClick={() => setRole("operator")}
@@ -128,6 +130,16 @@ function CreateUserDialog({ open, onClose, onCreated }) {
                 data-testid="new-user-role-operator"
               >
                 Operatore
+              </button>
+              <button
+                type="button"
+                onClick={() => setRole("responsabile")}
+                className={`h-11 px-4 rounded-md border font-semibold text-sm ${
+                  role === "responsabile" ? "bg-sky-700 text-white border-sky-700" : "bg-white border-slate-300"
+                }`}
+                data-testid="new-user-role-responsabile"
+              >
+                Responsabile
               </button>
               <button
                 type="button"
@@ -436,6 +448,8 @@ export default function AdminUsersPage() {
             <tbody>
               {users.map((u) => {
                 const isMe = me?.id === u.id;
+                const isMaster = isMasterUser(u);
+                const lockChange = isMe || isMaster;
                 return (
                   <tr key={u.id} data-testid={`user-row-${u.username}`}>
                     <td className="px-4 py-3">
@@ -458,11 +472,11 @@ export default function AdminUsersPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex gap-1">
+                      <div className="flex gap-1 flex-wrap">
                         <button
                           type="button"
                           onClick={() => changeRole(u, "operator")}
-                          disabled={isMe}
+                          disabled={lockChange}
                           className={`px-2 h-7 rounded-md text-xs font-semibold border ${
                             u.role === "operator"
                               ? "bg-slate-900 text-white border-slate-900"
@@ -474,8 +488,21 @@ export default function AdminUsersPage() {
                         </button>
                         <button
                           type="button"
+                          onClick={() => changeRole(u, "responsabile")}
+                          disabled={lockChange}
+                          className={`px-2 h-7 rounded-md text-xs font-semibold border ${
+                            u.role === "responsabile"
+                              ? "bg-sky-700 text-white border-sky-700"
+                              : "bg-white border-slate-300 text-slate-600 hover:border-sky-500"
+                          } disabled:opacity-40`}
+                          data-testid={`role-responsabile-${u.username}`}
+                        >
+                          Responsabile
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => changeRole(u, "admin")}
-                          disabled={isMe}
+                          disabled={lockChange}
                           className={`px-2 h-7 rounded-md text-xs font-semibold border ${
                             u.role === "admin"
                               ? "bg-amber-600 text-white border-amber-600"
@@ -500,6 +527,9 @@ export default function AdminUsersPage() {
                       {isMe && (
                         <span className="ml-2 text-[10px] uppercase tracking-wider text-slate-400">tu</span>
                       )}
+                      {isMaster && (
+                        <span className="ml-2 text-[10px] uppercase tracking-wider text-amber-600 font-bold" title="Account master protetto">🔒 master</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500 font-mono-tight">
                       {fmtDate(u.last_login)}
@@ -512,6 +542,8 @@ export default function AdminUsersPage() {
                           onClick={() => setResetTarget(u)}
                           className="h-8"
                           data-testid={`reset-${u.username}`}
+                          disabled={isMaster}
+                          title={isMaster ? "Account master protetto" : "Reset password"}
                         >
                           <Key size={14} className="mr-1" /> Reset PW
                         </Button>
@@ -519,9 +551,10 @@ export default function AdminUsersPage() {
                           size="sm"
                           variant="outline"
                           onClick={() => toggleActive(u)}
-                          disabled={isMe}
+                          disabled={isMe || isMaster}
                           className={`h-8 ${u.active ? "border-red-300 text-red-600 hover:bg-red-50" : "border-emerald-300 text-emerald-700 hover:bg-emerald-50"}`}
                           data-testid={`toggle-active-${u.username}`}
+                          title={isMaster ? "Account master protetto" : ""}
                         >
                           <Prohibit size={14} className="mr-1" /> {u.active ? "Disattiva" : "Riattiva"}
                         </Button>
@@ -529,10 +562,10 @@ export default function AdminUsersPage() {
                           size="sm"
                           variant="outline"
                           onClick={() => setDeleteTarget(u)}
-                          disabled={isMe}
+                          disabled={isMe || isMaster}
                           className="h-8 border-red-400 text-red-700 hover:bg-red-50"
                           data-testid={`delete-${u.username}`}
-                          title="Elimina definitivamente"
+                          title={isMaster ? "Account master protetto" : "Elimina definitivamente"}
                         >
                           <Trash size={14} className="mr-1" /> Elimina
                         </Button>
@@ -557,6 +590,8 @@ export default function AdminUsersPage() {
         <div className="sm:hidden space-y-3" data-testid="users-cards-mobile">
           {users.map((u) => {
             const isMe = me?.id === u.id;
+            const isMaster = isMasterUser(u);
+            const lockChange = isMe || isMaster;
             return (
               <div
                 key={u.id}
@@ -595,12 +630,12 @@ export default function AdminUsersPage() {
                   )}
                 </div>
 
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 flex-wrap">
                   <span className="text-[10px] uppercase tracking-wider text-slate-500 mr-1">Ruolo</span>
                   <button
                     type="button"
                     onClick={() => changeRole(u, "operator")}
-                    disabled={isMe}
+                    disabled={lockChange}
                     className={`px-2 h-8 rounded-md text-xs font-semibold border ${
                       u.role === "operator"
                         ? "bg-slate-900 text-white border-slate-900"
@@ -611,8 +646,20 @@ export default function AdminUsersPage() {
                   </button>
                   <button
                     type="button"
+                    onClick={() => changeRole(u, "responsabile")}
+                    disabled={lockChange}
+                    className={`px-2 h-8 rounded-md text-xs font-semibold border ${
+                      u.role === "responsabile"
+                        ? "bg-sky-700 text-white border-sky-700"
+                        : "bg-white border-slate-300 text-slate-600"
+                    } disabled:opacity-40`}
+                  >
+                    Responsabile
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => changeRole(u, "admin")}
-                    disabled={isMe}
+                    disabled={lockChange}
                     className={`px-2 h-8 rounded-md text-xs font-semibold border ${
                       u.role === "admin"
                         ? "bg-amber-600 text-white border-amber-600"
@@ -623,6 +670,9 @@ export default function AdminUsersPage() {
                   </button>
                   {isMe && (
                     <span className="ml-1 text-[10px] uppercase tracking-wider text-slate-400">tu</span>
+                  )}
+                  {isMaster && (
+                    <span className="ml-1 text-[10px] uppercase tracking-wider text-amber-600 font-bold">🔒 master</span>
                   )}
                 </div>
 
@@ -637,6 +687,7 @@ export default function AdminUsersPage() {
                     onClick={() => setResetTarget(u)}
                     className="h-9 flex-1"
                     data-testid={`m-reset-${u.username}`}
+                    disabled={isMaster}
                   >
                     <Key size={14} className="mr-1" /> Reset PW
                   </Button>
@@ -644,7 +695,7 @@ export default function AdminUsersPage() {
                     size="sm"
                     variant="outline"
                     onClick={() => toggleActive(u)}
-                    disabled={isMe}
+                    disabled={isMe || isMaster}
                     className={`h-9 flex-1 ${u.active ? "border-red-300 text-red-600 hover:bg-red-50" : "border-emerald-300 text-emerald-700 hover:bg-emerald-50"}`}
                     data-testid={`m-toggle-${u.username}`}
                   >

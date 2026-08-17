@@ -122,6 +122,12 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         existing = await db.users.find_one({"_id": oid})
         if not existing:
             raise HTTPException(404, "Utente non trovato")
+        # F8 — Account master protetto: blocca qualsiasi modifica strutturale.
+        if auth_mod.is_master_user(existing):
+            if body.role is not None and body.role != existing.get("role"):
+                raise HTTPException(403, "Account master protetto: ruolo non modificabile")
+            if body.active is not None and bool(body.active) != bool(existing.get("active", True)):
+                raise HTTPException(403, "Account master protetto: stato non modificabile")
         updates = {}
         if body.first_name is not None:
             updates["first_name"] = body.first_name.strip()
@@ -166,6 +172,9 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         existing = await db.users.find_one({"_id": oid})
         if not existing:
             raise HTTPException(404, "Utente non trovato")
+        # F8 — Account master: nessuno può resettare la sua password.
+        if auth_mod.is_master_user(existing):
+            raise HTTPException(403, "Account master protetto: password non resettabile da altri")
         try:
             new_hash = auth_mod.hash_password(body.new_password)
         except ValueError as e:
@@ -209,6 +218,9 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         existing = await db.users.find_one({"_id": oid})
         if not existing:
             raise HTTPException(404, "Utente non trovato")
+        # F8 — Account master: non eliminabile.
+        if auth_mod.is_master_user(existing):
+            raise HTTPException(403, "Account master protetto: non eliminabile")
         if str(existing["_id"]) == str(admin["_id"]):
             raise HTTPException(409, "Non puoi eliminare te stesso")
         if existing.get("role") == auth_mod.ROLE_ADMIN:

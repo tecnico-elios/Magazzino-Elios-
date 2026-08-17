@@ -410,10 +410,12 @@ export function SessionsTab() {
               </tr>
             </thead>
             <tbody>
-              {items.map((s) => (
+              {items.map((s) => {
+                const isMaster = String(s.email || "").trim().toLowerCase() === "tecnico@eliostech.org";
+                return (
                 <tr key={s.sid} data-testid={`session-row-${s.sid}`}>
                   <td>
-                    <div className="font-semibold text-slate-900">{s.full_name}</div>
+                    <div className="font-semibold text-slate-900">{s.full_name}{isMaster && <span className="ml-2 text-[10px] uppercase tracking-wider text-amber-600 font-bold">🔒 master</span>}</div>
                     <div className="text-xs text-slate-500 font-mono-tight">@{s.username} · {s.role}</div>
                   </td>
                   <td>
@@ -436,15 +438,17 @@ export function SessionsTab() {
                       variant="outline"
                       size="sm"
                       onClick={() => disconnect(s.sid)}
-                      disabled={busySid === s.sid}
+                      disabled={busySid === s.sid || isMaster}
                       className="text-red-600 border-red-200 hover:bg-red-50"
                       data-testid={`disconnect-session-${s.sid}`}
+                      title={isMaster ? "Account master protetto" : ""}
                     >
                       {busySid === s.sid ? "…" : "Disconnetti"}
                     </Button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {items.length === 0 && !loading && (
                 <tr><td colSpan={5} className="px-3 py-6 text-center text-slate-400">Nessuna sessione attiva.</td></tr>
               )}
@@ -705,6 +709,90 @@ export function GlobalSearchTab() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ---------- Fonte Inventario (F8 predisposizione) ----------
+// Sezione read-only: mostra la fonte attiva dell'Inventario. Attualmente NOTION.
+// La modalità GESTIONALE è predisposta ma NON attivabile in questa fase.
+// Nessun cambio di logica sull'Inventario, Notion o Arrivi/Spedizioni.
+export function InventorySourceTab() {
+  const active = "notion"; // Costante — la fonte Gestionale sarà attivabile in una release futura.
+  return (
+    <div className="space-y-4 max-w-3xl" data-testid="inventory-source-tab">
+      <div>
+        <h3 className="font-display text-lg font-bold text-slate-900">Fonte Inventario</h3>
+        <p className="text-sm text-slate-600 mt-1">
+          Determina da dove il gestionale legge e scrive prodotti, quantità e seriali.
+          Deve sempre esserci <b>una sola fonte attiva</b>.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div
+          className={`relative rounded-xl border p-5 transition-all ${
+            active === "notion"
+              ? "border-emerald-400 bg-emerald-50/50 shadow-[0_10px_30px_-15px_rgba(16,185,129,0.35)]"
+              : "border-slate-200 bg-white"
+          }`}
+          data-testid="inventory-source-notion"
+        >
+          <div className="flex items-center justify-between">
+            <div className="inline-flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" aria-hidden />
+              <div className="font-display text-base font-bold text-emerald-900">NOTION</div>
+            </div>
+            {active === "notion" && (
+              <span className="text-[10px] uppercase tracking-wider font-bold bg-emerald-600 text-white px-2 py-1 rounded">Attivo</span>
+            )}
+          </div>
+          <div className="text-sm text-slate-700 mt-2">
+            Inventario, Arrivi ed Spedizioni operano su Notion come Single Source of Truth.
+          </div>
+          <ul className="mt-3 text-xs text-slate-600 space-y-1 list-disc pl-4">
+            <li>Letture live da Notion (con cache)</li>
+            <li>Arrivi confermati → Inventario + Entrate</li>
+            <li>Spedizioni confermate → Inventario + Uscite</li>
+          </ul>
+        </div>
+
+        <div
+          className="relative rounded-xl border border-dashed border-slate-300 p-5 bg-slate-50/60"
+          data-testid="inventory-source-gestionale"
+        >
+          <div className="flex items-center justify-between">
+            <div className="inline-flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-sky-500" aria-hidden />
+              <div className="font-display text-base font-bold text-sky-900">GESTIONALE</div>
+            </div>
+            <span className="text-[10px] uppercase tracking-wider font-bold bg-slate-400 text-white px-2 py-1 rounded">In arrivo</span>
+          </div>
+          <div className="text-sm text-slate-700 mt-2">
+            Inventario interno gestito direttamente dall'app (creazione prodotti, seriali e quantità in locale).
+          </div>
+          <ul className="mt-3 text-xs text-slate-500 space-y-1 list-disc pl-4">
+            <li>Predisposto architetturalmente</li>
+            <li>Attivabile in una release futura</li>
+            <li>Nessuna modifica automatica di Notion</li>
+          </ul>
+          <Button
+            type="button"
+            disabled
+            className="mt-4 h-10 w-full bg-sky-100 text-sky-500 hover:bg-sky-100 cursor-not-allowed"
+            data-testid="switch-to-gestionale-btn"
+            title="Funzione in arrivo"
+          >
+            Passa a GESTIONALE — In arrivo
+          </Button>
+        </div>
+      </div>
+
+      <div className="rounded-md border border-amber-200 bg-amber-50 text-amber-900 text-xs p-3">
+        <b>Nota:</b> il cambio fonte richiederà conferma esplicita e non attiverà mai
+        entrambe le sorgenti contemporaneamente. Notion non viene modificato.
+      </div>
     </div>
   );
 }

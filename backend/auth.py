@@ -35,8 +35,21 @@ logger = logging.getLogger(__name__)
 
 JWT_ALGORITHM = "HS256"
 ROLE_ADMIN = "admin"
+ROLE_RESPONSABILE = "responsabile"
 ROLE_OPERATOR = "operator"
-VALID_ROLES = {ROLE_ADMIN, ROLE_OPERATOR}
+VALID_ROLES = {ROLE_ADMIN, ROLE_RESPONSABILE, ROLE_OPERATOR}
+
+# Account master protetto — non modificabile/eliminabile/disattivabile da nessuno,
+# neanche da altri Admin. Confronto case-insensitive sull'email.
+MASTER_EMAIL = "tecnico@eliostech.org"
+
+
+def is_master_user(user_doc) -> bool:
+    """True se l'utente è l'account master protetto (Riccardo Biuso)."""
+    if not user_doc:
+        return False
+    email = str(user_doc.get("email") or "").strip().lower()
+    return email == MASTER_EMAIL
 
 
 def _jwt_secret() -> str:

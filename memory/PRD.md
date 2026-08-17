@@ -52,3 +52,11 @@
 - Export CSV/Excel storico Spedizioni/Arrivi (P1)
 - PWA installabilità (P2)
 - Stats operatore giornaliere/settimanali (idea)
+
+## F8 — P0+P1 Prompt Definitivo ✅ (16/02/2026)
+- **Rinomina card operative**: Arrivi → "RICEVI SERIALI / RICEVI QUANTITÀ / REINTEGRA SERIALE"; Spedizioni → "SPEDISCI SERIALI / SPEDISCI QUANTITÀ" (nessun cambio dimensioni/stile).
+- **Account master `tecnico@eliostech.org` protetto a livello backend**: `auth.is_master_user()` + guardie 403 in `PATCH /admin/users/{id}` (role/active), `POST /admin/users/{id}/reset-password`, `DELETE /admin/users/{id}` (hard delete), `DELETE /admin/sessions/{sid}` (force-logout). UI Admin nasconde/disabilita i relativi pulsanti + badge "🔒 master".
+- **Arrivi**: ScannerBar nascosto all'ingresso (solo card). Compare dopo scelta operazione (§7 spec). Spedizioni invariato: ScannerBar sempre visibile (§18).
+- **Ruolo `responsabile`**: aggiunto a `VALID_ROLES` backend + selettore 3-way (Operatore/Responsabile/Admin) in Create + Edit user (desktop + mobile). Permessi = OPERATOR (per ora).
+- **Fonte Inventario**: nuova tab Admin (`InventorySourceTab`) read-only con `🟢 NOTION Attivo` + `🔵 GESTIONALE In arrivo` (bottone switch disabilitato). Nessuna logica di switch attivata.
+- Verificato: Notion invariato, `/api/time` 200, endpoint protetti (401 senza JWT), `is_master_user` case-insensitive OK, ruolo `responsabile` in VALID_ROLES.

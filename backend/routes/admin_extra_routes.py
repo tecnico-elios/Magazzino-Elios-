@@ -345,6 +345,7 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
                 "user_id": uid,
                 "username": s.get("username") or user.get("username"),
                 "full_name": f"{(user.get('first_name') or '').strip()} {(user.get('last_name') or '').strip()}".strip() or (user.get("username") or "—"),
+                "email": user.get("email"),
                 "role": user.get("role"),
                 "last_login": ll.isoformat() if ll else None,
                 "last_activity": la.isoformat() if la else None,
@@ -354,6 +355,20 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
 
     @router.delete("/sessions/{sid}")
     async def delete_session(sid: str, current_user=Depends(deps.require_admin)):
+        # F8 — Account master: nessuno può forzare il logout delle sue sessioni.
+        session = await db.active_sessions.find_one({"sid": sid})
+        if session:
+            user_id = session.get("user_id")
+            if user_id:
+                try:
+                    from bson import ObjectId as _OID
+                    user_doc = await db.users.find_one({"_id": _OID(user_id)})
+                    if auth_mod.is_master_user(user_doc):
+                        raise HTTPException(403, "Account master protetto: sessione non revocabile")
+                except HTTPException:
+                    raise
+                except Exception:
+                    pass
         res = await db.active_sessions.delete_one({"sid": sid})
         if res.deleted_count == 0:
             raise HTTPException(404, "Sessione non trovata")

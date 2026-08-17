@@ -374,7 +374,9 @@ export default function ArriviPage() {
           </div>
         </section>
 
-        {/* ScannerBar sempre in alto */}
+        {/* ScannerBar — visibile solo dopo che l'operatore ha scelto un flusso o la lista contiene già righe.
+            Regola spec §7: all'ingresso di Arrivi si vedono SOLO le card. */}
+        {(list.length > 0 || pending || initialAction) && (
         <ScannerBar
           onScanned={handleScannedCode}
           lastScan={lastScan}
@@ -388,6 +390,7 @@ export default function ArriviPage() {
                 : "Inserisci o scansiona un codice prodotto o un seriale"
           }
         />
+        )}
 
         {/* F8 — Card operative sempre visibili sotto lo ScannerBar. Stile Dashboard, dimensioni leggermente ridotte. */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4" data-testid="arrivi-initial-cards">
@@ -402,7 +405,7 @@ export default function ArriviPage() {
               <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-emerald-500/15 border border-emerald-400/30 text-emerald-300">
                 <ArrowSquareIn size={22} weight="bold" />
               </div>
-              <div className="text-lg sm:text-xl font-display font-black mt-3 tracking-tight">A SERIALE</div>
+              <div className="text-lg sm:text-xl font-display font-black mt-3 tracking-tight">RICEVI SERIALI</div>
               <div className="text-slate-300/80 text-xs mt-1">Modello con seriali (nuovi)</div>
             </div>
           </button>
@@ -417,7 +420,7 @@ export default function ArriviPage() {
               <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-sky-500/15 border border-sky-400/30 text-sky-300">
                 <Package size={22} weight="bold" />
               </div>
-              <div className="text-lg sm:text-xl font-display font-black mt-3 tracking-tight">A QUANTITÀ</div>
+              <div className="text-lg sm:text-xl font-display font-black mt-3 tracking-tight">RICEVI QUANTITÀ</div>
               <div className="text-slate-300/80 text-xs mt-1">Pezzi senza seriali</div>
             </div>
           </button>

@@ -417,7 +417,7 @@ export default function ChecklistPage() {
               <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-emerald-500/15 border border-emerald-400/30 text-emerald-300">
                 <ArrowSquareOut size={22} weight="bold" />
               </div>
-              <div className="text-lg sm:text-xl font-display font-black mt-3 tracking-tight">A SERIALE</div>
+              <div className="text-lg sm:text-xl font-display font-black mt-3 tracking-tight">SPEDISCI SERIALI</div>
               <div className="text-slate-300/80 text-xs mt-1">Modello e seriali da spedire</div>
             </div>
           </button>
@@ -432,7 +432,7 @@ export default function ChecklistPage() {
               <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-sky-500/15 border border-sky-400/30 text-sky-300">
                 <Package size={22} weight="bold" />
               </div>
-              <div className="text-lg sm:text-xl font-display font-black mt-3 tracking-tight">A QUANTITÀ</div>
+              <div className="text-lg sm:text-xl font-display font-black mt-3 tracking-tight">SPEDISCI QUANTITÀ</div>
               <div className="text-slate-300/80 text-xs mt-1">Uscita di pezzi senza seriali</div>
             </div>
           </button>
