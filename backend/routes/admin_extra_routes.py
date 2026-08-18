@@ -72,6 +72,29 @@ class SicurezzaSettings(BaseModel):
     lockout_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
 
 
+class ArriviSettings(BaseModel):
+    """F10 §10 — Impostazioni Arrivi realmente configurabili.
+    Le protezioni fondamentali (product_required_serial, verify_on_notion) sono
+    accettate solo se True — non è possibile disattivarle."""
+    model_config = ConfigDict(extra="ignore")
+    allow_new_serials: Optional[bool] = None          # consenti seriali mai visti
+    continuous_scan: Optional[bool] = None            # focus al prossimo campo dopo INVIO
+    enter_equals_add: Optional[bool] = None           # INVIO = aggiungi (no bottone CERCA)
+    final_confirmation: Optional[bool] = None         # richiedi dialog di conferma prima di scrivere
+    require_code_for_qty: Optional[bool] = None       # codice obbligatorio per Ricevi Quantità
+    require_quantity: Optional[bool] = None           # quantità obbligatoria
+
+
+class SpedizioniSettings(BaseModel):
+    """F10 §10 — Impostazioni Spedizioni realmente configurabili.
+    Le protezioni fondamentali (verify_serial_in_inventory, block_duplicates,
+    block_already_shipped, block_insufficient_qty) NON sono disattivabili."""
+    model_config = ConfigDict(extra="ignore")
+    continuous_scan: Optional[bool] = None            # focus al prossimo dopo scan/INVIO
+    final_check: Optional[bool] = None                # ricontrollo completo prima di CONFERMA
+    allow_partial_shipment: Optional[bool] = None     # permetti spedizioni parziali
+
+
 # Lista IANA supportata (fusi principali internazionali). L'ora legale/solare è gestita
 # automaticamente da ZoneInfo. Sono i tz mostrati nella UI Admin.
 SUPPORTED_TIMEZONES = [
@@ -101,6 +124,9 @@ class SettingsBody(BaseModel):
     ricerca: Optional[RicercaSettings] = None
     movimenti: Optional[MovimentiSettings] = None
     sicurezza: Optional[SicurezzaSettings] = None
+    # F10 Arrivi/Spedizioni configurabili
+    arrivi: Optional[ArriviSettings] = None
+    spedizioni: Optional[SpedizioniSettings] = None
     # F8 general (timezone)
     general: Optional[GeneralSettings] = None
 
@@ -150,6 +176,19 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         "max_login_attempts": 5,
         "lockout_minutes": 5,
     },
+    "arrivi": {
+        "allow_new_serials": True,
+        "continuous_scan": True,
+        "enter_equals_add": True,
+        "final_confirmation": True,
+        "require_code_for_qty": True,
+        "require_quantity": True,
+    },
+    "spedizioni": {
+        "continuous_scan": True,
+        "final_check": True,
+        "allow_partial_shipment": False,
+    },
     "general": {
         "timezone": "Europe/Rome",         # IANA — gestisce auto ora legale/solare
         "inventory_source": "notion",       # 'notion' | 'gestionale' — switch fonte inventario
@@ -176,7 +215,7 @@ async def get_app_settings(db) -> Dict[str, Any]:
         "feedback_seconds": int(doc.get("feedback_seconds", DEFAULT_SETTINGS["feedback_seconds"])),
     }
     # Nested — merge default con quanto salvato
-    for section in ("scanner", "dashboard", "magazzino", "ricerca", "movimenti", "sicurezza", "general"):
+    for section in ("scanner", "dashboard", "magazzino", "ricerca", "movimenti", "sicurezza", "arrivi", "spedizioni", "general"):
         result[section] = _merge_section(DEFAULT_SETTINGS[section], doc.get(section))
     # Coerenza: mantieni magazzino.low_stock_threshold allineato al flat top-level
     result["magazzino"]["low_stock_threshold"] = result["low_stock_threshold"]

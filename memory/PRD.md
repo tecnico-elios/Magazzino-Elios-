@@ -74,6 +74,14 @@
 - Frontend: nuova tab Admin `ManutenzioneTab` con stato Notion (pallino verde/rosso), count prodotti in cache, timestamp ultimo check, bottoni "Sincronizza ora" / "Svuota cache" / "Verifica stato".
 - Nota: gli altri punti F9 (Admin restructure per area, tipizzazione notifiche per evento) sono già stati esplicitamente rifiutati (P2) o richiedono scelta operativa dell'utente — non toccati per evitare regressioni.
 
+## F10 — Impostazioni Arrivi/Spedizioni realmente configurabili ✅ (18/02/2026)
+- **Backend**: nuove sezioni Pydantic `ArriviSettings` e `SpedizioniSettings` con validazione, aggiunte a `SettingsBody` + `DEFAULT_SETTINGS` + `get_app_settings` (merge automatico).
+  * Arrivi: `allow_new_serials`, `continuous_scan`, `enter_equals_add`, `final_confirmation`, `require_code_for_qty`, `require_quantity`
+  * Spedizioni: `continuous_scan`, `final_check`, `allow_partial_shipment`
+- **Frontend**: `SettingsArriviTab` e `SettingsSpedizioniTab` trasformate da tab info-only a **veri form configurabili** con toggle checkbox, load da `GET /admin/settings`, save via `PUT /admin/settings`, evento `elios:settings-changed` per notificare altri componenti.
+- **Protezioni LOCKED** (icona lucchetto ambra, "Sempre attivo"): prodotto obbligatorio per Ricevi Seriali, verifica Notion, popup Reintegra, verifica seriale in Inventario spedizioni, blocco duplicati, blocco seriale già spedito, verifica disponibilità, blocco quantità insufficiente. Non è possibile disattivarle da UI.
+- **Verificato**: backend restart OK, `/api/time` 200, `python -m py_compile` OK sia server.py che admin_extra_routes.py, frontend compila (0 errori).
+
 ## F8 — Scrittura Seriali su Colonna 16 Inventario Notion + UI Switch disattivato ✅ (17/02/2026)
 - **CORE F8 §3+§13**: dopo CONFERMA ARRIVO i seriali dei prodotti A Seriale vengono ora **scritti nella colonna `SN /codice` dell'Inventario Notion** (colonna 16, tipo rich_text). Prima erano registrati solo nella tabella Entrate/Consegne.
 - Nuova funzione `notion_service.update_inventory_serials(page_id, serials)`:

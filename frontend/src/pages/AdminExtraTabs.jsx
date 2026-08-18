@@ -9,7 +9,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "../components/ui/dialog";
 import {
-  ClockCounterClockwise, MagnifyingGlass, Warning, Broom, Gear, ListMagnifyingGlass, Trash, ArrowClockwise, Globe,
+  ClockCounterClockwise, MagnifyingGlass, Warning, Broom, Gear, ListMagnifyingGlass, Trash, ArrowClockwise, Globe, Lock,
 } from "@phosphor-icons/react";
 
 import { fmtDateTime as fmtDate, useTz } from "../lib/tz";
@@ -381,32 +381,170 @@ export const SettingsScannerTab = () => <SettingsTab filter={["scanner", "dashbo
 export const SettingsSicurezzaTab = () => <SettingsTab filter={["sicurezza", "test_prefix"]} saveLabel="Salva Sicurezza" />;
 
 // F9 §7 — Impostazioni Arrivi (info-only: le regole sono già cablate nella logica esistente).
+// F10 §10 — Impostazioni Arrivi realmente configurabili.
 export function SettingsArriviTab() {
-  return (
-    <div className="space-y-3 max-w-3xl" data-testid="settings-arrivi-tab">
-      <h3 className="font-display text-lg font-bold text-slate-900">Impostazioni Arrivi</h3>
-      <p className="text-sm text-slate-600">Le regole operative degli Arrivi sono cablate nel gestionale per garantire integrità.</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="et-card-elevated p-4"><b>Ricevi Seriali</b><ul className="text-xs mt-2 space-y-1"><li>✓ Prodotto obbligatorio prima del seriale</li><li>✓ Seriali nuovi consentiti</li><li>✓ Scansione continua</li><li>✓ INVIO = acquisisci</li><li>✓ Conferma finale scrive su Notion</li></ul></div>
-        <div className="et-card-elevated p-4"><b>Ricevi Quantità</b><ul className="text-xs mt-2 space-y-1"><li>✓ Codice obbligatorio</li><li>✓ Verifica su Inventario Notion</li><li>✓ Quantità obbligatoria</li><li>✓ Lista temporanea prima della conferma</li></ul></div>
-        <div className="et-card-elevated p-4"><b>Reintegra Seriale</b><ul className="text-xs mt-2 space-y-1"><li>✓ Popup dedicato</li><li>✓ Manuale / scanner / fotocamera</li><li>✓ Verifica su Inventario Notion</li></ul></div>
+  const [settings, setSettings] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const load = async () => {
+    try {
+      const { data } = await axios.get(`${API}/admin/settings`);
+      setSettings(data.arrivi || {});
+    } catch (e) { toast.error("Errore caricamento", { description: formatError(e) }); }
+  };
+  useEffect(() => { load(); }, []);
+  const upd = (k, v) => setSettings((s) => ({ ...s, [k]: v }));
+  const save = async () => {
+    setSaving(true);
+    try {
+      await axios.put(`${API}/admin/settings`, { arrivi: settings });
+      toast.success("Impostazioni Arrivi salvate");
+      window.dispatchEvent(new Event("elios:settings-changed"));
+    } catch (e) { toast.error("Errore salvataggio", { description: formatError(e) }); }
+    finally { setSaving(false); }
+  };
+  if (!settings) return <div className="text-sm text-slate-500">Caricamento…</div>;
+
+  const LockedRow = ({ label, desc }) => (
+    <div className="flex items-start justify-between gap-3 py-2 border-b border-slate-100 last:border-0">
+      <div>
+        <div className="text-sm font-medium text-slate-800">{label} <Lock size={12} className="inline text-amber-600 ml-1" /></div>
+        {desc && <div className="text-xs text-slate-500 mt-0.5">{desc}</div>}
       </div>
-      <div className="rounded-md border border-blue-200 bg-blue-50 text-blue-900 text-xs p-3">Alla <b>Conferma Arrivo</b>: aggiornamento Inventario Notion + registrazione Entrate.</div>
+      <Badge variant="outline" className="border-emerald-300 text-emerald-700 shrink-0">Sempre attivo</Badge>
+    </div>
+  );
+  const Toggle = ({ k, label, desc }) => (
+    <label className="flex items-start justify-between gap-3 py-2 cursor-pointer border-b border-slate-100 last:border-0">
+      <div>
+        <div className="text-sm font-medium text-slate-800">{label}</div>
+        {desc && <div className="text-xs text-slate-500 mt-0.5">{desc}</div>}
+      </div>
+      <input
+        type="checkbox" checked={!!settings[k]}
+        onChange={(e) => upd(k, e.target.checked)}
+        className="h-4 w-4 mt-1 accent-emerald-600"
+        data-testid={`arrivi-${k}-toggle`}
+      />
+    </label>
+  );
+  return (
+    <div className="space-y-4 max-w-3xl" data-testid="settings-arrivi-tab">
+      <div>
+        <h3 className="font-display text-lg font-bold text-slate-900">Impostazioni Arrivi</h3>
+        <p className="text-sm text-slate-600 mt-1">
+          Personalizza il comportamento dei flussi <b>Ricevi Seriali</b>, <b>Ricevi Quantità</b>, <b>Reintegra Seriale</b>.
+          Le protezioni fondamentali (in ambra) sono cablate per integrità del magazzino.
+        </p>
+      </div>
+
+      <div className="et-card-elevated p-4">
+        <div className="text-xs uppercase tracking-wider font-bold text-slate-500 mb-2">Ricevi Seriali</div>
+        <LockedRow label="Prodotto obbligatorio prima del seriale" desc="Il prodotto deve essere selezionato prima di scansionare seriali." />
+        <Toggle k="allow_new_serials" label="Consenti seriali mai visti prima" desc="Se disattivato, blocca l'arrivo di seriali sconosciuti." />
+        <Toggle k="continuous_scan" label="Scansione continua" desc="Dopo INVIO/scan, focus automatico sul prossimo seriale." />
+        <Toggle k="enter_equals_add" label="INVIO = acquisisci e aggiungi" desc="Nessun bottone CERCA: l'INVIO aggiunge direttamente." />
+        <Toggle k="final_confirmation" label="Conferma finale prima di scrivere su Notion" desc="Richiedi un dialog di conferma prima di CONFERMA ARRIVO." />
+      </div>
+
+      <div className="et-card-elevated p-4">
+        <div className="text-xs uppercase tracking-wider font-bold text-slate-500 mb-2">Ricevi Quantità</div>
+        <Toggle k="require_code_for_qty" label="Codice prodotto obbligatorio" desc="Ricevi Quantità richiede sempre un codice riconosciuto." />
+        <Toggle k="require_quantity" label="Quantità obbligatoria" desc="Rifiuta l'aggiunta se la quantità è 0 o vuota." />
+        <LockedRow label="Verifica sul Inventario Notion" desc="Il codice viene sempre verificato sull'Inventario Notion." />
+      </div>
+
+      <div className="et-card-elevated p-4">
+        <div className="text-xs uppercase tracking-wider font-bold text-slate-500 mb-2">Reintegra Seriale</div>
+        <LockedRow label="Popup dedicato con manuale/scanner/fotocamera" desc="Il flusso di reintegro passa sempre dal popup." />
+        <LockedRow label="Verifica sull'Inventario Notion" desc="Il seriale viene sempre verificato sull'Inventario prima del reintegro." />
+      </div>
+
+      <div className="flex justify-end">
+        <Button onClick={save} disabled={saving} data-testid="save-arrivi-settings-btn">
+          {saving ? "Salvataggio…" : "Salva Impostazioni Arrivi"}
+        </Button>
+      </div>
     </div>
   );
 }
 
-// F9 §8 — Impostazioni Spedizioni (info-only).
+// F10 §10 — Impostazioni Spedizioni realmente configurabili.
 export function SettingsSpedizioniTab() {
-  return (
-    <div className="space-y-3 max-w-3xl" data-testid="settings-spedizioni-tab">
-      <h3 className="font-display text-lg font-bold text-slate-900">Impostazioni Spedizioni</h3>
-      <p className="text-sm text-slate-600">Le regole operative delle Spedizioni sono cablate nel gestionale per garantire integrità.</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="et-card-elevated p-4"><b>Spedisci Seriali</b><ul className="text-xs mt-2 space-y-1"><li>✓ Verifica seriale presente in Inventario</li><li>✓ Blocco duplicati</li><li>✓ Blocco seriale già spedito</li><li>✓ Scansione continua</li></ul></div>
-        <div className="et-card-elevated p-4"><b>Spedisci Quantità</b><ul className="text-xs mt-2 space-y-1"><li>✓ Verifica disponibilità</li><li>✓ Blocco quantità insufficiente</li><li>✓ Lista temporanea prima della conferma</li></ul></div>
+  const [settings, setSettings] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const load = async () => {
+    try {
+      const { data } = await axios.get(`${API}/admin/settings`);
+      setSettings(data.spedizioni || {});
+    } catch (e) { toast.error("Errore caricamento", { description: formatError(e) }); }
+  };
+  useEffect(() => { load(); }, []);
+  const upd = (k, v) => setSettings((s) => ({ ...s, [k]: v }));
+  const save = async () => {
+    setSaving(true);
+    try {
+      await axios.put(`${API}/admin/settings`, { spedizioni: settings });
+      toast.success("Impostazioni Spedizioni salvate");
+      window.dispatchEvent(new Event("elios:settings-changed"));
+    } catch (e) { toast.error("Errore salvataggio", { description: formatError(e) }); }
+    finally { setSaving(false); }
+  };
+  if (!settings) return <div className="text-sm text-slate-500">Caricamento…</div>;
+
+  const LockedRow = ({ label, desc }) => (
+    <div className="flex items-start justify-between gap-3 py-2 border-b border-slate-100 last:border-0">
+      <div>
+        <div className="text-sm font-medium text-slate-800">{label} <Lock size={12} className="inline text-amber-600 ml-1" /></div>
+        {desc && <div className="text-xs text-slate-500 mt-0.5">{desc}</div>}
       </div>
-      <div className="rounded-md border border-blue-200 bg-blue-50 text-blue-900 text-xs p-3">Alla <b>Conferma Spedizione</b>: aggiornamento Inventario Notion + registrazione Uscite.</div>
+      <Badge variant="outline" className="border-emerald-300 text-emerald-700 shrink-0">Sempre attivo</Badge>
+    </div>
+  );
+  const Toggle = ({ k, label, desc }) => (
+    <label className="flex items-start justify-between gap-3 py-2 cursor-pointer border-b border-slate-100 last:border-0">
+      <div>
+        <div className="text-sm font-medium text-slate-800">{label}</div>
+        {desc && <div className="text-xs text-slate-500 mt-0.5">{desc}</div>}
+      </div>
+      <input
+        type="checkbox" checked={!!settings[k]}
+        onChange={(e) => upd(k, e.target.checked)}
+        className="h-4 w-4 mt-1 accent-emerald-600"
+        data-testid={`spedizioni-${k}-toggle`}
+      />
+    </label>
+  );
+  return (
+    <div className="space-y-4 max-w-3xl" data-testid="settings-spedizioni-tab">
+      <div>
+        <h3 className="font-display text-lg font-bold text-slate-900">Impostazioni Spedizioni</h3>
+        <p className="text-sm text-slate-600 mt-1">
+          Personalizza il comportamento dei flussi <b>Spedisci Seriali</b> e <b>Spedisci Quantità</b>.
+          Le protezioni critiche (in ambra) non sono disattivabili per proteggere l'integrità del magazzino.
+        </p>
+      </div>
+
+      <div className="et-card-elevated p-4">
+        <div className="text-xs uppercase tracking-wider font-bold text-slate-500 mb-2">Spedisci Seriali</div>
+        <LockedRow label="Verifica seriale presente in Inventario" desc="Blocca la spedizione di seriali non presenti nel magazzino." />
+        <LockedRow label="Blocco duplicati nella stessa spedizione" desc="Un seriale non può comparire due volte nella stessa spedizione." />
+        <LockedRow label="Blocco seriale già spedito" desc="Un seriale già uscito non può essere spedito di nuovo." />
+        <Toggle k="continuous_scan" label="Scansione continua" desc="Dopo la verifica torna automaticamente il focus alla scansione successiva." />
+        <Toggle k="final_check" label="Controllo finale prima di CONFERMA" desc="Ricontrolla disponibilità e integrità prima della scrittura Notion." />
+      </div>
+
+      <div className="et-card-elevated p-4">
+        <div className="text-xs uppercase tracking-wider font-bold text-slate-500 mb-2">Spedisci Quantità</div>
+        <LockedRow label="Verifica disponibilità sul Inventario Notion" desc="La disponibilità è sempre verificata prima di aggiungere alla lista." />
+        <LockedRow label="Blocco quantità insufficiente" desc="Non è possibile confermare più pezzi di quelli disponibili." />
+        <Toggle k="allow_partial_shipment" label="Consenti spedizioni parziali" desc="Se disponibile solo parte della quantità richiesta, procedi con quella disponibile." />
+      </div>
+
+      <div className="flex justify-end">
+        <Button onClick={save} disabled={saving} data-testid="save-spedizioni-settings-btn">
+          {saving ? "Salvataggio…" : "Salva Impostazioni Spedizioni"}
+        </Button>
+      </div>
     </div>
   );
 }
