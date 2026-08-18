@@ -354,6 +354,8 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             ("ricerca", body.ricerca),
             ("movimenti", body.movimenti),
             ("sicurezza", body.sicurezza),
+            ("arrivi", body.arrivi),
+            ("spedizioni", body.spedizioni),
             ("general", body.general),
         ]:
             if section_body is None:
