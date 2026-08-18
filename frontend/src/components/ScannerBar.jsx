@@ -28,9 +28,15 @@ async function fetchScannerCfg() {
       searchOnType: data?.ricerca?.search_on_type !== false, // default true
       maxResults: Math.max(1, parseInt(data?.ricerca?.max_results || 8, 10)),
       partial: data?.ricerca?.partial_match !== false, // default true
+      // F8 §1 — collegamento reale delle impostazioni operative
+      scannerEnabled: data?.scanner?.scanner_enabled !== false,   // default ON
+      cameraEnabled: data?.scanner?.camera_enabled !== false,     // default ON
+      enterEqualsAdd: data?.scanner?.enter_equals_add !== false,  // default ON
+      preventDoubleScan: data?.scanner?.prevent_double_scan !== false, // default ON
+      minScanIntervalMs: Math.max(0, parseInt(data?.scanner?.min_scan_interval_ms ?? 300, 10)),
     };
   } catch {
-    _cachedScannerCfg = { green: 3000, red: 3000, autofocus: true, autoselect: false, searchOnType: true, maxResults: 8, partial: true };
+    _cachedScannerCfg = { green: 3000, red: 3000, autofocus: true, autoselect: false, searchOnType: true, maxResults: 8, partial: true, scannerEnabled: true, cameraEnabled: true, enterEqualsAdd: true, preventDoubleScan: true, minScanIntervalMs: 300 };
   }
   return _cachedScannerCfg;
 }
@@ -55,17 +61,6 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint,
   const [open, setOpen] = useState(false); // dropdown visibility
   const [hoverIdx, setHoverIdx] = useState(-1);
   const [serverHit, setServerHit] = useState(null); // {item, status, ...} for SN/barcode found on Notion
-  const [cfg, setCfg] = useState({ autofocus: true, autoselect: false, searchOnType: true, maxResults: 8, partial: true });
-  const inputRef = useRef(null);
-  const containerRef = useRef(null);
-  const { searchLocal } = useInventoryCtx();
-
-  useEffect(() => {
-    fetchScannerCfg().then((c) => setCfg({
-      autofocus: c.autofocus, autoselect: c.autoselect,
-      searchOnType: c.searchOnType, maxResults: c.maxResults, partial: c.partial,
-    }));
-  }, []);
 
   useEffect(() => {
     if (cfg.autofocus && inputRef.current) inputRef.current.focus();
@@ -164,6 +159,21 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint,
   const commit = (code) => {
     const value = (code || "").trim();
     if (!value) return;
+    // F8 §1 — Prevenzione doppia scansione + intervallo minimo (Admin → Impostazioni → Scanner)
+    if (cfg.preventDoubleScan) {
+      const now = Date.now();
+      const gap = now - lastCommitRef.current.at;
+      if (
+        lastCommitRef.current.value === value &&
+        gap < Math.max(300, cfg.minScanIntervalMs || 300)
+      ) {
+        // scan duplicato ravvicinato → ignora
+        setBuffer("");
+        setTimeout(() => inputRef.current?.focus(), 0);
+        return;
+      }
+      lastCommitRef.current = { value, at: now };
+    }
     onScanned(value);
     setBuffer("");
     setServerHit(null);
@@ -210,6 +220,14 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint,
     }
     if (e.key === "Enter") {
       e.preventDefault();
+      // F8 §1 — se "INVIO = acquisisci" è OFF, ENTER non aggiunge automaticamente:
+      // permette solo di scorrere/selezionare dai suggerimenti. Il bottone CERCA resta.
+      if (!cfg.enterEqualsAdd) {
+        if (open && hoverIdx >= 0 && suggestions[hoverIdx]) {
+          selectSuggestion(suggestions[hoverIdx]);
+        }
+        return;
+      }
       if (open && hoverIdx >= 0 && suggestions[hoverIdx]) {
         selectSuggestion(suggestions[hoverIdx]);
       } else if (cfg.autoselect && suggestions.length === 1) {
@@ -227,6 +245,11 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint,
       className="rounded-md bg-white border border-slate-200 p-4 relative"
       data-testid="scanner-bar"
     >
+      {!cfg.scannerEnabled && (
+        <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-2" data-testid="scanner-disabled-banner">
+          Scanner disabilitato da Admin → Impostazioni → Scanner. Puoi ancora digitare manualmente.
+        </div>
+      )}
       <div className="text-[10px] tracking-[0.2em] uppercase text-slate-500 font-semibold mb-2">
         Inserisci o scansiona prodotto
       </div>
@@ -367,6 +390,7 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint,
           <MagnifyingGlass size={16} weight="bold" />
           <span>{searchLabel || "CERCA"}</span>
         </button>
+        {cfg.cameraEnabled && (
         <button
           type="button"
           onClick={() => setCameraOpen(true)}
@@ -377,6 +401,7 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint,
         >
           <Camera size={18} />
         </button>
+        )}
         <button
           type="button"
           onClick={() => inputRef.current?.focus()}
