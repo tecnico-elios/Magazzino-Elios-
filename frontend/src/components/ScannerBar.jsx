@@ -61,6 +61,27 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint,
   const [open, setOpen] = useState(false); // dropdown visibility
   const [hoverIdx, setHoverIdx] = useState(-1);
   const [serverHit, setServerHit] = useState(null); // {item, status, ...} for SN/barcode found on Notion
+  const [cfg, setCfg] = useState({ autofocus: true, autoselect: false, searchOnType: true, maxResults: 8, partial: true, scannerEnabled: true, cameraEnabled: true, enterEqualsAdd: true, preventDoubleScan: true, minScanIntervalMs: 300 });
+  const inputRef = useRef(null);
+  const containerRef = useRef(null);
+  const lastCommitRef = useRef({ value: "", at: 0 });
+  const { searchLocal } = useInventoryCtx();
+
+  useEffect(() => {
+    const apply = (c) => setCfg({
+      autofocus: c.autofocus, autoselect: c.autoselect,
+      searchOnType: c.searchOnType, maxResults: c.maxResults, partial: c.partial,
+      scannerEnabled: c.scannerEnabled, cameraEnabled: c.cameraEnabled,
+      enterEqualsAdd: c.enterEqualsAdd, preventDoubleScan: c.preventDoubleScan,
+      minScanIntervalMs: c.minScanIntervalMs,
+    });
+    fetchScannerCfg().then(apply);
+    const onChange = () => fetchScannerCfg().then(apply);
+    if (typeof window !== "undefined") {
+      window.addEventListener("elios:settings-changed", onChange);
+      return () => window.removeEventListener("elios:settings-changed", onChange);
+    }
+  }, []);
 
   useEffect(() => {
     if (cfg.autofocus && inputRef.current) inputRef.current.focus();

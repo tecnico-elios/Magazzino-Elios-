@@ -904,18 +904,18 @@ export default function AdminPage() {
         <div className="flex flex-col md:flex-row gap-4 md:gap-6" data-testid="admin-layout">
           {/* Sidebar */}
           <aside
-            className="md:w-64 md:shrink-0 md:sticky md:top-24 md:self-start bg-white border border-slate-200 rounded-xl p-3 shadow-sm"
+            className="md:w-64 md:shrink-0 md:sticky md:top-24 md:self-start bg-white border border-slate-200 rounded-xl p-2 md:p-3 shadow-sm"
             data-testid="admin-sidebar"
           >
-            <nav className="space-y-3">
+            <nav className="flex md:flex-col gap-1 md:gap-3 overflow-x-auto md:overflow-visible -mx-2 md:mx-0 px-2 md:px-0 pb-1 md:pb-0 scrollbar-thin">
               {groups.map((g, gi) => (
-                <div key={gi}>
+                <div key={gi} className="md:contents shrink-0">
                   {g.label && (
-                    <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-[0.15em] font-bold text-slate-400">
+                    <div className="hidden md:block px-3 pt-2 pb-1 text-[10px] uppercase tracking-[0.15em] font-bold text-slate-400">
                       {g.label}
                     </div>
                   )}
-                  <div className="space-y-0.5">
+                  <div className="flex md:flex-col gap-1 md:gap-0.5 md:space-y-0.5 shrink-0">
                     {g.items.map((it) => {
                       const Icon = it.icon;
                       const isActive = active === it.key;
@@ -925,14 +925,14 @@ export default function AdminPage() {
                           type="button"
                           onClick={() => setActive(it.key)}
                           data-testid={`sidebar-${it.key}`}
-                          className={`w-full text-left px-3 py-2 rounded-lg text-sm inline-flex items-center gap-2 transition-colors ${
+                          className={`shrink-0 md:w-full text-left px-3 py-2 rounded-lg text-sm inline-flex items-center gap-2 whitespace-nowrap transition-colors ${
                             isActive
                               ? "bg-slate-900 text-white shadow-sm"
                               : "text-slate-700 hover:bg-slate-100"
                           }`}
                         >
                           <Icon size={16} className={isActive ? "text-amber-300" : "text-slate-400"} />
-                          <span className="truncate">{it.label}</span>
+                          <span className="md:truncate">{it.label}</span>
                         </button>
                       );
                     })}

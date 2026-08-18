@@ -47,8 +47,8 @@ export function AuditLogTab() {
           <ArrowClockwise size={14} className={loading ? "animate-spin" : ""} />
         </Button>
       </div>
-      <div className="bg-white border border-slate-200 rounded-md overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
+        <table className="w-full min-w-[720px] text-sm">
           <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
             <tr>
               <th className="text-left px-3 py-2">Quando</th>
@@ -900,8 +900,8 @@ export function ProductsAdminTab() {
           oppure <b>Nuovo Prodotto</b> per crearli manualmente.
         </div>
       ) : (
-        <div className="bg-white border border-slate-200 rounded-md overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
+          <table className="w-full min-w-[680px] text-sm">
             <thead className="bg-slate-50 text-slate-600 text-xs uppercase">
               <tr>
                 <th className="text-left px-3 py-2">Nome</th>
