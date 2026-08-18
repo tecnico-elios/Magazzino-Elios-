@@ -13,7 +13,7 @@ import {
   CardTitle,
   CardDescription,
 } from "../components/ui/card";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
+import { Tabs as _TabsUnused, TabsList as _TabsListUnused, TabsTrigger as _TabsTriggerUnused, TabsContent as _TabsContentUnused } from "../components/ui/tabs"; // eslint-disable-line no-unused-vars
 import { Badge } from "../components/ui/badge";
 import { Switch } from "../components/ui/switch";
 import {
@@ -821,10 +821,59 @@ function HistoryTab() {
 
 // ---------- Root ----------
 export default function AdminPage() {
+  const [active, setActive] = useState("settings-general");
+
+  // Struttura sidebar F11 §1 — 3 gruppi principali.
+  // Ogni voce: { key, label, icon, comp }
+  const groups = [
+    {
+      label: null, // gruppo senza titolo
+      items: [
+        { key: "products", label: "Gestione Prodotti", icon: Package, Comp: ProductsAdminTab },
+      ],
+    },
+    {
+      label: "Impostazioni",
+      items: [
+        { key: "settings-general", label: "Generali", icon: Gear, Comp: SettingsGeneralTab },
+        { key: "settings-magazzino", label: "Magazzino", icon: Warning, Comp: SettingsMagazzinoTab },
+        { key: "settings-scanner", label: "Scanner e Acquisizione", icon: ListMagnifyingGlass, Comp: SettingsScannerTab },
+        { key: "settings-arrivi", label: "Arrivi", icon: Gear, Comp: SettingsArriviTab },
+        { key: "settings-spedizioni", label: "Spedizioni", icon: Gear, Comp: SettingsSpedizioniTab },
+        { key: "recipients", label: "Notifiche", icon: Envelope, Comp: RecipientsTab },
+        { key: "notion", label: "Notion", icon: ArrowsClockwise, Comp: NotionSettingsTab },
+        { key: "inventory-source", label: "Fonte Inventario", icon: Package, Comp: InventorySourceTab },
+      ],
+    },
+    {
+      label: "Amministrazione",
+      items: [
+        { key: "audit", label: "Registro Attività", icon: ClockCounterClockwise, Comp: AuditLogTab },
+        { key: "maintenance", label: "Sistema / Manutenzione", icon: ArrowsClockwise, Comp: ManutenzioneTab },
+      ],
+    },
+    {
+      label: "Strumenti",
+      items: [
+        { key: "history", label: "Storico", icon: ClockCounterClockwise, Comp: HistoryTab },
+        { key: "global-search", label: "Ricerca globale", icon: MagnifyingGlass, Comp: GlobalSearchTab },
+        { key: "serial-history", label: "Storico SN", icon: ListMagnifyingGlass, Comp: SerialHistoryTab },
+        { key: "sessions", label: "Sessioni", icon: UsersFour, Comp: SessionsTab },
+        { key: "cleanup", label: "Cleanup TEST", icon: Broom, Comp: CleanupTestTab },
+      ],
+    },
+  ];
+
+  // Trova componente attivo
+  const activeItem = groups
+    .flatMap((g) => g.items)
+    .find((i) => i.key === active) || groups[1].items[0];
+  const ActiveComp = activeItem.Comp;
+
   return (
     <div className="min-h-screen bg-slate-50" data-testid="admin-page">
       <header className="et-header-dark sticky top-0 z-30">
-        <div className="max-w-6xl mx-auto px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-2 flex-wrap">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 sm:flex-none">
             <Link
               to="/"
@@ -850,78 +899,62 @@ export default function AdminPage() {
           </Link>
         </div>
       </header>
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
-        <Tabs defaultValue="settings-general">
-          <TabsList
-            className="mb-6 h-auto flex flex-nowrap w-full max-w-full justify-start overflow-x-auto scrollbar-thin bg-transparent p-0 gap-1 sm:bg-muted sm:p-1 sm:flex-wrap sm:overflow-visible"
-            data-testid="admin-tabs-list"
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+        <div className="flex flex-col md:flex-row gap-4 md:gap-6" data-testid="admin-layout">
+          {/* Sidebar */}
+          <aside
+            className="md:w-64 md:shrink-0 md:sticky md:top-24 md:self-start bg-white border border-slate-200 rounded-xl p-3 shadow-sm"
+            data-testid="admin-sidebar"
           >
-            <TabsTrigger value="products" data-testid="tab-products" className="shrink-0">
-              <Package size={16} className="mr-1" /> Gestione Prodotti
-            </TabsTrigger>
-            <TabsTrigger value="settings-general" data-testid="tab-general" className="shrink-0">
-              <Gear size={16} className="mr-1" /> Generali
-            </TabsTrigger>
-            <TabsTrigger value="settings-magazzino" data-testid="tab-magazzino" className="shrink-0">
-              <Warning size={16} className="mr-1" /> Magazzino
-            </TabsTrigger>
-            <TabsTrigger value="settings-scanner" data-testid="tab-scanner" className="shrink-0">
-              <ListMagnifyingGlass size={16} className="mr-1" /> Scanner
-            </TabsTrigger>
-            <TabsTrigger value="settings-arrivi" data-testid="tab-set-arrivi" className="shrink-0">
-              <Gear size={16} className="mr-1" /> Arrivi
-            </TabsTrigger>
-            <TabsTrigger value="settings-spedizioni" data-testid="tab-set-spedizioni" className="shrink-0">
-              <Gear size={16} className="mr-1" /> Spedizioni
-            </TabsTrigger>
-            <TabsTrigger value="recipients" data-testid="tab-recipients" className="shrink-0">
-              <Envelope size={16} className="mr-1" /> Notifiche
-            </TabsTrigger>
-            <TabsTrigger value="notion" data-testid="tab-notion" className="shrink-0">
-              <ArrowsClockwise size={16} className="mr-1" /> Notion
-            </TabsTrigger>
-            <TabsTrigger value="inventory-source" data-testid="tab-inventory-source" className="shrink-0">
-              <Package size={16} className="mr-1" /> Fonte Inventario
-            </TabsTrigger>
-            <TabsTrigger value="audit" data-testid="tab-audit" className="shrink-0">
-              <ClockCounterClockwise size={16} className="mr-1" /> Registro Attività
-            </TabsTrigger>
-            <TabsTrigger value="maintenance" data-testid="tab-maintenance" className="shrink-0">
-              <ArrowsClockwise size={16} className="mr-1" /> Sistema / Manutenzione
-            </TabsTrigger>
-            <TabsTrigger value="history" data-testid="tab-history" className="shrink-0">
-              <ClockCounterClockwise size={16} className="mr-1" /> Storico
-            </TabsTrigger>
-            <TabsTrigger value="global-search" data-testid="tab-global-search" className="shrink-0">
-              <MagnifyingGlass size={16} className="mr-1" /> Ricerca
-            </TabsTrigger>
-            <TabsTrigger value="serial-history" data-testid="tab-serial-history" className="shrink-0">
-              <ListMagnifyingGlass size={16} className="mr-1" /> Storico SN
-            </TabsTrigger>
-            <TabsTrigger value="sessions" data-testid="tab-sessions" className="shrink-0">
-              <UsersFour size={16} className="mr-1" /> Sessioni
-            </TabsTrigger>
-            <TabsTrigger value="cleanup" data-testid="tab-cleanup" className="shrink-0">
-              <Broom size={16} className="mr-1" /> Cleanup TEST
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="products"><ProductsAdminTab /></TabsContent>
-          <TabsContent value="settings-general"><SettingsGeneralTab /></TabsContent>
-          <TabsContent value="settings-magazzino"><SettingsMagazzinoTab /></TabsContent>
-          <TabsContent value="settings-scanner"><SettingsScannerTab /></TabsContent>
-          <TabsContent value="settings-arrivi"><SettingsArriviTab /></TabsContent>
-          <TabsContent value="settings-spedizioni"><SettingsSpedizioniTab /></TabsContent>
-          <TabsContent value="recipients"><RecipientsTab /></TabsContent>
-          <TabsContent value="notion"><NotionSettingsTab /></TabsContent>
-          <TabsContent value="inventory-source"><InventorySourceTab /></TabsContent>
-          <TabsContent value="audit"><AuditLogTab /></TabsContent>
-          <TabsContent value="maintenance"><ManutenzioneTab /></TabsContent>
-          <TabsContent value="history"><HistoryTab /></TabsContent>
-          <TabsContent value="global-search"><GlobalSearchTab /></TabsContent>
-          <TabsContent value="serial-history"><SerialHistoryTab /></TabsContent>
-          <TabsContent value="sessions"><SessionsTab /></TabsContent>
-          <TabsContent value="cleanup"><CleanupTestTab /></TabsContent>
-        </Tabs>
+            <nav className="space-y-3">
+              {groups.map((g, gi) => (
+                <div key={gi}>
+                  {g.label && (
+                    <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-[0.15em] font-bold text-slate-400">
+                      {g.label}
+                    </div>
+                  )}
+                  <div className="space-y-0.5">
+                    {g.items.map((it) => {
+                      const Icon = it.icon;
+                      const isActive = active === it.key;
+                      return (
+                        <button
+                          key={it.key}
+                          type="button"
+                          onClick={() => setActive(it.key)}
+                          data-testid={`sidebar-${it.key}`}
+                          className={`w-full text-left px-3 py-2 rounded-lg text-sm inline-flex items-center gap-2 transition-colors ${
+                            isActive
+                              ? "bg-slate-900 text-white shadow-sm"
+                              : "text-slate-700 hover:bg-slate-100"
+                          }`}
+                        >
+                          <Icon size={16} className={isActive ? "text-amber-300" : "text-slate-400"} />
+                          <span className="truncate">{it.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </nav>
+          </aside>
+
+          {/* Content */}
+          <section className="flex-1 min-w-0 bg-white border border-slate-200 rounded-xl p-4 sm:p-6 shadow-sm" data-testid="admin-content">
+            <div className="mb-4 pb-3 border-b border-slate-100">
+              <div className="text-[10px] uppercase tracking-[0.15em] font-bold text-amber-600">
+                {(groups.find((g) => g.items.some((i) => i.key === active)) || {}).label || "Admin"}
+              </div>
+              <h2 className="font-display text-xl sm:text-2xl font-bold text-slate-900 mt-0.5">
+                {activeItem.label}
+              </h2>
+            </div>
+            <ActiveComp />
+          </section>
+        </div>
       </main>
     </div>
   );

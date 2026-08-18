@@ -74,6 +74,19 @@
 - Frontend: nuova tab Admin `ManutenzioneTab` con stato Notion (pallino verde/rosso), count prodotti in cache, timestamp ultimo check, bottoni "Sincronizza ora" / "Svuota cache" / "Verifica stato".
 - Nota: gli altri punti F9 (Admin restructure per area, tipizzazione notifiche per evento) sono già stati esplicitamente rifiutati (P2) o richiedono scelta operativa dell'utente — non toccati per evitare regressioni.
 
+## F11 — Admin Impostazioni ristrutturato in Sidebar+Content ✅ (18/02/2026)
+- **AdminPage.jsx** completamente ridisegnato: rimosso il TabsList orizzontale piatto ("lista di 16 tab" criticata dall'utente) → **layout Sidebar+Content professionale** con navigazione raggruppata per aree.
+- **Struttura sidebar** (F11 §1) in 4 gruppi con etichette maiuscole:
+  * (senza titolo) — Gestione Prodotti
+  * **Impostazioni** — Generali, Magazzino, Scanner e Acquisizione, Arrivi, Spedizioni, Notifiche, Notion, Fonte Inventario
+  * **Amministrazione** — Registro Attività, Sistema / Manutenzione
+  * **Strumenti** — Storico, Ricerca globale, Storico SN, Sessioni, Cleanup TEST
+- Bottone attivo: navy scuro + accent amber sull'icona. Sidebar sticky su desktop (`md:sticky md:top-24`).
+- **Header pannello content**: eyebrow amber con nome gruppo + titolo sezione grande. Card white con border+shadow.
+- **useState** invece di Radix Tabs → rendering condizionale del componente attivo. Nessun cambio ai componenti figli (tutti mantenuti).
+- **Verificato**: frontend compila (0 errori runtime), login page 0 errori console, tutti i data-testid preservati (`sidebar-{key}` sui nuovi bottoni).
+- **Nessun refactoring**: `AdminExtraTabs.jsx`, `AdminUsersPage.jsx`, pagine operative (Arrivi/Spedizioni/Inventario/Movimenti) e backend NON toccati.
+
 ## F10 — Impostazioni Arrivi/Spedizioni realmente configurabili ✅ (18/02/2026)
 - **Backend**: nuove sezioni Pydantic `ArriviSettings` e `SpedizioniSettings` con validazione, aggiunte a `SettingsBody` + `DEFAULT_SETTINGS` + `get_app_settings` (merge automatico).
   * Arrivi: `allow_new_serials`, `continuous_scan`, `enter_equals_add`, `final_confirmation`, `require_code_for_qty`, `require_quantity`
