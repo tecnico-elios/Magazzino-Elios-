@@ -31,6 +31,15 @@ logger = logging.getLogger(__name__)
 
 class ScannerSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
+    # F11 — impostazioni globali scanner
+    scanner_enabled: Optional[bool] = None
+    camera_enabled: Optional[bool] = None
+    continuous_scan: Optional[bool] = None           # scansione continua globale
+    auto_acquire: Optional[bool] = None              # acquisizione automatica
+    enter_equals_add: Optional[bool] = None          # INVIO = aggiungi
+    prevent_double_scan: Optional[bool] = None       # blocca doppia scansione ravvicinata
+    min_scan_interval_ms: Optional[int] = Field(default=None, ge=0, le=5000)
+    error_behavior: Optional[str] = Field(default=None, pattern="^(retry|block|skip)$")
     autofocus: Optional[bool] = None
     feedback_green_ms: Optional[int] = Field(default=None, ge=200, le=10000)
     feedback_red_ms: Optional[int] = Field(default=None, ge=200, le=10000)
@@ -47,8 +56,13 @@ class DashboardSettings(BaseModel):
 class MagazzinoSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
     low_stock_threshold: Optional[int] = Field(default=None, ge=0, le=1000)
+    near_empty_threshold: Optional[int] = Field(default=None, ge=0, le=1000)
     warn_low_stock: Optional[bool] = None
     warn_out_of_stock: Optional[bool] = None
+    out_of_stock_behavior: Optional[str] = Field(default=None, pattern="^(block|warn|ignore)$")
+    unconfigured_product_behavior: Optional[str] = Field(default=None, pattern="^(block|warn|ignore)$")
+    prevent_duplicates: Optional[bool] = None
+    allow_partial_shipment: Optional[bool] = None
 
 
 class RicercaSettings(BaseModel):
@@ -107,6 +121,16 @@ SUPPORTED_TIMEZONES = [
 
 class GeneralSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
+    # F11 — nuove impostazioni gestionale
+    app_name: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    company_name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    logo_url: Optional[str] = Field(default=None, max_length=500)
+    language: Optional[str] = Field(default=None, pattern="^(it|en)$")
+    date_format: Optional[str] = Field(default=None, pattern="^(DD/MM/YYYY|YYYY-MM-DD|MM/DD/YYYY)$")
+    time_format: Optional[str] = Field(default=None, pattern="^(24h|12h)$")
+    primary_color: Optional[str] = Field(default=None, pattern="^#[0-9a-fA-F]{6}$")
+    auto_refresh_enabled: Optional[bool] = None
+    confirm_important_ops: Optional[bool] = None
     timezone: Optional[str] = Field(default=None, min_length=2, max_length=64)
     inventory_source: Optional[str] = Field(default=None, pattern="^(notion|gestionale)$")
 
@@ -146,6 +170,14 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "feedback_seconds": 3,
     # F7 nested
     "scanner": {
+        "scanner_enabled": True,
+        "camera_enabled": True,
+        "continuous_scan": True,
+        "auto_acquire": True,
+        "enter_equals_add": True,
+        "prevent_double_scan": True,
+        "min_scan_interval_ms": 300,
+        "error_behavior": "retry",
         "autofocus": True,
         "feedback_green_ms": 3000,
         "feedback_red_ms": 3000,
@@ -158,8 +190,13 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     },
     "magazzino": {
         "low_stock_threshold": 2,
+        "near_empty_threshold": 5,
         "warn_low_stock": True,
         "warn_out_of_stock": True,
+        "out_of_stock_behavior": "warn",   # block | warn | ignore
+        "unconfigured_product_behavior": "block",
+        "prevent_duplicates": True,
+        "allow_partial_shipment": False,
     },
     "ricerca": {
         "search_on_type": True,
@@ -190,6 +227,15 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         "allow_partial_shipment": False,
     },
     "general": {
+        "app_name": "Magazzino Elios Tech",
+        "company_name": "Elios Tech S.r.l.",
+        "logo_url": "",
+        "language": "it",
+        "date_format": "DD/MM/YYYY",
+        "time_format": "24h",
+        "primary_color": "#0f172a",
+        "auto_refresh_enabled": False,
+        "confirm_important_ops": True,
         "timezone": "Europe/Rome",         # IANA — gestisce auto ora legale/solare
         "inventory_source": "notion",       # 'notion' | 'gestionale' — switch fonte inventario
     },

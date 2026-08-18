@@ -191,14 +191,62 @@ export function SettingsTab({ filter, saveLabel }) {
     <div className="space-y-4 max-w-3xl" data-testid="settings-tab">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {show("scanner") && (
-        <SettingsSection title="Scanner" icon={ListMagnifyingGlass}>
-          <SettingSwitch
-            label="Focus automatico"
+        <SettingsSection title="Scanner e Acquisizione" icon={ListMagnifyingGlass}>
+          <SettingSwitch label="Scanner ON/OFF"
+            hint="Abilita/disabilita globalmente lo scanner (fisico + fotocamera)"
+            checked={s.scanner?.scanner_enabled}
+            onChange={(v) => setSection("scanner", { scanner_enabled: v })}
+            testid="set-scanner-enabled" />
+          <SettingSwitch label="Fotocamera ON/OFF"
+            hint="Abilita l'uso della fotocamera per la scansione"
+            checked={s.scanner?.camera_enabled}
+            onChange={(v) => setSection("scanner", { camera_enabled: v })}
+            testid="set-scanner-camera" />
+          <SettingSwitch label="Scansione continua"
+            hint="Dopo INVIO/scan il focus va al prossimo campo automaticamente"
+            checked={s.scanner?.continuous_scan}
+            onChange={(v) => setSection("scanner", { continuous_scan: v })}
+            testid="set-scanner-continuous" />
+          <SettingSwitch label="Acquisizione automatica"
+            hint="Aggiunge il valore appena la lettura è validata (no click)"
+            checked={s.scanner?.auto_acquire}
+            onChange={(v) => setSection("scanner", { auto_acquire: v })}
+            testid="set-scanner-autoacquire" />
+          <SettingSwitch label="INVIO = acquisisci / aggiungi"
+            hint="Il tasto INVIO aggiunge direttamente il valore (no bottone CERCA)"
+            checked={s.scanner?.enter_equals_add}
+            onChange={(v) => setSection("scanner", { enter_equals_add: v })}
+            testid="set-scanner-enter" />
+          <SettingSwitch label="Prevenzione doppia scansione"
+            hint="Ignora scansioni ripetute dello stesso codice ravvicinate"
+            checked={s.scanner?.prevent_double_scan}
+            onChange={(v) => setSection("scanner", { prevent_double_scan: v })}
+            testid="set-scanner-nodup" />
+          <SettingNumber label="Intervallo minimo tra scansioni"
+            hint="Tempo di attesa fra due scansioni consecutive"
+            value={s.scanner?.min_scan_interval_ms} min={0} max={5000} step={50} unit="ms"
+            onChange={(v) => setSection("scanner", { min_scan_interval_ms: v })}
+            testid="set-scanner-interval" />
+          <SettingSwitch label="Focus automatico"
             hint="Riporta sempre il cursore sul campo scanner"
             checked={s.scanner?.autofocus}
             onChange={(v) => setSection("scanner", { autofocus: v })}
             testid="set-scanner-autofocus"
           />
+          <div className="py-2">
+            <Label className="text-sm font-semibold text-slate-800">Comportamento dopo errore</Label>
+            <div className="text-[11px] text-slate-500 mb-1">Come reagire quando la scansione fallisce</div>
+            <select
+              value={s.scanner?.error_behavior || "retry"}
+              onChange={(e) => setSection("scanner", { error_behavior: e.target.value })}
+              className="h-10 w-full max-w-[240px] rounded-md border border-slate-200 bg-white px-3 text-sm"
+              data-testid="set-scanner-errbehavior"
+            >
+              <option value="retry">Ripeti (riprova stessa riga)</option>
+              <option value="block">Blocca (attende conferma manuale)</option>
+              <option value="skip">Salta (passa al successivo)</option>
+            </select>
+          </div>
           <SettingNumber label="Feedback verde (ms)" hint="Durata evidenza al match riuscito"
             value={s.scanner?.feedback_green_ms} min={200} max={10000} step={100} unit="ms"
             onChange={(v) => setSection("scanner", { feedback_green_ms: v })}
@@ -237,12 +285,17 @@ export function SettingsTab({ filter, saveLabel }) {
 
         {show("magazzino") && (
         <SettingsSection title="Magazzino" icon={Warning}>
-          <SettingNumber label="Soglia minima predefinita"
+          <SettingNumber label="Soglia minima"
             hint="Prodotti con quantità ≤ soglia (e > 0) risultano sotto scorta"
             value={s.magazzino?.low_stock_threshold ?? s.low_stock_threshold}
             min={0} max={1000} step={1} unit="pezzi"
             onChange={(v) => { setSection("magazzino", { low_stock_threshold: v }); setS((prev) => ({ ...prev, low_stock_threshold: v })); }}
             testid="set-mag-low-threshold" />
+          <SettingNumber label="Soglia quasi esaurito"
+            hint="Livello di attenzione superiore alla soglia minima (arancione)"
+            value={s.magazzino?.near_empty_threshold} min={0} max={1000} step={1} unit="pezzi"
+            onChange={(v) => setSection("magazzino", { near_empty_threshold: v })}
+            testid="set-mag-near-empty" />
           <SettingSwitch label="Avviso sotto scorta"
             hint="Mostra badge/toast quando un prodotto scende sotto soglia"
             checked={s.magazzino?.warn_low_stock}
@@ -253,6 +306,44 @@ export function SettingsTab({ filter, saveLabel }) {
             checked={s.magazzino?.warn_out_of_stock}
             onChange={(v) => setSection("magazzino", { warn_out_of_stock: v })}
             testid="set-mag-warn-oos" />
+          <div className="py-2">
+            <Label className="text-sm font-semibold text-slate-800">Comportamento con stock 0</Label>
+            <div className="text-[11px] text-slate-500 mb-1">Cosa succede quando si prova a spedire un prodotto esaurito</div>
+            <select
+              value={s.magazzino?.out_of_stock_behavior || "warn"}
+              onChange={(e) => setSection("magazzino", { out_of_stock_behavior: e.target.value })}
+              className="h-10 w-full max-w-[240px] rounded-md border border-slate-200 bg-white px-3 text-sm"
+              data-testid="set-mag-oos-behavior"
+            >
+              <option value="block">Blocca l'operazione</option>
+              <option value="warn">Avvisa ma consenti</option>
+              <option value="ignore">Ignora</option>
+            </select>
+          </div>
+          <div className="py-2">
+            <Label className="text-sm font-semibold text-slate-800">Prodotti non configurati (senza Tipo Gestione)</Label>
+            <div className="text-[11px] text-slate-500 mb-1">Come gestire prodotti senza Tipo Gestione impostato su Notion</div>
+            <select
+              value={s.magazzino?.unconfigured_product_behavior || "block"}
+              onChange={(e) => setSection("magazzino", { unconfigured_product_behavior: e.target.value })}
+              className="h-10 w-full max-w-[240px] rounded-md border border-slate-200 bg-white px-3 text-sm"
+              data-testid="set-mag-unconf-behavior"
+            >
+              <option value="block">Blocca finché non configurato</option>
+              <option value="warn">Avvisa e permetti</option>
+              <option value="ignore">Ignora</option>
+            </select>
+          </div>
+          <SettingSwitch label="Prevenzione duplicati"
+            hint="Rifiuta l'inserimento di codici/seriali già presenti nella lista temporanea"
+            checked={s.magazzino?.prevent_duplicates}
+            onChange={(v) => setSection("magazzino", { prevent_duplicates: v })}
+            testid="set-mag-nodup" />
+          <SettingSwitch label="Consenti spedizioni parziali"
+            hint="Se la quantità richiesta non è disponibile per intero, procedi con quella disponibile"
+            checked={s.magazzino?.allow_partial_shipment}
+            onChange={(v) => setSection("magazzino", { allow_partial_shipment: v })}
+            testid="set-mag-partial" />
         </SettingsSection>
         )}
 
@@ -317,18 +408,61 @@ export function SettingsTab({ filter, saveLabel }) {
         )}
 
         {show("general") && (
-        <SettingsSection title="Fuso orario" icon={Globe}>
+        <SettingsSection title="Identità Gestionale" icon={Gear}>
           <div className="py-2">
-            <Label className="text-sm font-semibold text-slate-800">Fuso orario del gestionale</Label>
-            <div className="text-[11px] text-slate-500 mb-2">
-              Data e ora mostrate in tutto il gestionale (Arrivi, Spedizioni, Movimenti, Dashboard, Audit, Storico Seriali)
-              vengono formattate in questo fuso. L'ora legale/solare è gestita automaticamente.
-              L'ora viene generata dal server e non dipende dall'orologio del dispositivo.
+            <Label className="text-sm font-semibold text-slate-800">Nome gestionale</Label>
+            <Input value={s.general?.app_name || ""}
+              onChange={(e) => setSection("general", { app_name: e.target.value })}
+              className="h-10 mt-1" data-testid="set-gen-appname" />
+          </div>
+          <div className="py-2">
+            <Label className="text-sm font-semibold text-slate-800">Nome azienda</Label>
+            <Input value={s.general?.company_name || ""}
+              onChange={(e) => setSection("general", { company_name: e.target.value })}
+              className="h-10 mt-1" data-testid="set-gen-company" />
+          </div>
+          <div className="py-2">
+            <Label className="text-sm font-semibold text-slate-800">Logo (URL)</Label>
+            <div className="text-[11px] text-slate-500 mb-1">URL immagine per il logo (lascia vuoto per usare il default)</div>
+            <Input value={s.general?.logo_url || ""}
+              onChange={(e) => setSection("general", { logo_url: e.target.value })}
+              placeholder="https://…" className="h-10" data-testid="set-gen-logo" />
+          </div>
+          <div className="py-2">
+            <Label className="text-sm font-semibold text-slate-800">Colore principale</Label>
+            <div className="flex items-center gap-2 mt-1">
+              <input type="color" value={s.general?.primary_color || "#0f172a"}
+                onChange={(e) => setSection("general", { primary_color: e.target.value })}
+                className="h-10 w-14 rounded border border-slate-200 cursor-pointer" data-testid="set-gen-color" />
+              <Input value={s.general?.primary_color || ""}
+                onChange={(e) => setSection("general", { primary_color: e.target.value })}
+                className="h-10 max-w-[140px] font-mono-tight" />
             </div>
+          </div>
+        </SettingsSection>
+        )}
+
+        {show("general") && (
+        <SettingsSection title="Formato e lingua" icon={Globe}>
+          <div className="py-2">
+            <Label className="text-sm font-semibold text-slate-800">Lingua</Label>
+            <select
+              value={s.general?.language || "it"}
+              onChange={(e) => setSection("general", { language: e.target.value })}
+              className="h-10 w-full max-w-[180px] rounded-md border border-slate-200 bg-white px-3 text-sm mt-1"
+              data-testid="set-gen-lang"
+            >
+              <option value="it">Italiano</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+          <div className="py-2">
+            <Label className="text-sm font-semibold text-slate-800">Fuso orario</Label>
+            <div className="text-[11px] text-slate-500 mb-1">Data e ora mostrate ovunque nel gestionale. Ora legale/solare automatica.</div>
             <select
               value={s.general?.timezone || "Europe/Rome"}
               onChange={(e) => setSection("general", { timezone: e.target.value })}
-              className="h-11 w-full max-w-sm rounded-md border border-slate-200 bg-white px-3 text-sm font-mono-tight focus:outline-none focus:border-slate-500"
+              className="h-10 w-full max-w-sm rounded-md border border-slate-200 bg-white px-3 text-sm font-mono-tight"
               data-testid="setting-timezone"
             >
               <option value="Europe/Rome">Europe/Rome — Italia (predefinito)</option>
@@ -347,6 +481,51 @@ export function SettingsTab({ filter, saveLabel }) {
               <option value="UTC">UTC — Tempo universale</option>
             </select>
           </div>
+          <div className="py-2">
+            <Label className="text-sm font-semibold text-slate-800">Formato data</Label>
+            <select
+              value={s.general?.date_format || "DD/MM/YYYY"}
+              onChange={(e) => setSection("general", { date_format: e.target.value })}
+              className="h-10 w-full max-w-[240px] rounded-md border border-slate-200 bg-white px-3 text-sm mt-1"
+              data-testid="set-gen-datefmt"
+            >
+              <option value="DD/MM/YYYY">DD/MM/YYYY (europeo)</option>
+              <option value="YYYY-MM-DD">YYYY-MM-DD (ISO)</option>
+              <option value="MM/DD/YYYY">MM/DD/YYYY (US)</option>
+            </select>
+          </div>
+          <div className="py-2">
+            <Label className="text-sm font-semibold text-slate-800">Formato ora</Label>
+            <select
+              value={s.general?.time_format || "24h"}
+              onChange={(e) => setSection("general", { time_format: e.target.value })}
+              className="h-10 w-full max-w-[180px] rounded-md border border-slate-200 bg-white px-3 text-sm mt-1"
+              data-testid="set-gen-timefmt"
+            >
+              <option value="24h">24 ore (14:30)</option>
+              <option value="12h">12 ore (2:30 PM)</option>
+            </select>
+          </div>
+        </SettingsSection>
+        )}
+
+        {show("general") && (
+        <SettingsSection title="Comportamento generale" icon={ArrowClockwise}>
+          <SettingSwitch label="Auto-refresh dati"
+            hint="Aggiorna automaticamente le pagine principali senza intervento manuale"
+            checked={s.general?.auto_refresh_enabled}
+            onChange={(v) => setSection("general", { auto_refresh_enabled: v })}
+            testid="set-gen-autorefresh-enabled" />
+          <SettingNumber label="Intervallo auto-refresh"
+            hint="Ogni quanto ricaricare i dati (0 = disattivato)"
+            value={s.dashboard?.autorefresh_seconds} min={0} max={3600} step={5} unit="secondi"
+            onChange={(v) => setSection("dashboard", { autorefresh_seconds: v })}
+            testid="set-dash-autorefresh" />
+          <SettingSwitch label="Conferme per operazioni importanti"
+            hint="Richiedi conferma esplicita per Conferma Arrivo, Conferma Spedizione e altre azioni critiche"
+            checked={s.general?.confirm_important_ops}
+            onChange={(v) => setSection("general", { confirm_important_ops: v })}
+            testid="set-gen-confirm-ops" />
         </SettingsSection>
         )}
 
@@ -375,9 +554,9 @@ export function SettingsTab({ filter, saveLabel }) {
 }
 
 // F9 §21 — Wrapper per singola area. Riutilizzano SettingsTab con filtro sezioni.
-export const SettingsGeneralTab = () => <SettingsTab filter={["general"]} saveLabel="Salva Impostazioni Generali" />;
+export const SettingsGeneralTab = () => <SettingsTab filter={["general", "dashboard"]} saveLabel="Salva Impostazioni Generali" />;
 export const SettingsMagazzinoTab = () => <SettingsTab filter={["magazzino", "ricerca", "movimenti"]} saveLabel="Salva Impostazioni Magazzino" />;
-export const SettingsScannerTab = () => <SettingsTab filter={["scanner", "dashboard"]} saveLabel="Salva Scanner e Acquisizione" />;
+export const SettingsScannerTab = () => <SettingsTab filter={["scanner"]} saveLabel="Salva Scanner e Acquisizione" />;
 export const SettingsSicurezzaTab = () => <SettingsTab filter={["sicurezza", "test_prefix"]} saveLabel="Salva Sicurezza" />;
 
 // F9 §7 — Impostazioni Arrivi (info-only: le regole sono già cablate nella logica esistente).
