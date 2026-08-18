@@ -374,9 +374,13 @@ export default function ArriviPage() {
           </div>
         </section>
 
-        {/* ScannerBar — visibile solo dopo che l'operatore ha scelto un flusso o la lista contiene già righe.
-            Regola spec §7: all'ingresso di Arrivi si vedono SOLO le card. */}
-        {(list.length > 0 || pending || initialAction) && (
+        {/* F8/F12 — ScannerBar visibile SOLO quando serve il barcode:
+            - RICEVI QUANTITÀ (initialAction="quantity"): barcode obbligatorio
+            - Lista già iniziata (list.length > 0)
+            - Attesa seriali con pending
+            NON visibile in RICEVI SERIALI: il seriale si inserisce direttamente
+            nel SerialCollector (dopo prodotto+quantità). */}
+        {(initialAction === "quantity" || list.length > 0 || pending) && (
         <ScannerBar
           onScanned={handleScannedCode}
           lastScan={lastScan}
@@ -385,8 +389,8 @@ export default function ArriviPage() {
           hint={
             pending
               ? `In attesa dei seriali per: ${pending.name}`
-              : initialAction === "rientro"
-                ? "Scansiona o inserisci il seriale già uscito da reintegrare"
+              : initialAction === "quantity"
+                ? "Inserisci o scansiona il codice/barcode del prodotto"
                 : "Inserisci o scansiona un codice prodotto o un seriale"
           }
         />
