@@ -593,18 +593,15 @@ export function SettingsArriviTab() {
     </div>
   );
   const Toggle = ({ k, label, desc }) => (
-    <label className="flex items-start justify-between gap-3 py-2 cursor-pointer border-b border-slate-100 last:border-0">
-      <div>
-        <div className="text-sm font-medium text-slate-800">{label}</div>
-        {desc && <div className="text-xs text-slate-500 mt-0.5">{desc}</div>}
-      </div>
-      <input
-        type="checkbox" checked={!!settings[k]}
-        onChange={(e) => upd(k, e.target.checked)}
-        className="h-4 w-4 mt-1 accent-emerald-600"
-        data-testid={`arrivi-${k}-toggle`}
+    <div className="border-b border-slate-100 last:border-0">
+      <SettingSwitch
+        label={label}
+        hint={desc}
+        checked={!!settings[k]}
+        onChange={(v) => upd(k, v)}
+        testid={`arrivi-${k}-toggle`}
       />
-    </label>
+    </div>
   );
   return (
     <div className="space-y-4 max-w-3xl" data-testid="settings-arrivi-tab">
@@ -680,18 +677,15 @@ export function SettingsSpedizioniTab() {
     </div>
   );
   const Toggle = ({ k, label, desc }) => (
-    <label className="flex items-start justify-between gap-3 py-2 cursor-pointer border-b border-slate-100 last:border-0">
-      <div>
-        <div className="text-sm font-medium text-slate-800">{label}</div>
-        {desc && <div className="text-xs text-slate-500 mt-0.5">{desc}</div>}
-      </div>
-      <input
-        type="checkbox" checked={!!settings[k]}
-        onChange={(e) => upd(k, e.target.checked)}
-        className="h-4 w-4 mt-1 accent-emerald-600"
-        data-testid={`spedizioni-${k}-toggle`}
+    <div className="border-b border-slate-100 last:border-0">
+      <SettingSwitch
+        label={label}
+        hint={desc}
+        checked={!!settings[k]}
+        onChange={(v) => upd(k, v)}
+        testid={`spedizioni-${k}-toggle`}
       />
-    </label>
+    </div>
   );
   return (
     <div className="space-y-4 max-w-3xl" data-testid="settings-spedizioni-tab">

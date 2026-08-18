@@ -430,6 +430,7 @@ function DeleteUserDialog({ user, onClose, onDone }) {
 
 export default function AdminUsersPage() {
   const { user: me, isAdmin, isLoading } = useAuth();
+  const iAmMaster = isMasterUser(me);
   useTz();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -615,7 +616,7 @@ export default function AdminUsersPage() {
                       {isMe && (
                         <span className="ml-2 text-[10px] uppercase tracking-wider text-slate-400">tu</span>
                       )}
-                      {isMaster && (
+                      {isMaster && iAmMaster && (
                         <span className="ml-2 text-[10px] uppercase tracking-wider text-amber-600 font-bold" title="Account master protetto">🔒 master</span>
                       )}
                     </td>
@@ -770,7 +771,7 @@ export default function AdminUsersPage() {
                   {isMe && (
                     <span className="ml-1 text-[10px] uppercase tracking-wider text-slate-400">tu</span>
                   )}
-                  {isMaster && (
+                  {isMaster && iAmMaster && (
                     <span className="ml-1 text-[10px] uppercase tracking-wider text-amber-600 font-bold">🔒 master</span>
                   )}
                 </div>
