@@ -74,6 +74,11 @@
 - Frontend: nuova tab Admin `ManutenzioneTab` con stato Notion (pallino verde/rosso), count prodotti in cache, timestamp ultimo check, bottoni "Sincronizza ora" / "Svuota cache" / "Verifica stato".
 - Nota: gli altri punti F9 (Admin restructure per area, tipizzazione notifiche per evento) sono già stati esplicitamente rifiutati (P2) o richiedono scelta operativa dell'utente — non toccati per evitare regressioni.
 
+## F8 — Switch fonte inventario riservato al Master + fix import useAuth ✅ (18/02/2026)
+- **Frontend `InventorySourceTab`**: switch Notion↔Gestionale ora visibile e operativo SOLO per l'account Master (`tecnico@eliostech.org`). Gli altri Admin vedono badge read-only "🔒 Solo Master" e bottone disabilitato.
+- **Backend**: la guardia `POST /api/admin/inventory/source` era già in place (403 se non Master) — nessuna modifica.
+- **Fix blocker lint**: aggiunto `import { useAuth } from "../lib/AuthContext";` in `AdminExtraTabs.jsx` (l'agente precedente l'aveva usato senza importarlo → oxlint fallito). Compilazione webpack ora 0 errori.
+
 ## F11 — Admin Impostazioni ristrutturato in Sidebar+Content ✅ (18/02/2026)
 - **AdminPage.jsx** completamente ridisegnato: rimosso il TabsList orizzontale piatto ("lista di 16 tab" criticata dall'utente) → **layout Sidebar+Content professionale** con navigazione raggruppata per aree.
 - **Struttura sidebar** (F11 §1) in 4 gruppi con etichette maiuscole:

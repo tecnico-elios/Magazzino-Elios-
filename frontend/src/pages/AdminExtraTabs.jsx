@@ -13,6 +13,7 @@ import {
 } from "@phosphor-icons/react";
 
 import { fmtDateTime as fmtDate, useTz } from "../lib/tz";
+import { useAuth } from "../lib/AuthContext";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -1415,7 +1416,9 @@ export function GlobalSearchTab() {
 // La modalità GESTIONALE è predisposta ma NON attivabile in questa fase.
 // Nessun cambio di logica sull'Inventario, Notion o Arrivi/Spedizioni.
 export function InventorySourceTab() {
-  // F12 — Cambio fonte ATTIVATO: l'admin può passare a GESTIONALE con conferma esplicita.
+  // F8 §10 — Cambio fonte SOLO per l'account master
+  const { user: me } = useAuth();
+  const iAmMaster = String(me?.email || "").trim().toLowerCase() === "tecnico@eliostech.org";
   const [active, setActive] = useState("notion");
   const [loading, setLoading] = useState(true);
   const [switching, setSwitching] = useState(false);
@@ -1487,7 +1490,7 @@ export function InventorySourceTab() {
             <li>Arrivi confermati → Inventario Notion + Entrate + colonna <b>SN /codice</b></li>
             <li>Spedizioni confermate → Inventario Notion + Uscite</li>
           </ul>
-          {active !== "notion" && (
+          {active !== "notion" && iAmMaster && (
             <Button
               type="button"
               onClick={() => setConfirmSwitch("notion")}
@@ -1528,7 +1531,7 @@ export function InventorySourceTab() {
             <li>Prima del cambio → importa da Notion (tab Gestione Prodotti)</li>
             <li>Nessuna modifica automatica di Notion</li>
           </ul>
-          {active !== "gestionale" && (
+          {active !== "gestionale" && iAmMaster && (
             <Button
               type="button"
               onClick={() => setConfirmSwitch("gestionale")}
@@ -1539,6 +1542,11 @@ export function InventorySourceTab() {
             >
               {localCount === 0 ? "Importa prima i prodotti da Notion" : "Passa a GESTIONALE"}
             </Button>
+          )}
+          {!iAmMaster && (
+            <div className="mt-4 text-[11px] text-slate-500 italic">
+              Solo l'account master può modificare la fonte Inventario.
+            </div>
           )}
         </div>
       </div>

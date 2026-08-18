@@ -34,9 +34,11 @@ async function fetchScannerCfg() {
       enterEqualsAdd: data?.scanner?.enter_equals_add !== false,  // default ON
       preventDoubleScan: data?.scanner?.prevent_double_scan !== false, // default ON
       minScanIntervalMs: Math.max(0, parseInt(data?.scanner?.min_scan_interval_ms ?? 300, 10)),
+      autoAcquire: data?.scanner?.auto_acquire !== false,           // default ON
+      errorBehavior: (data?.scanner?.error_behavior || 'retry'),    // 'retry' | 'block' | 'skip'
     };
   } catch {
-    _cachedScannerCfg = { green: 3000, red: 3000, autofocus: true, autoselect: false, searchOnType: true, maxResults: 8, partial: true, scannerEnabled: true, cameraEnabled: true, enterEqualsAdd: true, preventDoubleScan: true, minScanIntervalMs: 300 };
+    _cachedScannerCfg = { green: 3000, red: 3000, autofocus: true, autoselect: false, searchOnType: true, maxResults: 8, partial: true, scannerEnabled: true, cameraEnabled: true, enterEqualsAdd: true, preventDoubleScan: true, minScanIntervalMs: 300, autoAcquire: true, errorBehavior: 'retry' };
   }
   return _cachedScannerCfg;
 }
@@ -61,7 +63,7 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint,
   const [open, setOpen] = useState(false); // dropdown visibility
   const [hoverIdx, setHoverIdx] = useState(-1);
   const [serverHit, setServerHit] = useState(null); // {item, status, ...} for SN/barcode found on Notion
-  const [cfg, setCfg] = useState({ autofocus: true, autoselect: false, searchOnType: true, maxResults: 8, partial: true, scannerEnabled: true, cameraEnabled: true, enterEqualsAdd: true, preventDoubleScan: true, minScanIntervalMs: 300 });
+  const [cfg, setCfg] = useState({ autofocus: true, autoselect: false, searchOnType: true, maxResults: 8, partial: true, scannerEnabled: true, cameraEnabled: true, enterEqualsAdd: true, preventDoubleScan: true, minScanIntervalMs: 300, autoAcquire: true, errorBehavior: 'retry' });
   const inputRef = useRef(null);
   const containerRef = useRef(null);
   const lastCommitRef = useRef({ value: "", at: 0 });
@@ -74,6 +76,7 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint,
       scannerEnabled: c.scannerEnabled, cameraEnabled: c.cameraEnabled,
       enterEqualsAdd: c.enterEqualsAdd, preventDoubleScan: c.preventDoubleScan,
       minScanIntervalMs: c.minScanIntervalMs,
+      autoAcquire: c.autoAcquire, errorBehavior: c.errorBehavior,
     });
     fetchScannerCfg().then(apply);
     const onChange = () => fetchScannerCfg().then(apply);
@@ -171,6 +174,22 @@ export default function ScannerBar({ onScanned, lastScan, onClearLastScan, hint,
     if (alreadyLocal) return localSuggestions;
     return [{ __server: true, ...serverHit }, ...localSuggestions];
   }, [localSuggestions, serverHit]);
+
+  // Auto-acquire — F8 §1: se autoAcquire ON e c'è un solo suggerimento perfetto,
+  // committa automaticamente senza attendere ENTER.
+  useEffect(() => {
+    if (!cfg.autoAcquire) return;
+    if (buffer.trim().length < 4) return;
+    if (suggestions.length !== 1) return;
+    const s = suggestions[0];
+    const it = s.__server ? s.item : s;
+    const q = buffer.trim().toLowerCase();
+    const exact = (it?.code || "").toLowerCase() === q || (s.__server && (s.query || "").toLowerCase() === q);
+    if (!exact) return;
+    const t = setTimeout(() => selectSuggestion(s), 200);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suggestions, buffer, cfg.autoAcquire]);
 
   useEffect(() => {
     setHoverIdx(-1);

@@ -785,7 +785,12 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
 
     @router.post("/inventory/source")
     async def switch_inventory_source(body: SourceSwitch, current_user=Depends(deps.require_admin)):
-        """Cambio fonte inventario (Notion ↔ Gestionale). Richiede `confirm=true`."""
+        """Cambio fonte inventario (Notion ↔ Gestionale). Richiede `confirm=true`.
+        F8 §10 — SOLO l'account master può cambiare la fonte (protezione backend)."""
+        import auth as _auth
+        email = (current_user.get("email") or "").strip().lower()
+        if email != _auth.MASTER_EMAIL:
+            raise HTTPException(403, "Solo l'account master può cambiare la fonte Inventario")
         if not body.confirm:
             raise HTTPException(400, "Conferma esplicita mancante (confirm=true)")
         # Aggiorna solo general.inventory_source, preserva timezone
