@@ -159,6 +159,91 @@ async def update_tipo_gestione(page_id: str, tipo: str) -> None:
     invalidate_inventory_cache()
 
 
+# Nome esatto della colonna 16 dell'Inventario Notion (SN / codici seriali).
+INVENTARIO_SN_PROP = "SN /codice"
+
+
+async def update_inventory_serials(page_id: str, serials_to_add: List[str]) -> None:
+    """Aggiunge nuovi seriali alla colonna `SN /codice` dell'Inventario Notion
+    (colonna 16, tipo rich_text). Preserva i seriali già presenti, evita duplicati.
+    Non modifica la struttura di Notion, tocca solo il valore della cella.
+
+    Chiamata da submit_arrivo dopo CONFERMA ARRIVO — F8 §3/§13.
+    """
+    if not NOTION_TOKEN or not page_id:
+        raise RuntimeError("Notion non configurato")
+    new_clean = [s.strip() for s in (serials_to_add or []) if s and s.strip()]
+    if not new_clean:
+        return
+    get_url = f"{NOTION_BASE}/pages/{page_id}"
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(get_url, headers=_headers())
+        if r.status_code >= 400:
+            logger.warning(f"update_inventory_serials GET failed {r.status_code}: {r.text[:200]}")
+            r.raise_for_status()
+        page = r.json()
+    props = page.get("properties", {})
+    sn_prop = _get_prop(props, INVENTARIO_SN_PROP, "SN / CODICI", "SN /CODICI", "SN/codice", "SN")
+    current_text = _plain_text(sn_prop) if sn_prop else ""
+    existing = _parse_serials(current_text)
+    existing_lower = {e.lower() for e in existing}
+    to_append = [s for s in new_clean if s.lower() not in existing_lower]
+    if not to_append:
+        return
+    merged = existing + to_append
+    new_text = "\n".join(merged)
+    body = {
+        "properties": {
+            INVENTARIO_SN_PROP: {
+                "rich_text": [{"type": "text", "text": {"content": new_text[:1990]}}],
+            }
+        }
+    }
+    patch_url = f"{NOTION_BASE}/pages/{page_id}"
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.patch(patch_url, headers=_headers(), json=body)
+        if resp.status_code >= 400:
+            logger.error(f"update_inventory_serials PATCH failed: {resp.status_code} {resp.text[:300]}")
+            resp.raise_for_status()
+    invalidate_inventory_cache()
+
+
+async def remove_inventory_serials(page_id: str, serials_to_remove: List[str]) -> None:
+    """Rimuove seriali dalla colonna `SN /codice` dell'Inventario Notion.
+    Chiamata da submit_shipment dopo CONFERMA SPEDIZIONE — F8 §18.
+    """
+    if not NOTION_TOKEN or not page_id:
+        return
+    rm_lower = {(s or "").strip().lower() for s in (serials_to_remove or []) if (s or "").strip()}
+    if not rm_lower:
+        return
+    get_url = f"{NOTION_BASE}/pages/{page_id}"
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(get_url, headers=_headers())
+        if r.status_code >= 400:
+            logger.warning(f"remove_inventory_serials GET failed: {r.status_code}")
+            return
+        page = r.json()
+    props = page.get("properties", {})
+    sn_prop = _get_prop(props, INVENTARIO_SN_PROP, "SN / CODICI", "SN /CODICI", "SN/codice", "SN")
+    if not sn_prop:
+        return
+    existing = _parse_serials(_plain_text(sn_prop))
+    kept = [s for s in existing if s.lower() not in rm_lower]
+    if len(kept) == len(existing):
+        return
+    new_text = "\n".join(kept)
+    body = {"properties": {INVENTARIO_SN_PROP: {"rich_text": [{"type": "text", "text": {"content": new_text[:1990]}}] if kept else []}}}
+    patch_url = f"{NOTION_BASE}/pages/{page_id}"
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.patch(patch_url, headers=_headers(), json=body)
+        if resp.status_code >= 400:
+            logger.warning(f"remove_inventory_serials PATCH failed: {resp.status_code} {resp.text[:200]}")
+    invalidate_inventory_cache()
+
+
+
+
 async def list_inventory(force_refresh: bool = False) -> List[Dict[str, Any]]:
     if not is_configured():
         raise RuntimeError("Notion non configurato")

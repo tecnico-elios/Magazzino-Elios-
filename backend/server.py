@@ -722,6 +722,16 @@ async def submit_checklist(
             await svc.archive_page(pid)
         raise HTTPException(502, f"Impossibile aggiornare il magazzino. Riprova. ({e})")
 
+    # F8 §18: rimuovi i seriali spediti dalla colonna 16 "SN /codice" dell'Inventario Notion
+    # (no-op quando fonte=gestionale). Best-effort: se fallisce non blocca la spedizione.
+    try:
+        for it in filled:
+            if it.serialized and it.serials:
+                await svc.remove_inventory_serials(it.page_id, [s.strip() for s in it.serials if s and s.strip()])
+    except Exception as e:
+        logging.warning(f"remove_inventory_serials fallito (non blocca la spedizione): {e}")
+    svc.invalidate_inventory_cache()
+
     # 4) Send email(s) — email failure does not invalidate the shipment
     # F9 §28: filtra per evento "spedizioni"
     recipients = await get_recipients_for_event("spedizioni")
@@ -1147,6 +1157,16 @@ async def submit_arrivo(
 
     # 3) Invalidate cached inventory so subsequent reads show updated stock
     svc.invalidate_inventory_cache()
+
+    # 3.1) F8 §3+§13: aggiorna la colonna 16 "SN /codice" dell'Inventario Notion
+    # aggiungendo i seriali appena registrati per i prodotti A Seriale.
+    # No-op quando fonte=gestionale (i seriali sono già in product_serials).
+    try:
+        for it in filled:
+            if it.serialized and it.serials:
+                await svc.update_inventory_serials(it.page_id, [s.strip() for s in it.serials if s and s.strip()])
+    except Exception as e:
+        logging.warning(f"update_inventory_serials fallito (non blocca l'arrivo): {e}")
 
     # 4) Email
     # F9 §28: filtra per evento "arrivi"

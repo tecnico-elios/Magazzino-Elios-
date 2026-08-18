@@ -102,13 +102,25 @@ async def get_item(page_id: str) -> Dict[str, Any]:
 async def update_tipo_gestione(page_id: str, tipo: str) -> None:
     if tipo not in ("a_seriale", "a_quantita"):
         raise ValueError("tipo must be 'a_seriale' or 'a_quantita'")
-    db = _db()
-    r = await db.products.update_one(
+    _db()
+    r = await _db().products.update_one(
         {"id": page_id},
         {"$set": {"tipo_gestione": tipo, "updated_at": _now_iso()}},
     )
     if r.matched_count == 0:
         raise RuntimeError(f"Prodotto non trovato: {page_id}")
+
+
+async def update_inventory_serials(page_id: str, serials_to_add: List[str]) -> None:
+    """No-op — nel gestionale i seriali vivono nella collection product_serials,
+    già scritti da create_receipt. Manteniamo la stessa firma di notion_service
+    per interfaccia uniforme."""
+    return None
+
+
+async def remove_inventory_serials(page_id: str, serials_to_remove: List[str]) -> None:
+    """No-op — analoga a update_inventory_serials."""
+    return None
 
 
 # ---------- Serials ----------

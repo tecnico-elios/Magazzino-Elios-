@@ -1104,44 +1104,21 @@ export function GlobalSearchTab() {
 // La modalità GESTIONALE è predisposta ma NON attivabile in questa fase.
 // Nessun cambio di logica sull'Inventario, Notion o Arrivi/Spedizioni.
 export function InventorySourceTab() {
-  const [active, setActive] = useState("notion");
-  const [loading, setLoading] = useState(true);
-  const [switching, setSwitching] = useState(false);
-  const [confirmSwitch, setConfirmSwitch] = useState(null); // 'notion' | 'gestionale'
+  // F8 §22-24: PER QUESTA FASE il cambio fonte è disattivato.
+  // Notion resta l'unica fonte attiva. Il backend è predisposto per il futuro.
   const [localCount, setLocalCount] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const [s, p] = await Promise.all([
-        axios.get(`${API}/admin/settings`),
-        axios.get(`${API}/admin/products`),
-      ]);
-      setActive(((s.data?.general || {}).inventory_source) || "notion");
-      setLocalCount(p.data?.count || 0);
-    } catch (e) {
-      toast.error("Errore lettura fonte", { description: formatError(e) });
-    } finally {
-      setLoading(false);
-    }
-  };
-  useEffect(() => { load(); }, []);
-
-  const doSwitch = async (target) => {
-    setSwitching(true);
-    try {
-      await axios.post(`${API}/admin/inventory/source`, { source: target, confirm: true });
-      toast.success(`Fonte inventario ora: ${target === "gestionale" ? "GESTIONALE" : "NOTION"}`);
-      setConfirmSwitch(null);
-      setActive(target);
-      // notifica altri componenti (InventoryContext auto-refresh su prossima call)
-      window.dispatchEvent(new Event("elios:settings-changed"));
-    } catch (e) {
-      toast.error("Errore cambio fonte", { description: formatError(e) });
-    } finally {
-      setSwitching(false);
-    }
-  };
+  useEffect(() => {
+    (async () => {
+      try {
+        const p = await axios.get(`${API}/admin/products`);
+        setLocalCount(p.data?.count || 0);
+      } catch (_e) {
+        setLocalCount(0);
+      } finally { setLoading(false); }
+    })();
+  }, []);
 
   return (
     <div className="space-y-4 max-w-3xl" data-testid="inventory-source-tab">
@@ -1154,13 +1131,9 @@ export function InventorySourceTab() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {/* NOTION */}
+        {/* NOTION — attivo */}
         <div
-          className={`relative rounded-xl border p-5 transition-all ${
-            active === "notion"
-              ? "border-emerald-400 bg-emerald-50/50 shadow-[0_10px_30px_-15px_rgba(16,185,129,0.35)]"
-              : "border-slate-200 bg-white"
-          }`}
+          className="relative rounded-xl border border-emerald-400 bg-emerald-50/50 shadow-[0_10px_30px_-15px_rgba(16,185,129,0.35)] p-5 transition-all"
           data-testid="inventory-source-notion"
         >
           <div className="flex items-center justify-between">
@@ -1168,38 +1141,21 @@ export function InventorySourceTab() {
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" aria-hidden />
               <div className="font-display text-base font-bold text-emerald-900">NOTION</div>
             </div>
-            {active === "notion" && (
-              <span className="text-[10px] uppercase tracking-wider font-bold bg-emerald-600 text-white px-2 py-1 rounded">Attivo</span>
-            )}
+            <span className="text-[10px] uppercase tracking-wider font-bold bg-emerald-600 text-white px-2 py-1 rounded">Attivo</span>
           </div>
           <div className="text-sm text-slate-700 mt-2">
-            Inventario, Arrivi ed Spedizioni operano su Notion come Single Source of Truth.
+            Inventario, Arrivi e Spedizioni operano su Notion come Single Source of Truth.
           </div>
           <ul className="mt-3 text-xs text-slate-600 space-y-1 list-disc pl-4">
-            <li>Letture live da Notion (con cache)</li>
-            <li>Arrivi confermati → Inventario + Entrate</li>
-            <li>Spedizioni confermate → Inventario + Uscite</li>
+            <li>Letture live da Notion (con cache breve)</li>
+            <li>Arrivi confermati → Inventario Notion + Entrate + colonna <b>SN /codice</b></li>
+            <li>Spedizioni confermate → Inventario Notion + Uscite</li>
           </ul>
-          {active !== "notion" && (
-            <Button
-              type="button"
-              onClick={() => setConfirmSwitch("notion")}
-              disabled={switching || loading}
-              className="mt-4 h-10 w-full bg-emerald-600 hover:bg-emerald-700 text-white"
-              data-testid="switch-to-notion-btn"
-            >
-              Torna a NOTION
-            </Button>
-          )}
         </div>
 
-        {/* GESTIONALE */}
+        {/* GESTIONALE — futuro / non attivo */}
         <div
-          className={`relative rounded-xl border p-5 transition-all ${
-            active === "gestionale"
-              ? "border-sky-400 bg-sky-50/50 shadow-[0_10px_30px_-15px_rgba(56,189,248,0.35)]"
-              : "border-dashed border-slate-300 bg-slate-50/60"
-          }`}
+          className="relative rounded-xl border border-dashed border-slate-300 p-5 bg-slate-50/60"
           data-testid="inventory-source-gestionale"
         >
           <div className="flex items-center justify-between">
@@ -1207,62 +1163,33 @@ export function InventorySourceTab() {
               <span className="w-2.5 h-2.5 rounded-full bg-sky-500" aria-hidden />
               <div className="font-display text-base font-bold text-sky-900">GESTIONALE</div>
             </div>
-            {active === "gestionale" ? (
-              <span className="text-[10px] uppercase tracking-wider font-bold bg-sky-600 text-white px-2 py-1 rounded">Attivo</span>
-            ) : (
-              <span className="text-[10px] uppercase tracking-wider font-bold bg-slate-400 text-white px-2 py-1 rounded">Disponibile</span>
-            )}
+            <span className="text-[10px] uppercase tracking-wider font-bold bg-slate-400 text-white px-2 py-1 rounded">Futuro</span>
           </div>
           <div className="text-sm text-slate-700 mt-2">
             Inventario interno gestito direttamente dall'app (creazione prodotti, seriali e quantità in locale).
           </div>
           <ul className="mt-3 text-xs text-slate-500 space-y-1 list-disc pl-4">
-            <li>Prodotti locali attualmente: <b className="text-slate-800">{localCount}</b></li>
-            <li>Prima del cambio → importare da Notion (tab Gestione Prodotti)</li>
-            <li>Nessuna modifica automatica di Notion</li>
+            <li>Predisposto architetturalmente (backend pronto)</li>
+            <li>Prodotti locali già configurabili: <b className="text-slate-800">{loading ? "…" : localCount}</b></li>
+            <li>Il cambio richiederà una conferma esplicita quando abilitato</li>
           </ul>
-          {active !== "gestionale" && (
-            <Button
-              type="button"
-              onClick={() => setConfirmSwitch("gestionale")}
-              disabled={switching || loading || localCount === 0}
-              className="mt-4 h-10 w-full bg-sky-600 hover:bg-sky-700 text-white disabled:bg-sky-200 disabled:text-sky-500"
-              data-testid="switch-to-gestionale-btn"
-              title={localCount === 0 ? "Importa prima i prodotti da Notion" : "Passa al Gestionale"}
-            >
-              {localCount === 0 ? "Passa a GESTIONALE — importa prima i prodotti" : "Passa a GESTIONALE"}
-            </Button>
-          )}
+          <Button
+            type="button"
+            disabled
+            className="mt-4 h-10 w-full bg-slate-100 text-slate-400 hover:bg-slate-100 cursor-not-allowed"
+            data-testid="switch-to-gestionale-btn"
+            title="Predisposizione futura — non attivabile in questa fase"
+          >
+            Cambio fonte disattivato in questa fase
+          </Button>
         </div>
       </div>
 
       <div className="rounded-md border border-amber-200 bg-amber-50 text-amber-900 text-xs p-3">
-        <b>Nota:</b> il cambio fonte richiede conferma esplicita e non attiva mai
-        entrambe le sorgenti contemporaneamente. Notion non viene modificato.
+        <b>Nota:</b> Notion resta l'unica fonte attiva. La predisposizione dell'Inventario Gestionale
+        è pronta lato architettura ma il cambio fonte non è abilitato per questa fase.
+        Puoi comunque preparare i prodotti locali dalla tab <b>Gestione Prodotti</b> (import da Notion).
       </div>
-
-      {/* Conferma switch */}
-      <Dialog open={!!confirmSwitch} onOpenChange={(o) => !o && setConfirmSwitch(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Confermi il cambio fonte?</DialogTitle>
-            <DialogDescription>
-              Stai cambiando la fonte principale dell'Inventario. Dopo la modifica
-              <b> Arrivi e Spedizioni utilizzeranno {confirmSwitch === "gestionale" ? "l'Inventario interno del gestionale" : "Notion"}</b>
-              {" "}invece di {confirmSwitch === "gestionale" ? "Notion" : "l'Inventario interno"}.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="rounded-md border border-slate-200 bg-slate-50 text-slate-700 text-xs p-3">
-            L'altra fonte non viene alterata: puoi tornare indietro in qualsiasi momento.
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmSwitch(null)} data-testid="switch-cancel-btn">Annulla</Button>
-            <Button onClick={() => doSwitch(confirmSwitch)} disabled={switching} data-testid="switch-confirm-btn">
-              {switching ? "Cambio in corso…" : "Conferma cambio"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

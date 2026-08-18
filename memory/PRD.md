@@ -74,6 +74,24 @@
 - Frontend: nuova tab Admin `ManutenzioneTab` con stato Notion (pallino verde/rosso), count prodotti in cache, timestamp ultimo check, bottoni "Sincronizza ora" / "Svuota cache" / "Verifica stato".
 - Nota: gli altri punti F9 (Admin restructure per area, tipizzazione notifiche per evento) sono già stati esplicitamente rifiutati (P2) o richiedono scelta operativa dell'utente — non toccati per evitare regressioni.
 
+## F8 — Scrittura Seriali su Colonna 16 Inventario Notion + UI Switch disattivato ✅ (17/02/2026)
+- **CORE F8 §3+§13**: dopo CONFERMA ARRIVO i seriali dei prodotti A Seriale vengono ora **scritti nella colonna `SN /codice` dell'Inventario Notion** (colonna 16, tipo rich_text). Prima erano registrati solo nella tabella Entrate/Consegne.
+- Nuova funzione `notion_service.update_inventory_serials(page_id, serials)`:
+  * GET pagina inventario → legge colonna esistente `SN /codice`
+  * `_parse_serials` gestisce i separatori esistenti (virgola/newline/spazio)
+  * Merge idempotente: seriali già presenti vengono ignorati (case-insensitive)
+  * PATCH con newline come separatore, troncatura a 1990 char (limite Notion rich_text 2000)
+  * Invalida cache automaticamente
+- Nuova funzione `notion_service.remove_inventory_serials(page_id, serials)`:
+  * Chiamata dopo CONFERMA SPEDIZIONE (§18) per riflettere che i seriali NON sono più in magazzino
+  * Best-effort (se fallisce non blocca la spedizione)
+- `server.py submit_arrivo`: dopo `invalidate_inventory_cache()` chiama `svc.update_inventory_serials(page_id, seriali)` per ogni prodotto A Seriale. Try/except → non blocca l'arrivo se il patch fallisce.
+- `server.py submit_shipment`: dopo la creazione dei tracker uscita chiama `svc.remove_inventory_serials(page_id, seriali)`. Analogo pattern best-effort.
+- `inventory_local` no-op: nel gestionale i seriali sono già in `product_serials`, la colonna 16 è specifica di Notion. Interfaccia uniforme mantenuta.
+- **Frontend `InventorySourceTab` F8 §22-24**: switch fonte **disattivato per questa fase**. Notion sempre "Attivo", GESTIONALE marcato "Futuro" con bottone disabilitato. Backend resta predisposto ma UI non permette il cambio.
+- **Verificato REALE con test end-to-end su Notion**: script che chiama update+remove su un prodotto reale, verifica presenza in colonna 16 → cleanup → confronta stato finale = originale. RESULT: ADD OK, REMOVE OK, back-to-original OK.
+- Nessuna modifica a struttura Notion (0 nuove colonne/proprietà/tipi). Nessuna modifica a card, ScannerBar, ProductPicker, QtyDialog, SerialCollector.
+
 ## F8 — Inventario Gestionale ATTIVABILE (§14-20) ✅ (17/02/2026)
 - **Backend nuovo servizio** `inventory_local.py` (400 righe) — MongoDB-backed che replica esattamente l'interfaccia pubblica di `notion_service`: `is_configured/invalidate_inventory_cache/list_inventory/get_item/update_tipo_gestione/latest_serial_status/create_receipt/create_pick/archive_page/list_receipts_all/list_exits`. Interfacce 100% allineate → nessuna condizione nel resto del codice.
 - **Router selezione fonte** `inventory_router.py`: `get_svc(db)` restituisce il modulo attivo (`notion_service` | `inventory_local`) leggendo `settings.general.inventory_source` (default `"notion"`).
