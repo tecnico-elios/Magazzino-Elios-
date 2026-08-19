@@ -10,7 +10,8 @@ import { Badge } from "../components/ui/badge";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "../components/ui/dialog";
-import { ArrowUUpLeft, MagnifyingGlass, Warning, PencilSimple, Prohibit } from "@phosphor-icons/react";
+import { ArrowUUpLeft, MagnifyingGlass, Warning, PencilSimple, Prohibit, QrCode, Camera, Keyboard } from "@phosphor-icons/react";
+import BarcodeScanner from "../components/BarcodeScanner";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -181,7 +182,33 @@ function EditDialog({ row, kind, onClose, onDone }) {
   const [newDate, setNewDate] = useState("");
   const [newStructure, setNewStructure] = useState("");
   const [newQr, setNewQr] = useState("");
+  const [qrMode, setQrMode] = useState(null); // null | "manual" | "scan"
+  const [qrScannerOpen, setQrScannerOpen] = useState(false);
+  const [qrChecking, setQrChecking] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // Verifica QR live tramite /api/qr/check quando l'utente inserisce/scansiona
+  const verifyQr = async (val) => {
+    const q = (val || "").trim();
+    if (!q) return true;
+    setQrChecking(true);
+    try {
+      const { data } = await axios.get(`${API}/qr/check`, { params: { qr: q } });
+      const currentSn = (newSn.trim() || row.sn || "").toLowerCase();
+      if (data.exists && (data.serial || "").toLowerCase() !== currentSn) {
+        toast.error("🔴 QR CODE GIÀ ASSOCIATO", { description: `Questo QR è già associato a un'altra Wallbox (SN ${data.serial}).` });
+        setNewQr("");
+        return false;
+      }
+      toast.success(`✅ QR disponibile`, { description: q });
+      return true;
+    } catch (e) {
+      toast.error("Verifica QR fallita", { description: e?.response?.data?.detail || e?.message });
+      return false;
+    } finally {
+      setQrChecking(false);
+    }
+  };
 
   const submit = async () => {
     if (!reason.trim()) {
@@ -267,8 +294,39 @@ function EditDialog({ row, kind, onClose, onDone }) {
                   <Input value={newStructure} onChange={(e) => setNewStructure(e.target.value)} placeholder={row.cliente || ""} className="h-10 mt-1" data-testid="retro-new-structure" />
                 </div>
                 <div className="sm:col-span-2">
-                  <Label className="text-xs font-semibold">Aggiungi/aggiorna QR Code (opz)</Label>
-                  <Input value={newQr} onChange={(e) => setNewQr(e.target.value)} placeholder="Es. QR123456" className="h-10 mt-1 font-mono-tight" data-testid="retro-new-qr" />
+                  <Label className="text-xs font-semibold">QR Code (aggiungi/modifica — opzionale)</Label>
+                  {qrMode === null ? (
+                    <div className="grid grid-cols-2 gap-2 mt-1">
+                      <Button type="button" variant="outline" onClick={() => setQrMode("manual")} className="h-11" data-testid="retro-qr-manual-btn">
+                        <Keyboard size={16} weight="bold" className="mr-2" /> INSERISCI MANUALMENTE
+                      </Button>
+                      <Button type="button" onClick={() => { setQrMode("scan"); setQrScannerOpen(true); }} className="h-11 bg-amber-600 hover:bg-amber-700 text-white" data-testid="retro-qr-scan-btn">
+                        <Camera size={16} weight="bold" className="mr-2" /> 📷 SCANSIONA QR
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="mt-1 flex items-center gap-2">
+                      <Input
+                        value={newQr}
+                        onChange={(e) => setNewQr(e.target.value)}
+                        onBlur={(e) => verifyQr(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); verifyQr(newQr); } }}
+                        placeholder={qrMode === "scan" ? "Scansiona con la fotocamera" : "Es. QR123456"}
+                        className="h-10 font-mono-tight flex-1"
+                        autoFocus
+                        data-testid="retro-new-qr"
+                      />
+                      {qrMode === "scan" && (
+                        <Button type="button" variant="outline" size="sm" onClick={() => setQrScannerOpen(true)} data-testid="retro-qr-reopen-scan">
+                          <Camera size={14} weight="bold" />
+                        </Button>
+                      )}
+                      <Button type="button" variant="outline" size="sm" onClick={() => { setQrMode(null); setNewQr(""); }} data-testid="retro-qr-reset">
+                        Cambia
+                      </Button>
+                    </div>
+                  )}
+                  {qrChecking && <p className="text-xs text-slate-400 mt-1">Verifica…</p>}
                 </div>
               </>
             )}
@@ -288,6 +346,19 @@ function EditDialog({ row, kind, onClose, onDone }) {
           </Button>
         </DialogFooter>
       </DialogContent>
+      {/* F14 — Fotocamera per scansione QR (riusa componente esistente) */}
+      <BarcodeScanner
+        open={qrScannerOpen}
+        onClose={() => setQrScannerOpen(false)}
+        label="Scansiona QR Code"
+        onDetected={async (val) => {
+          setQrScannerOpen(false);
+          const v = (val || "").trim();
+          if (!v) return;
+          setNewQr(v);
+          await verifyQr(v);
+        }}
+      />
     </Dialog>
   );
 }

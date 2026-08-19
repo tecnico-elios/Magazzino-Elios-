@@ -74,6 +74,24 @@
 - Frontend: nuova tab Admin `ManutenzioneTab` con stato Notion (pallino verde/rosso), count prodotti in cache, timestamp ultimo check, bottoni "Sincronizza ora" / "Svuota cache" / "Verifica stato".
 - Nota: gli altri punti F9 (Admin restructure per area, tipizzazione notifiche per evento) sono già stati esplicitamente rifiutati (P2) o richiedono scelta operativa dell'utente — non toccati per evitare regressioni.
 
+## F14 — CORREZIONI POST-IMPLEMENTAZIONE ✅ (19/02/2026)
+
+### Correzione 1 — Match struttura su "Modulo Ordine/Struttura" (non più "Ragione sociale")
+- **Diagnostica reale su Notion** (script Python su 721 ordini + 15 strutture Uscite): il campo che contiene i nomi struttura come inseriti dagli operatori è il **TITLE `Modulo Ordine/Struttura`** (4/5 match diretti su strutture reali come "Dalla Nonna Trattoria Bar", "Ristorante Il Cenacolo", "Paradise Village", "Award Vigilanza"). "Ragione sociale" conteneva invece nomi di persone (es. "Alessandra Cannazza") → non era il criterio corretto.
+- **Fix**: `NOTION_ORDINE_STRUCTURE_FIELD=Modulo Ordine/Struttura` in `/app/backend/.env`. Nessuna modifica a codice o struttura Notion.
+- **Verifica finale**: "Dalla Nonna Trattoria Bar" → `found` ✅, "Casa Vacanze Palmer Palace" → `found` ✅, "Alessandra Cannazza" → correttamente `not_found` (non più matchato) ✅, "STRUTTURA_XYZ" → `not_found` ✅.
+
+### Correzione 2 — QR Retroattività: manuale + scansione fotocamera
+- **`RetroattivitaPage.jsx`**: sostituito il singolo input QR con la scelta a 2 bottoni:
+  * `[INSERISCI MANUALMENTE]` — input testuale con verifica live via `GET /api/qr/check` on blur/Enter.
+  * `[📷 SCANSIONA QR]` — apre il componente `BarcodeScanner` esistente (html5-qrcode, riuso 100% del componente già usato in Arrivi/Spedizioni). Il valore letto popola automaticamente il campo `newQr` e applica la stessa verifica di univocità.
+- **Regola univocità**: unica verifica sul QR = "già utilizzato per altro SN?" → 409/blocco. Nessuna altra validazione aggiuntiva.
+- **Modifica QR esistente** (§3): il flusso già supportato dal backend `PATCH /api/retro/shipment/{id}` (campo `new_qr_code`) — aggiorna il record esistente, upsert `qr_associations`, append al nuovo ordine, rimozione dal vecchio se cambia struttura. Nessuna nuova riga.
+- **Riuso `BarcodeScanner`**: nessun secondo sistema di scansione creato — importato direttamente da `../components/BarcodeScanner`.
+
+### Invariato
+- QR opzionale nelle Spedizioni + SALTA/ASSOCIA · controllo "QR già utilizzato" · QTY WB invariato · SN WB/CODICI QR update · matching ordine · blocco 0/multi · permesso `modifica_retroattiva` · audit before/after · nessuna modifica struttura Notion.
+
 ## F14 — QR opzionale Spedizioni + Sync "Eliostech Ordini" + Operazione Retroattiva ✅ (19/02/2026)
 
 ### Blocco A — QR Code opzionale Spedizioni (§1-7)
