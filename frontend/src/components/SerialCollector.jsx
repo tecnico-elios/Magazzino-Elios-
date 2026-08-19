@@ -61,7 +61,7 @@ function playBeep(frequency = 880, durationMs = 100) {
  *  - Focus automatico: dopo una validazione OK il focus salta al primo campo
  *    vuoto successivo.
  */
-export default function SerialCollector({ pending, mode, existingSerials = [], onChange, onCommit, onCancel }) {
+export default function SerialCollector({ pending, mode, existingSerials = [], onChange, onCommit, onCancel, onSerialConfirmed }) {
   const refs = useRef([]);
   const [validations, setValidations] = useState({}); // idx -> {state, message}
   const [cameraFor, setCameraFor] = useState(null); // idx della riga per cui è aperta la camera
@@ -165,6 +165,10 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
       if (data.status === "in_warehouse") {
         setValidations((v) => ({ ...v, [idx]: { state: "ok", message: "Presente in Entrate — pronto" } }));
         isBeepEnabled().then((on) => on && playBeep());
+        // F14 (20/02) — QR opzionale disponibile anche in inserimento manuale/ENTER/scanner.
+        if (typeof onSerialConfirmed === "function") {
+          try { onSerialConfirmed(value); } catch { /* no-op */ }
+        }
         focusNext(idx);
       } else if (data.status === "out") {
         setValidations((v) => ({ ...v, [idx]: { state: "error", message: "Già uscito in una spedizione precedente" } }));

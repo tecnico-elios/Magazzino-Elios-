@@ -20,7 +20,7 @@ import notion_service
 import inventory_local
 from inventory_router import get_svc as _get_inv_svc, get_source as _get_inv_source
 import auth as auth_mod
-from routes import auth_routes, admin_users_routes, admin_extra_routes, qr_routes, retro_routes
+from routes import auth_routes, admin_users_routes, admin_extra_routes, qr_routes, retro_routes, orders_routes
 try:
     from zoneinfo import ZoneInfo
     ROME_TZ = ZoneInfo("Europe/Rome")
@@ -207,6 +207,10 @@ class ProductItem(BaseModel):
 
 
 class ChecklistPayload(BaseModel):
+    # F14 — ID Notion della pagina "Eliostech Ordini" selezionata via autocomplete.
+    # Se presente: viene usato DIRETTAMENTE (skip ricerca per nome — evita ambiguità).
+    # Se assente: fallback alla ricerca per struttura (retrocompatibilità).
+    order_page_id: Optional[str] = None
     model_config = ConfigDict(extra="ignore")
     operator: str
     shipping_date: str  # ISO date YYYY-MM-DD
@@ -705,28 +709,53 @@ async def submit_checklist(
     # Se non trovato / ambiguo → blocca la spedizione (nessuna scrittura parziale).
     order_info: Optional[Dict[str, Any]] = None
     if notion_service.NOTION_ORDINI_DS_ID:
-        try:
-            order_info = await notion_service.find_order_by_structure(payload.structure)
-        except Exception as e:
-            raise HTTPException(502, f"Errore ricerca ordine Notion: {e}")
-        if order_info.get("status") == "not_found":
-            await log_anomaly(
-                kind="order_not_found",
-                description=f"Nessun ordine per struttura '{payload.structure}'",
-                operator=payload.operator, source="spedizione",
-            )
-            raise HTTPException(409, f"Ordine non trovato per la struttura selezionata: '{payload.structure}'")
-        if order_info.get("status") == "multiple":
-            await log_anomaly(
-                kind="order_multiple",
-                description=f"{order_info.get('count')} ordini per '{payload.structure}'",
-                operator=payload.operator, source="spedizione",
-            )
-            raise HTTPException(
-                409,
-                f"Sono stati trovati {order_info.get('count')} ordini per questa struttura. "
-                f"Verificare l'ordine selezionato.",
-            )
+        # F14 (autocomplete): se il frontend ha già selezionato un ordine dall'autocomplete
+        # (order_page_id passato nel payload), lo usiamo DIRETTAMENTE — evita ambiguità.
+        if (payload.order_page_id or "").strip():
+            try:
+                async with __import__("httpx").AsyncClient(timeout=15) as _client:
+                    _r = await _client.get(
+                        f"{notion_service.NOTION_BASE}/pages/{payload.order_page_id.strip()}",
+                        headers=notion_service._headers(),
+                    )
+                    if _r.status_code == 404:
+                        raise HTTPException(409, "L'ordine selezionato non è più disponibile su Notion")
+                    if _r.status_code >= 400:
+                        raise HTTPException(502, f"Errore verifica ordine Notion: {_r.status_code}")
+                    _data = _r.json()
+                    if _data.get("archived"):
+                        raise HTTPException(409, "L'ordine selezionato è archiviato")
+                    _props = _data.get("properties", {})
+                    _struct = notion_service._get_prop(_props, notion_service.NOTION_ORDINE_STRUCTURE_FIELD)
+                    _struct_text = (notion_service._plain_text(_struct) if _struct else "").strip()
+                    order_info = {"status": "found", "id": _data.get("id"), "structure": _struct_text}
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(502, f"Errore verifica ordine: {e}")
+        else:
+            try:
+                order_info = await notion_service.find_order_by_structure(payload.structure)
+            except Exception as e:
+                raise HTTPException(502, f"Errore ricerca ordine Notion: {e}")
+            if order_info.get("status") == "not_found":
+                await log_anomaly(
+                    kind="order_not_found",
+                    description=f"Nessun ordine per struttura '{payload.structure}'",
+                    operator=payload.operator, source="spedizione",
+                )
+                raise HTTPException(409, f"Ordine non trovato per la struttura selezionata: '{payload.structure}'")
+            if order_info.get("status") == "multiple":
+                await log_anomaly(
+                    kind="order_multiple",
+                    description=f"{order_info.get('count')} ordini per '{payload.structure}'",
+                    operator=payload.operator, source="spedizione",
+                )
+                raise HTTPException(
+                    409,
+                    f"Sono stati trovati {order_info.get('count')} ordini per questa struttura. "
+                    f"Verificare l'ordine selezionato.",
+                )
         # status == "not_configured" → passa oltre (retrocompatibile se ENV non impostato)
 
     # 3) Create Inventory Tracker rows in Notion (one per SN for serialized, one aggregated otherwise)
@@ -1545,6 +1574,7 @@ app.include_router(auth_routes.build_router(db, auth_deps, send_email_fn=send_em
 app.include_router(admin_users_routes.build_router(db, auth_deps), prefix="/api")
 app.include_router(admin_extra_routes.build_router(db, auth_deps), prefix="/api")
 app.include_router(qr_routes.build_router(db, auth_deps), prefix="/api")
+app.include_router(orders_routes.build_router(db, auth_deps), prefix="/api")
 app.include_router(retro_routes.build_router(db, auth_deps, send_email_fn=send_email), prefix="/api")
 
 

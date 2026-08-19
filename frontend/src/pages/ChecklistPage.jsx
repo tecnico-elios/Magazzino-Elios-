@@ -42,6 +42,12 @@ export default function ChecklistPage() {
   const operatorName = user?.full_name || user?.username || "";
 
   const [cliente, setCliente] = useState("");
+  // F14 (autocomplete) — id Notion dell'ordine "Eliostech Ordini" selezionato dal picker.
+  //   Se null: nessun ordine selezionato (blocco sync su richiesta backend).
+  const [clienteOrderId, setClienteOrderId] = useState(null);
+  const [clienteSuggestions, setClienteSuggestions] = useState([]);
+  const [clienteOpen, setClienteOpen] = useState(false);
+  const [clienteLoading, setClienteLoading] = useState(false);
   const [shippingDate, setShippingDate] = useState(todayISO());
   const [notes, setNotes] = useState("");
 
@@ -307,6 +313,7 @@ export default function ChecklistPage() {
         operator: operatorName,
         shipping_date: shippingDate,
         structure: cliente.trim(),
+        order_page_id: clienteOrderId || null,
         taken_by: operatorName,
         notes: notes.trim() || null,
         items: list.map((li) => ({
@@ -324,6 +331,8 @@ export default function ChecklistPage() {
       toast.success("Spedizione confermata", { description: data.message, duration: 6000 });
       setList([]);
       setCliente("");
+      setClienteOrderId(null);
+      setClienteSuggestions([]);
       setNotes("");
       setPending(null);
       setLastScan(null);
@@ -380,16 +389,85 @@ export default function ChecklistPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <Label htmlFor="cliente" className="text-slate-700 text-sm font-semibold">
-                <Buildings size={14} className="inline mr-1" /> Cliente
+                <Buildings size={14} className="inline mr-1" /> Struttura / Cliente
               </Label>
-              <Input
-                id="cliente"
-                data-testid="input-structure"
-                value={cliente}
-                onChange={(e) => setCliente(e.target.value)}
-                placeholder=""
-                className="h-12 mt-1 text-base"
-              />
+              <div className="relative mt-1">
+                <Input
+                  id="cliente"
+                  data-testid="input-structure"
+                  value={cliente}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setCliente(v);
+                    setClienteOrderId(null); // ogni digitazione invalida la selezione precedente
+                    setClienteOpen(true);
+                    if (window.__cliSug) clearTimeout(window.__cliSug);
+                    window.__cliSug = setTimeout(async () => {
+                      const q = v.trim();
+                      if (q.length < 2) { setClienteSuggestions([]); return; }
+                      setClienteLoading(true);
+                      try {
+                        const { data } = await axios.get(`${API}/orders/search`, { params: { q, limit: 20 } });
+                        setClienteSuggestions(data.items || []);
+                      } catch {
+                        setClienteSuggestions([]);
+                      } finally {
+                        setClienteLoading(false);
+                      }
+                    }, 220);
+                  }}
+                  onFocus={() => cliente.trim().length >= 2 && setClienteOpen(true)}
+                  onBlur={() => setTimeout(() => setClienteOpen(false), 180)}
+                  autoComplete="off"
+                  placeholder=""
+                  className="h-12 text-base pr-9"
+                />
+                {clienteOrderId && (
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-emerald-600" title="Ordine Notion selezionato">
+                    <Check size={16} weight="bold" />
+                  </span>
+                )}
+                {clienteOpen && cliente.trim().length >= 2 && (
+                  <div
+                    className="absolute z-50 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-md shadow-xl max-h-64 overflow-auto"
+                    data-testid="cliente-suggestions"
+                  >
+                    {clienteLoading && (
+                      <div className="px-3 py-2 text-xs text-slate-400">Cerco…</div>
+                    )}
+                    {!clienteLoading && clienteSuggestions.length === 0 && (
+                      <div className="px-3 py-3 text-sm text-red-600" data-testid="cliente-no-results">
+                        Nessuna struttura trovata
+                      </div>
+                    )}
+                    {clienteSuggestions.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          setCliente(s.structure);
+                          setClienteOrderId(s.id);
+                          setClienteOpen(false);
+                          setClienteSuggestions([]);
+                        }}
+                        className="w-full text-left px-3 py-2 hover:bg-amber-50 border-b border-slate-100 last:border-0 min-h-[44px]"
+                        data-testid={`cliente-sug-${s.id}`}
+                      >
+                        <div className="font-semibold text-sm text-slate-900">{s.structure}</div>
+                        {s.title && s.title !== s.structure && (
+                          <div className="text-xs text-slate-500 truncate">{s.title}</div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {!clienteOrderId && cliente.trim().length >= 2 && (
+                <p className="text-[11px] text-amber-700 mt-1">
+                  ⚠️ Seleziona una struttura dall'elenco (necessario per la sync con l'ordine).
+                </p>
+              )}
             </div>
             <div>
               <Label className="text-slate-700 text-sm font-semibold">
@@ -680,10 +758,18 @@ export default function ChecklistPage() {
                 title: "🟢 SERIALI AGGIUNTI",
                 subtitle: `${sess.name} — ${sess.quantity} pz`,
               });
-              // F14 — Popup QR opzionale per ogni seriale committato
-              enqueueForQR({ id: sess.id, name: sess.name }, sess.serials.filter(Boolean));
+              // F14 (20/02) — il popup QR appare per-seriale via onSerialConfirmed nel SerialCollector.
+              //               Qui NON eseguiamo più enqueue in bulk per evitare doppi popup.
               setSerialSession(null);
             }}
+          onSerialConfirmed={(sn) => {
+            // F14 (20/02) — appena un seriale è validato (manuale/ENTER/scanner/fotocamera)
+            // apri subito il popup QR per QUEL seriale. Ogni SN è indipendente (SALTA/ASSOCIA per singolo).
+            const currentSess = serialSession;
+            const productName = currentSess?.name || "Wallbox";
+            const productId = currentSess?.id || "";
+            enqueueForQR({ id: productId, name: productName }, [sn]);
+          }}
           />
         </div>
       )}
