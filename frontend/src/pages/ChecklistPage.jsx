@@ -14,6 +14,7 @@ import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import { Badge } from "../components/ui/badge";
 import { fetchServerToday } from "../lib/tz";
+import BarcodeScanner from "../components/BarcodeScanner";
 import {
   ArrowSquareOut,
   Trash,
@@ -28,6 +29,7 @@ import {
   QrCode,
   SkipForward,
   Check,
+  Camera,
 } from "@phosphor-icons/react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -818,9 +820,14 @@ export default function ChecklistPage() {
         onConfirm={submit}
       />
 
-      {/* F14 — Popup opzionale QR Code per il primo elemento della coda */}
+      {/* F14 (BLOCCO 1) — Popup QR: input MANUALE + FOTOCAMERA sempre visibili.
+          Compatibile con scanner palmare/USB/Bluetooth (input HID → invia direttamente al campo),
+          fotocamera smartphone/tablet/PC (📷) e digitazione manuale. Stessa validazione. */}
       {qrPromptOpen && qrQueue.length > 0 && (
-        <Dialog open={true} onOpenChange={(v) => { if (!v && !qrBusy) { setQrPromptOpen(false); setQrScanOpen(false); setQrValue(""); } }}>
+        <Dialog
+          open={true}
+          onOpenChange={(v) => { if (!v && !qrBusy) { setQrPromptOpen(false); setQrScanOpen(false); setQrValue(""); } }}
+        >
           <DialogContent className="max-w-md" data-testid="qr-prompt-dialog">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -829,59 +836,76 @@ export default function ChecklistPage() {
               </DialogTitle>
               <DialogDescription>
                 <b>{qrQueue[0].productName}</b> — SN <span className="font-mono-tight">{qrQueue[0].serial}</span>
-                <br />Vuoi associare un QR Code a questa Wallbox? (opzionale)
+                <br />QR opzionale: puoi <b>SALTARE</b> o associarlo digitando/scansionando.
               </DialogDescription>
             </DialogHeader>
-            {!qrScanOpen ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 py-2">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    // SALTA — passa al prossimo
-                    setQrQueue((q) => q.slice(1));
-                    setQrValue("");
-                    setQrScanOpen(false);
-                    if (qrQueue.length <= 1) setQrPromptOpen(false);
-                  }}
-                  className="h-14 text-base"
-                  data-testid="qr-skip-btn"
-                >
-                  <SkipForward size={18} weight="bold" className="mr-2" /> SALTA
-                </Button>
-                <Button
-                  onClick={() => setQrScanOpen(true)}
-                  className="h-14 text-base bg-amber-600 hover:bg-amber-700 text-white"
-                  data-testid="qr-associate-btn"
-                >
-                  <QrCode size={18} weight="bold" className="mr-2" /> ASSOCIA QR
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <Label className="text-sm font-semibold">Scansiona o digita il QR Code</Label>
+            <div className="space-y-3">
+              <Label className="text-sm font-semibold">QR Code</Label>
+              <div className="flex items-center gap-2">
                 <Input
                   autoFocus
                   value={qrValue}
                   onChange={(e) => setQrValue(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); confirmQR(); } }}
-                  placeholder=""
-                  className="h-12 text-lg font-mono-tight"
+                  placeholder="Digita, scansiona o usa la fotocamera"
+                  className="h-12 text-base font-mono-tight flex-1"
                   data-testid="qr-input"
                   disabled={qrBusy}
+                  autoComplete="off"
                 />
-                <p className="text-xs text-slate-500">
-                  Puoi usare lo scanner hardware o digitare manualmente. Verifica automatica di univocità.
-                </p>
-                <div className="flex gap-2 justify-end">
-                  <Button variant="outline" onClick={() => { setQrScanOpen(false); setQrValue(""); }} disabled={qrBusy}>Indietro</Button>
-                  <Button onClick={confirmQR} disabled={qrBusy || !qrValue.trim()} className="bg-amber-600 hover:bg-amber-700 text-white" data-testid="qr-confirm-btn">
-                    {qrBusy ? <CircleNotch size={16} className="animate-spin mr-1" /> : <Check size={16} weight="bold" className="mr-1" />}
-                    Conferma QR
-                  </Button>
-                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setQrScanOpen(true)}
+                  className="h-12 w-12 shrink-0 border-amber-300 text-amber-700 hover:bg-amber-50"
+                  disabled={qrBusy}
+                  data-testid="qr-camera-btn"
+                  title="Apri fotocamera"
+                  aria-label="Apri fotocamera per scansionare il QR"
+                >
+                  <Camera size={20} weight="bold" />
+                </Button>
               </div>
-            )}
+              <p className="text-[11px] text-slate-500">
+                Compatibile con scanner palmare/USB/Bluetooth, fotocamera 📷 (smartphone/tablet/PC) e digitazione manuale.
+              </p>
+            </div>
+            <DialogFooter className="flex-col sm:flex-row gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setQrQueue((q) => q.slice(1));
+                  setQrValue("");
+                  setQrScanOpen(false);
+                  if (qrQueue.length <= 1) setQrPromptOpen(false);
+                }}
+                className="h-11 w-full sm:w-auto"
+                disabled={qrBusy}
+                data-testid="qr-skip-btn"
+              >
+                <SkipForward size={18} weight="bold" className="mr-2" /> SALTA
+              </Button>
+              <Button
+                onClick={confirmQR}
+                disabled={qrBusy || !qrValue.trim()}
+                className="h-11 w-full sm:w-auto bg-amber-600 hover:bg-amber-700 text-white"
+                data-testid="qr-confirm-btn"
+              >
+                {qrBusy ? <CircleNotch size={16} className="animate-spin mr-1" /> : <Check size={16} weight="bold" className="mr-1" />}
+                Conferma QR
+              </Button>
+            </DialogFooter>
           </DialogContent>
+          <BarcodeScanner
+            open={qrScanOpen}
+            onClose={() => setQrScanOpen(false)}
+            label={`Scansiona QR Code — SN ${qrQueue[0]?.serial || ""}`}
+            onDetected={(val) => {
+              setQrScanOpen(false);
+              const v = (val || "").trim();
+              if (v) setQrValue(v);
+            }}
+          />
         </Dialog>
       )}
     </div>

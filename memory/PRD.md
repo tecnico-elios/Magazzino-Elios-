@@ -1,5 +1,28 @@
 # PRD — Magazzino Elios Tech
 
+
+## F14 (BLOCCHI 1-3) — QR multi-dispositivo, Retroattività responsive, Utenti responsive ✅ (20/02/2026)
+- **BLOCCO 1 — QR Code multi-dispositivo (Spedizioni + Retroattività)**:
+  - Popup unificato `[ Campo QR Code ] [ 📷 Scansiona ]` sempre visibili insieme
+  - Compatibile con: palmare (scanner HID), fotocamera smartphone/tablet/PC (`BarcodeScanner`), scanner USB/Bluetooth, digitazione manuale
+  - Stessa funzione di validazione (`/api/qr/check`) per tutti i metodi di input
+  - SALTA rimane possibile (QR opzionale, seriale mantenuto)
+  - `ChecklistPage.jsx`: rimosso step intermedio "ASSOCIA QR"; ora input + camera + SALTA + CONFERMA in un'unica vista
+  - `RetroattivitaPage.jsx` — `EditDialog`: stesso layout unificato + rimosso `qrMode` non necessario
+  - `RetroattivitaPage.jsx` — `AddForgottenItem`: stesso layout unificato per QR
+- **BLOCCO 2 — Pulsante "Aggiungi Wallbox dimenticata" responsive**:
+  - Spostato PRIMA del `DialogFooter` (evita clip su `max-height` mobile)
+  - Stile rinforzato: `w-full` mobile, `sm:w-auto sm:min-w-[280px]` desktop, border amber-400
+  - Nessun `display:none` / `hidden` breakpoint — sempre visibile su tutti i dispositivi
+- **BLOCCO 3 — Pagina Utenti responsive + fix creazione utente**:
+  - Aggiunto pulsante `Permessi` alle card mobile (`AdminUsersPage.jsx` <640px)
+  - Fix critico: form "Crea nuovo utente" ora NON eredita più credenziali dell'admin loggato
+    - `autoComplete="off"` sul form, `autoComplete="new-password"` sulla password
+    - Trap fields nascosti (position:absolute -9999px) per intercettare l'autofill browser
+    - `name="new-user-*-noautofill"` per evitare match sui gestori password
+  - Backend `POST /api/admin/users` verificato: usa solo `CreateUserBody` esplicito, nessun prefill dall'utente loggato
+
+
 ## Fasi
 - **F0-F6** ✅ (scanner, cache O(1), Notion SSOT, conferma finale, mapping strict)
 - **Phase-2 Auth & RBAC** ✅ (15/02/2026)

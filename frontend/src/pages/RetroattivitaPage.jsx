@@ -10,7 +10,7 @@ import { Badge } from "../components/ui/badge";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "../components/ui/dialog";
-import { ArrowUUpLeft, MagnifyingGlass, Warning, PencilSimple, Prohibit, QrCode, Camera, Keyboard } from "@phosphor-icons/react";
+import { ArrowUUpLeft, MagnifyingGlass, Warning, PencilSimple, Prohibit, Camera } from "@phosphor-icons/react";
 import BarcodeScanner from "../components/BarcodeScanner";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -198,7 +198,6 @@ function EditDialog({ row, kind, onClose, onDone }) {
   const [newQty, setNewQty] = useState(row?.quantity != null ? String(row.quantity) : "");
   const [newStructure, setNewStructure] = useState(row?.cliente || "");
   const [newQr, setNewQr] = useState("");
-  const [qrMode, setQrMode] = useState(null); // null | "manual" | "scan"
   const [qrScannerOpen, setQrScannerOpen] = useState(false);
   const [qrChecking, setQrChecking] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -210,7 +209,6 @@ function EditDialog({ row, kind, onClose, onDone }) {
       .then(({ data }) => {
         if (data?.exists && data?.qr_code) {
           setNewQr(data.qr_code);
-          setQrMode("manual"); // apre il campo con valore precaricato
         }
       })
       .catch(() => {});
@@ -326,37 +324,33 @@ function EditDialog({ row, kind, onClose, onDone }) {
                 </div>
                 <div className="sm:col-span-2">
                   <Label className="text-xs font-semibold">QR Code (aggiungi/modifica — opzionale)</Label>
-                  {qrMode === null ? (
-                    <div className="grid grid-cols-2 gap-2 mt-1">
-                      <Button type="button" variant="outline" onClick={() => setQrMode("manual")} className="h-11" data-testid="retro-qr-manual-btn">
-                        <Keyboard size={16} weight="bold" className="mr-2" /> INSERISCI MANUALMENTE
-                      </Button>
-                      <Button type="button" onClick={() => { setQrMode("scan"); setQrScannerOpen(true); }} className="h-11 bg-amber-600 hover:bg-amber-700 text-white" data-testid="retro-qr-scan-btn">
-                        <Camera size={16} weight="bold" className="mr-2" /> 📷 SCANSIONA QR
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="mt-1 flex items-center gap-2">
-                      <Input
-                        value={newQr}
-                        onChange={(e) => setNewQr(e.target.value)}
-                        onBlur={(e) => verifyQr(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); verifyQr(newQr); } }}
-                        placeholder={qrMode === "scan" ? "Scansiona con la fotocamera" : ""}
-                        className="h-10 font-mono-tight flex-1"
-                        autoFocus
-                        data-testid="retro-new-qr"
-                      />
-                      {qrMode === "scan" && (
-                        <Button type="button" variant="outline" size="sm" onClick={() => setQrScannerOpen(true)} data-testid="retro-qr-reopen-scan">
-                          <Camera size={14} weight="bold" />
-                        </Button>
-                      )}
-                      <Button type="button" variant="outline" size="sm" onClick={() => { setQrMode(null); setNewQr(""); }} data-testid="retro-qr-reset">
-                        Cambia
-                      </Button>
-                    </div>
-                  )}
+                  {/* F14 (BLOCCO 1) — input + fotocamera SEMPRE visibili, layout unificato con Spedizioni. */}
+                  <div className="mt-1 flex items-center gap-2">
+                    <Input
+                      value={newQr}
+                      onChange={(e) => setNewQr(e.target.value)}
+                      onBlur={(e) => verifyQr(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); verifyQr(newQr); } }}
+                      placeholder="Digita, scansiona o usa la fotocamera"
+                      className="h-11 font-mono-tight flex-1"
+                      autoComplete="off"
+                      data-testid="retro-new-qr"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setQrScannerOpen(true)}
+                      className="h-11 w-11 shrink-0 border-amber-300 text-amber-700 hover:bg-amber-50"
+                      data-testid="retro-qr-scan-btn"
+                      title="Apri fotocamera"
+                      aria-label="Apri fotocamera per QR Code"
+                    >
+                      <Camera size={18} weight="bold" />
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Scanner palmare/USB/Bluetooth, fotocamera 📷 (smartphone/tablet/PC) e digitazione manuale — stessa validazione.
+                  </p>
                   {qrChecking && <p className="text-xs text-slate-400 mt-1">Verifica…</p>}
                 </div>
               </>
@@ -367,6 +361,8 @@ function EditDialog({ row, kind, onClose, onDone }) {
             <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} placeholder="" className="mt-1" data-testid="retro-reason" />
           </div>
         </div>
+        {/* F14 (BLOCCO 2) — Sub-form "Aggiungi Wallbox dimenticata": posizionato PRIMA del footer per garantire visibilità su mobile/tablet/palmare (evita clip su max-height del dialog). */}
+        <AddForgottenItem row={row} kind={kind} onDone={onDone} />
         <DialogFooter className="flex-col sm:flex-row gap-2">
           <Button variant="outline" onClick={onClose} disabled={busy}>Chiudi</Button>
           <Button variant="destructive" onClick={cancelOp} disabled={busy} data-testid="retro-cancel-op">
@@ -386,8 +382,6 @@ function EditDialog({ row, kind, onClose, onDone }) {
             )}
           </Button>
         </DialogFooter>
-        {/* F14 §2-14 — Aggiungi wallbox/seriale dimenticato senza creare nuove righe */}
-        <AddForgottenItem row={row} kind={kind} onDone={onDone} />
       </DialogContent>
       {/* F14 — Fotocamera per scansione QR (riusa componente esistente) */}
       <BarcodeScanner
@@ -412,7 +406,6 @@ function AddForgottenItem({ row, kind, onDone }) {
   const [reason, setReason] = useState("");
   const [addSn, setAddSn] = useState("");
   const [addQr, setAddQr] = useState("");
-  const [qrMode, setQrMode] = useState(null);
   const [scanFor, setScanFor] = useState(null); // "sn" | "qr" | null
   const [busy, setBusy] = useState(false);
 
@@ -432,7 +425,7 @@ function AddForgottenItem({ row, kind, onDone }) {
       toast.success("Wallbox dimenticata aggiunta", {
         description: `Nuova quantità: ${data.new_qty} · Seriali: ${(data.sn_list || []).length}`,
       });
-      setOpen(false); setReason(""); setAddSn(""); setAddQr(""); setQrMode(null);
+      setOpen(false); setReason(""); setAddSn(""); setAddQr("");
       onDone();
     } catch (e) {
       toast.error("Aggiunta fallita", { description: formatError(e) });
@@ -442,10 +435,18 @@ function AddForgottenItem({ row, kind, onDone }) {
   if (!open) {
     return (
       <div className="mt-4 border-t border-slate-200 pt-3">
-        <Button type="button" variant="outline" onClick={() => setOpen(true)} className="w-full border-amber-300 text-amber-800" data-testid="retro-add-forgotten-btn">
+        {/* F14 (BLOCCO 2) — Pulsante SEMPRE visibile su tutti i dispositivi (mobile/tablet/palmare/desktop).
+            w-full su mobile, larghezza auto e centrato su desktop. Nessun display:none / hidden. */}
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setOpen(true)}
+          className="w-full sm:w-auto sm:min-w-[280px] mx-auto flex border-2 border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-800 font-semibold h-11"
+          data-testid="retro-add-forgotten-btn"
+        >
           ➕ Aggiungi Wallbox dimenticata
         </Button>
-        <p className="text-[11px] text-slate-400 mt-1">
+        <p className="text-[11px] text-slate-400 mt-2 text-center">
           Aggiunge un seriale{kind === "spedizione" ? " + QR opzionale" : ""} allo stesso record ({kind}). Nessuna nuova riga.
         </p>
       </div>
@@ -469,21 +470,28 @@ function AddForgottenItem({ row, kind, onDone }) {
           {kind === "spedizione" && (
             <div className="sm:col-span-2">
               <Label className="text-xs font-semibold">QR Code (opz)</Label>
-              {qrMode === null ? (
-                <div className="grid grid-cols-2 gap-2 mt-1">
-                  <Button type="button" variant="outline" onClick={() => setQrMode("manual")} className="h-10 text-xs" data-testid="retro-add-qr-manual">
-                    <Keyboard size={14} weight="bold" className="mr-1" /> MANUALE
-                  </Button>
-                  <Button type="button" onClick={() => { setQrMode("scan"); setScanFor("qr"); }} className="h-10 text-xs bg-amber-600 text-white" data-testid="retro-add-qr-scan">
-                    <Camera size={14} weight="bold" className="mr-1" /> 📷 SCANSIONA
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex gap-2 mt-1">
-                  <Input value={addQr} onChange={(e) => setAddQr(e.target.value)} className="h-10 font-mono-tight flex-1" data-testid="retro-add-qr" />
-                  <Button type="button" variant="outline" size="sm" onClick={() => { setQrMode(null); setAddQr(""); }}>×</Button>
-                </div>
-              )}
+              {/* F14 (BLOCCO 1) — input + fotocamera SEMPRE visibili */}
+              <div className="flex gap-2 mt-1">
+                <Input
+                  value={addQr}
+                  onChange={(e) => setAddQr(e.target.value)}
+                  placeholder="Digita, scansiona o usa la fotocamera"
+                  className="h-10 font-mono-tight flex-1"
+                  autoComplete="off"
+                  data-testid="retro-add-qr"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setScanFor("qr")}
+                  className="h-10 w-10 shrink-0 border-amber-300 text-amber-700 hover:bg-amber-50"
+                  data-testid="retro-add-qr-scan"
+                  title="Apri fotocamera"
+                  aria-label="Apri fotocamera per QR"
+                >
+                  <Camera size={14} weight="bold" />
+                </Button>
+              </div>
             </div>
           )}
           <div className="sm:col-span-2">

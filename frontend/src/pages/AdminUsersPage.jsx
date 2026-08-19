@@ -38,6 +38,8 @@ function CreateUserDialog({ open, onClose, onCreated }) {
   const [role, setRole] = useState("operator");
   const [busy, setBusy] = useState(false);
 
+  // F14 (BLOCCO 3) — Reset totale del form ad ogni apertura. Il form NON deve mai
+  // ereditare dati dall'utente attualmente loggato (né stato React né autofill browser).
   useEffect(() => {
     if (open) {
       setFirst(""); setLast(""); setUsername(""); setEmail(""); setPassword(""); setRole("operator");
@@ -73,15 +75,20 @@ function CreateUserDialog({ open, onClose, onCreated }) {
           <DialogTitle>Nuovo utente</DialogTitle>
           <DialogDescription>La password verrà cifrata con bcrypt e non salvata in chiaro.</DialogDescription>
         </DialogHeader>
-        <form onSubmit={submit} className="space-y-3">
+        <form onSubmit={submit} className="space-y-3" autoComplete="off" data-testid="create-user-form">
+          {/* F14 (BLOCCO 3) — Trappole anti-autofill: fields nascosti che intercettano
+              username/password che il browser tenterebbe di auto-inserire con le credenziali
+              dell'utente attualmente loggato. NON toccano lo stato del form. */}
+          <input type="text" name="username" autoComplete="username" tabIndex={-1} aria-hidden="true" style={{ position: "absolute", left: "-9999px", opacity: 0, height: 0, width: 0 }} />
+          <input type="password" name="password" autoComplete="current-password" tabIndex={-1} aria-hidden="true" style={{ position: "absolute", left: "-9999px", opacity: 0, height: 0, width: 0 }} />
           <div className="grid grid-cols-2 gap-2">
             <div>
               <Label>Nome</Label>
-              <Input value={first} onChange={(e) => setFirst(e.target.value)} required className="h-11 mt-1" data-testid="new-user-first-name" />
+              <Input value={first} onChange={(e) => setFirst(e.target.value)} required className="h-11 mt-1" data-testid="new-user-first-name" autoComplete="off" />
             </div>
             <div>
               <Label>Cognome</Label>
-              <Input value={last} onChange={(e) => setLast(e.target.value)} required className="h-11 mt-1" data-testid="new-user-last-name" />
+              <Input value={last} onChange={(e) => setLast(e.target.value)} required className="h-11 mt-1" data-testid="new-user-last-name" autoComplete="off" />
             </div>
           </div>
           <div>
@@ -93,6 +100,8 @@ function CreateUserDialog({ open, onClose, onCreated }) {
               className="h-11 mt-1 font-mono-tight"
               data-testid="new-user-username"
               placeholder="minuscole, numeri, . _ -"
+              autoComplete="off"
+              name="new-user-username-noautofill"
             />
           </div>
           <div>
@@ -104,6 +113,8 @@ function CreateUserDialog({ open, onClose, onCreated }) {
               className="h-11 mt-1"
               data-testid="new-user-email"
               placeholder="opzionale"
+              autoComplete="off"
+              name="new-user-email-noautofill"
             />
           </div>
           <div>
@@ -116,6 +127,8 @@ function CreateUserDialog({ open, onClose, onCreated }) {
               minLength={6}
               className="h-11 mt-1"
               data-testid="new-user-password"
+              autoComplete="new-password"
+              name="new-user-password-noautofill"
             />
           </div>
           <div>
@@ -785,8 +798,19 @@ export default function AdminUsersPage() {
                   <Button
                     size="sm"
                     variant="outline"
+                    onClick={() => setPermTarget(u)}
+                    disabled={isMaster || u.role !== "responsabile"}
+                    className="h-9 flex-1 min-w-[calc(50%-0.25rem)]"
+                    data-testid={`m-perm-${u.username}`}
+                    title={u.role !== "responsabile" ? "Solo per Responsabile" : "Permessi configurabili"}
+                  >
+                    <PencilSimple size={14} className="mr-1" /> Permessi
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
                     onClick={() => setResetTarget(u)}
-                    className="h-9 flex-1"
+                    className="h-9 flex-1 min-w-[calc(50%-0.25rem)]"
                     data-testid={`m-reset-${u.username}`}
                     disabled={isMaster}
                   >
@@ -797,7 +821,7 @@ export default function AdminUsersPage() {
                     variant="outline"
                     onClick={() => toggleActive(u)}
                     disabled={isMe || isMaster}
-                    className={`h-9 flex-1 ${u.active ? "border-red-300 text-red-600 hover:bg-red-50" : "border-emerald-300 text-emerald-700 hover:bg-emerald-50"}`}
+                    className={`h-9 flex-1 min-w-[calc(50%-0.25rem)] ${u.active ? "border-red-300 text-red-600 hover:bg-red-50" : "border-emerald-300 text-emerald-700 hover:bg-emerald-50"}`}
                     data-testid={`m-toggle-${u.username}`}
                   >
                     <Prohibit size={14} className="mr-1" /> {u.active ? "Disattiva" : "Riattiva"}
@@ -806,8 +830,8 @@ export default function AdminUsersPage() {
                     size="sm"
                     variant="outline"
                     onClick={() => setDeleteTarget(u)}
-                    disabled={isMe}
-                    className="h-9 flex-1 border-red-400 text-red-700 hover:bg-red-50"
+                    disabled={isMe || isMaster}
+                    className="h-9 flex-1 min-w-[calc(50%-0.25rem)] border-red-400 text-red-700 hover:bg-red-50"
                     data-testid={`m-delete-${u.username}`}
                   >
                     <Trash size={14} className="mr-1" /> Elimina
