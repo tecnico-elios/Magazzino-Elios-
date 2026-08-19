@@ -109,6 +109,12 @@ class SpedizioniSettings(BaseModel):
     allow_partial_shipment: Optional[bool] = None     # permetti spedizioni parziali
 
 
+class RetroattivitaSettings(BaseModel):
+    """F14 §9 — Impostazioni retroattività."""
+    model_config = ConfigDict(extra="ignore")
+    email_enabled: Optional[bool] = None              # invio email automatico dopo save success
+
+
 # Lista IANA supportata (fusi principali internazionali). L'ora legale/solare è gestita
 # automaticamente da ZoneInfo. Sono i tz mostrati nella UI Admin.
 SUPPORTED_TIMEZONES = [
@@ -151,6 +157,8 @@ class SettingsBody(BaseModel):
     # F10 Arrivi/Spedizioni configurabili
     arrivi: Optional[ArriviSettings] = None
     spedizioni: Optional[SpedizioniSettings] = None
+    # F14 Retroattività
+    retroattivita: Optional[RetroattivitaSettings] = None
     # F8 general (timezone)
     general: Optional[GeneralSettings] = None
 
@@ -225,6 +233,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         "continuous_scan": True,
         "final_check": True,
         "allow_partial_shipment": False,
+    },
+    "retroattivita": {
+        "email_enabled": False,   # F14 §9 — default OFF (no email)
     },
     "general": {
         "app_name": "Magazzino Elios Tech",

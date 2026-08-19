@@ -74,6 +74,31 @@
 - Frontend: nuova tab Admin `ManutenzioneTab` con stato Notion (pallino verde/rosso), count prodotti in cache, timestamp ultimo check, bottoni "Sincronizza ora" / "Svuota cache" / "Verifica stato".
 - Nota: gli altri punti F9 (Admin restructure per area, tipizzazione notifiche per evento) sono già stati esplicitamente rifiutati (P2) o richiedono scelta operativa dell'utente — non toccati per evitare regressioni.
 
+## F14 — Completamento finale (correzioni P0) ✅ (19/02/2026)
+
+### 1. Rimosso campo "Nuova data" da Retroattività (§3)
+- **Frontend `RetroattivitaPage.jsx`**: eliminato state `newDate` + input UI + parametro `new_date` dal PATCH body.
+- **Backend `retro_routes.py`**: rimosso `new_date` da `ShipmentPatchBody` e `ArrivoPatchBody`. Chiamate a `update_tracker_row/update_receipt_row` passano `new_date=None`. La data dell'operazione resta invariata; l'audit registra `date_registrazione` separatamente.
+
+### 2. Email automatica retroattività (§9-10)
+- **Backend**: nuovo helper `_send_retro_email_if_enabled(db, send_email_fn, tipo, before, after, reason, actor)` — riusa **`send_email` esistente** e destinatari già configurati (filtrando `events.spedizioni/arrivi` come per submit normale). Nessun nuovo sistema email.
+- **Settings**: nuova sezione `retroattivita.email_enabled` (default `False`) in `admin_extra_routes.py` (SettingsBody + DEFAULT_SETTINGS).
+- **UI**: nuovo `RetroattivitaEmailToggle` in `SettingsSpedizioniTab` — toggle ON/OFF con `SettingSwitch`, persistito via `PUT /admin/settings`.
+- **Flusso email**: chiamata SOLO dopo save success di `PATCH /retro/shipment` e `PATCH /retro/arrivo`. Se save fallisce → nessuna email. Response include `email_sent: bool`.
+- `server.py`: passa `send_email_fn=send_email` a `retro_routes.build_router()`.
+
+### 3. Logo Elios Tech → Dashboard (§15-16)
+- **`AppLayout.jsx`**: il bottone brand ora chiama `navigate("/")` prima del refresh cache (già presente). Non salva nulla, non crea movimenti, non tocca Notion. Testid rinominato in `brand-home-btn`.
+
+### 4. Loading state Retroattività (§8)
+- **`EditDialog`**: bottone `Conferma modifica` mostra spinner SVG animato + testo "Salvataggio…", `disabled={busy}` impedisce doppio invio, min-width fisso evita layout jump.
+
+### Non modificato (invariato F14)
+- Match Ordini su `Modulo Ordine/Struttura` (confermato §1) · QTY WB mai toccato (§2) · QR check univoco (§5) · retro modifica record esistente (§6) · modifica parziale (§7) · audit before/after (§11) · filtri Arrivi=Fornitore, Spedizioni=Struttura (§12-13) · permessi Admin/Responsabile/Operator (§14) · struttura Notion 0 modifiche (§17).
+
+### Test superati (curl + import)
+- Backend compila 3 file · imports OK · endpoint 401 senza JWT · Frontend lint 0 errori su 3 file toccati · Match ordine reale "Dalla Nonna Trattoria Bar" → found (già validato in job precedente).
+
 ## F14 — Ricerca Retroattività: label + colonna + campo dinamici per tipo ✅ (19/02/2026)
 
 - **Backend `routes/retro_routes.py`**: aggiunto campo `fornitore` a `RetroFindBody`. Quando `tipo=arrivo`, i receipts Notion vengono arricchiti con il campo `fornitore` (best-effort) tramite match su `db.arrivi` Mongo per `(arrival_date, serial)` o `(arrival_date, item_name)`. Il filtro server-side usa `structure` se tipo=spedizione, `fornitore` se tipo=arrivo.

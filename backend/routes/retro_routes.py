@@ -23,8 +23,73 @@ from pydantic import BaseModel, ConfigDict
 
 import auth as auth_mod
 import notion_service
+from routes import admin_extra_routes as _adm
 
 logger = logging.getLogger(__name__)
+
+
+async def _send_retro_email_if_enabled(db, send_email_fn, tipo: str, before: Dict[str, Any],
+                                         after: Dict[str, Any], reason: str, actor: str) -> bool:
+    """F14 §9-10 — Invio email retroattività SOLO se settings.retroattivita.email_enabled=True.
+    Riusa `send_email` esistente + destinatari già configurati. Returns True se inviata."""
+    try:
+        settings = await _adm.get_app_settings(db)
+        enabled = bool(((settings.get("retroattivita") or {}).get("email_enabled")))
+        if not enabled:
+            return False
+        # Riusa i destinatari già configurati per gli eventi shipment/arrivi
+        recips_doc = await db.settings.find_one({"_id": "app_settings"}) or {}
+        raw_recips = recips_doc.get("recipients") or []
+        emails: List[str] = []
+        for r in raw_recips:
+            if isinstance(r, str):
+                emails.append(r)
+            elif isinstance(r, dict) and r.get("email"):
+                if r.get("enabled") is False:
+                    continue
+                ev_key = "spedizioni" if tipo == "spedizione" else "arrivi"
+                if (r.get("events") or {}).get(ev_key, True):
+                    emails.append(r["email"])
+        if not emails:
+            return False
+        subject = f"[Retroattività] {tipo.capitalize()} modificata — {after.get('sn') or before.get('sn') or ''}"
+        rows_html = ""
+        for k in ("sn", "quantity", "date", "cliente", "taken_by", "qr_code"):
+            b = before.get(k); a = after.get(k)
+            if b is None and a is None:
+                continue
+            if str(b) == str(a):
+                continue
+            rows_html += (
+                f"<tr>"
+                f"<td style='padding:6px 10px;border:1px solid #e2e8f0;font-weight:600'>{k}</td>"
+                f"<td style='padding:6px 10px;border:1px solid #e2e8f0;color:#dc2626'>{b if b is not None else '—'}</td>"
+                f"<td style='padding:6px 10px;border:1px solid #e2e8f0;color:#16a34a;font-weight:700'>{a if a is not None else '—'}</td>"
+                f"</tr>"
+            )
+        html = (
+            f"<div style='font-family:Arial,sans-serif;padding:16px'>"
+            f"<h2 style='color:#b45309'>⚠️ Operazione retroattiva applicata</h2>"
+            f"<p><b>Tipo:</b> {tipo}<br/>"
+            f"<b>Operatore:</b> {actor}<br/>"
+            f"<b>Motivazione:</b> {reason}<br/>"
+            f"<b>Data registrazione:</b> {datetime.now(timezone.utc).isoformat()}</p>"
+            f"<table style='border-collapse:collapse;font-size:13px'>"
+            f"<thead><tr><th style='padding:6px 10px;border:1px solid #e2e8f0'>Campo</th>"
+            f"<th style='padding:6px 10px;border:1px solid #e2e8f0'>Prima</th>"
+            f"<th style='padding:6px 10px;border:1px solid #e2e8f0'>Dopo</th></tr></thead>"
+            f"<tbody>{rows_html or '<tr><td colspan=3>Nessun campo modificato</td></tr>'}</tbody>"
+            f"</table></div>"
+        )
+        for e in emails:
+            try:
+                await send_email_fn(e, subject, html)
+            except Exception as ex:
+                logger.warning(f"retro email to {e} failed: {ex}")
+        return True
+    except Exception as e:
+        logger.warning(f"retro email skipped: {e}")
+        return False
 
 
 def _require_retro(current) -> None:
@@ -53,7 +118,6 @@ class ShipmentPatchBody(BaseModel):
     new_sn: Optional[str] = None
     new_quantity: Optional[float] = None
     new_structure: Optional[str] = None  # → riscrive "Preso per" e ri-sincronizza Ordini
-    new_date: Optional[str] = None
     new_taken_by: Optional[str] = None
     new_qr_code: Optional[str] = None    # aggiungi/aggiorna QR sull'ordine
 
@@ -63,7 +127,6 @@ class ArrivoPatchBody(BaseModel):
     reason: str
     new_sn: Optional[str] = None
     new_quantity: Optional[float] = None
-    new_date: Optional[str] = None
 
 
 class CancelBody(BaseModel):
@@ -71,7 +134,7 @@ class CancelBody(BaseModel):
     reason: str
 
 
-def build_router(db, deps) -> APIRouter:
+def build_router(db, deps, send_email_fn=None) -> APIRouter:
     router = APIRouter(prefix="/retro", tags=["retro"])
 
     @router.get("/authorized")
@@ -175,14 +238,13 @@ def build_router(db, deps) -> APIRouter:
                 new_sn=(body.new_sn.strip() if body.new_sn else None),
                 new_qty=body.new_quantity,
                 new_cliente=(body.new_structure.strip() if body.new_structure else None),
-                new_date=body.new_date,
+                new_date=None,  # F14 §3: la data operazione non è modificabile via UI
                 new_taken_by=body.new_taken_by,
             )
         except Exception as e:
             raise HTTPException(502, f"Aggiornamento riga uscita fallito: {e}")
         if body.new_sn: after["sn"] = body.new_sn.strip()
         if body.new_quantity is not None: after["quantity"] = body.new_quantity
-        if body.new_date: after["date"] = body.new_date
         if body.new_taken_by is not None: after["taken_by"] = body.new_taken_by
 
         # 4) Se cambio struttura → rimuovi SN/QR dal vecchio ordine e append al nuovo
@@ -274,7 +336,10 @@ def build_router(db, deps) -> APIRouter:
             },
         })
         notion_service.invalidate_inventory_cache()
-        return {"ok": True, "before": before, "after": after}
+        email_sent = False
+        if send_email_fn:
+            email_sent = await _send_retro_email_if_enabled(db, send_email_fn, "spedizione", before, after, body.reason, current.get("username") or "")
+        return {"ok": True, "before": before, "after": after, "email_sent": email_sent}
 
     @router.patch("/arrivo/{receipt_page_id}")
     async def patch_arrivo(receipt_page_id: str, body: ArrivoPatchBody, current=Depends(deps.get_current_user)):
@@ -300,14 +365,13 @@ def build_router(db, deps) -> APIRouter:
                 receipt_page_id,
                 new_sn=(body.new_sn.strip() if body.new_sn else None),
                 new_qty=body.new_quantity,
-                new_date=body.new_date,
+                new_date=None,  # F14 §3
             )
         except Exception as e:
             raise HTTPException(502, f"Aggiornamento arrivo fallito: {e}")
 
         if body.new_sn: after["sn"] = body.new_sn.strip()
         if body.new_quantity is not None: after["quantity"] = body.new_quantity
-        if body.new_date: after["date"] = body.new_date
 
         # Se cambia il seriale sul receipt → aggiorna colonna 16 Inventario
         if body.new_sn and (before["sn"] or "").lower() != body.new_sn.strip().lower():
@@ -334,7 +398,10 @@ def build_router(db, deps) -> APIRouter:
             },
         })
         notion_service.invalidate_inventory_cache()
-        return {"ok": True, "before": before, "after": after}
+        email_sent = False
+        if send_email_fn:
+            email_sent = await _send_retro_email_if_enabled(db, send_email_fn, "arrivo", before, after, body.reason, current.get("username") or "")
+        return {"ok": True, "before": before, "after": after, "email_sent": email_sent}
 
     @router.post("/cancel/{tipo}/{page_id}")
     async def cancel_op(tipo: str, page_id: str, body: CancelBody, current=Depends(deps.get_current_user)):

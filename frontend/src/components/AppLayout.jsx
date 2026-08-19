@@ -53,25 +53,27 @@ export default function AppLayout() {
     <div className="min-h-screen bg-slate-50 flex flex-col" data-testid="app-layout">
       <header className="et-header-dark sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
-          {/* Brand — click = refresh dati (cache inventario + KPI Dashboard). Non tocca form aperti. */}
+          {/* Brand — click = vai a Dashboard + refresh dati (F14 §15). */}
           <button
             type="button"
             onClick={async () => {
+              // F14 §15/§16 — navigazione a Dashboard SENZA salvare form aperti,
+              // NESSUNA scrittura Notion. Il refresh è solo cache read-only.
+              navigate("/");
               try {
                 await refresh();
                 if (typeof window !== "undefined") {
                   window.dispatchEvent(new Event("elios:refresh-dashboard"));
                 }
-                toast.success("Dati aggiornati");
               } catch {
                 toast.error("Aggiornamento fallito");
               }
             }}
             disabled={loading}
             className="flex items-center gap-3 min-w-0 rounded-md hover:bg-white/5 active:bg-white/10 px-1 -mx-1 py-1 transition-colors disabled:opacity-60"
-            data-testid="brand-refresh-btn"
-            title="Aggiorna dati da Notion"
-            aria-label="Aggiorna dati da Notion"
+            data-testid="brand-home-btn"
+            title="Torna alla Dashboard"
+            aria-label="Torna alla Dashboard"
           >
             <EliosLogo size={30} />
             <div className="min-w-0 hidden sm:block text-left">

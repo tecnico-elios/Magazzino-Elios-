@@ -1545,7 +1545,7 @@ app.include_router(auth_routes.build_router(db, auth_deps, send_email_fn=send_em
 app.include_router(admin_users_routes.build_router(db, auth_deps), prefix="/api")
 app.include_router(admin_extra_routes.build_router(db, auth_deps), prefix="/api")
 app.include_router(qr_routes.build_router(db, auth_deps), prefix="/api")
-app.include_router(retro_routes.build_router(db, auth_deps), prefix="/api")
+app.include_router(retro_routes.build_router(db, auth_deps, send_email_fn=send_email), prefix="/api")
 
 
 @app.on_event("startup")

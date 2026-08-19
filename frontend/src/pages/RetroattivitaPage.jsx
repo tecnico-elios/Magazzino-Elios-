@@ -190,7 +190,6 @@ function EditDialog({ row, kind, onClose, onDone }) {
   const [reason, setReason] = useState("");
   const [newSn, setNewSn] = useState("");
   const [newQty, setNewQty] = useState("");
-  const [newDate, setNewDate] = useState("");
   const [newStructure, setNewStructure] = useState("");
   const [newQr, setNewQr] = useState("");
   const [qrMode, setQrMode] = useState(null); // null | "manual" | "scan"
@@ -231,15 +230,14 @@ function EditDialog({ row, kind, onClose, onDone }) {
       const body = { reason: reason.trim() };
       if (newSn.trim()) body.new_sn = newSn.trim();
       if (newQty !== "" && !isNaN(parseFloat(newQty))) body.new_quantity = parseFloat(newQty);
-      if (newDate) body.new_date = newDate;
       if (kind === "spedizione") {
         if (newStructure.trim()) body.new_structure = newStructure.trim();
         if (newQr.trim()) body.new_qr_code = newQr.trim();
       }
       const path = kind === "spedizione" ? `retro/shipment/${row.id}` : `retro/arrivo/${row.id}`;
       const { data } = await axios.patch(`${API}/${path}`, body);
-      toast.success("Modifica retroattiva applicata", {
-        description: `Prima: ${JSON.stringify(data.before).slice(0, 60)}…`,
+      toast.success("Modifica retroattiva salvata", {
+        description: data?.email_sent ? "Email di notifica inviata." : undefined,
       });
       onDone();
     } catch (e) {
@@ -293,10 +291,6 @@ function EditDialog({ row, kind, onClose, onDone }) {
             <div>
               <Label className="text-xs font-semibold">Nuova quantità (opz)</Label>
               <Input type="number" step="any" value={newQty} onChange={(e) => setNewQty(e.target.value)} placeholder={String(row.quantity ?? "")} className="h-10 mt-1 font-mono-tight" data-testid="retro-new-qty" />
-            </div>
-            <div>
-              <Label className="text-xs font-semibold">Nuova data (opz)</Label>
-              <Input type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} className="h-10 mt-1" data-testid="retro-new-date" />
             </div>
             {kind === "spedizione" && (
               <>
@@ -352,8 +346,18 @@ function EditDialog({ row, kind, onClose, onDone }) {
           <Button variant="destructive" onClick={cancelOp} disabled={busy} data-testid="retro-cancel-op">
             <Prohibit size={14} weight="bold" className="mr-1" /> Annulla operazione
           </Button>
-          <Button onClick={submit} disabled={busy} className="bg-amber-600 hover:bg-amber-700 text-white" data-testid="retro-confirm">
-            {busy ? "Applico…" : "Conferma modifica"}
+          <Button onClick={submit} disabled={busy} className="bg-amber-600 hover:bg-amber-700 text-white min-w-[180px]" data-testid="retro-confirm">
+            {busy ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <circle cx="12" cy="12" r="10" strokeWidth="4" className="opacity-25" />
+                  <path d="M4 12a8 8 0 018-8v0" strokeWidth="4" className="opacity-75" />
+                </svg>
+                Salvataggio…
+              </span>
+            ) : (
+              "Conferma modifica"
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

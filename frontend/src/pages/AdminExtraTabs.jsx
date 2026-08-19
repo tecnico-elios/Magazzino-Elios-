@@ -714,11 +714,49 @@ export function SettingsSpedizioniTab() {
         <Toggle k="allow_partial_shipment" label="Consenti spedizioni parziali" desc="Se disponibile solo parte della quantità richiesta, procedi con quella disponibile." />
       </div>
 
+      <RetroattivitaEmailToggle />
+
       <div className="flex justify-end">
         <Button onClick={save} disabled={saving} data-testid="save-spedizioni-settings-btn">
           {saving ? "Salvataggio…" : "Salva Impostazioni Spedizioni"}
         </Button>
       </div>
+    </div>
+  );
+}
+
+// F14 §9 — Toggle email automatica dopo modifica retroattiva
+function RetroattivitaEmailToggle() {
+  const [enabled, setEnabled] = useState(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    axios.get(`${API}/admin/settings`).then(({ data }) => {
+      setEnabled(!!((data.retroattivita || {}).email_enabled));
+    }).catch(() => setEnabled(false));
+  }, []);
+  const toggle = async (v) => {
+    setSaving(true);
+    try {
+      await axios.put(`${API}/admin/settings`, { retroattivita: { email_enabled: v } });
+      setEnabled(v);
+      toast.success(v ? "Email retroattività: ON" : "Email retroattività: OFF");
+      window.dispatchEvent(new Event("elios:settings-changed"));
+    } catch (e) {
+      toast.error("Salvataggio fallito", { description: formatError(e) });
+    } finally { setSaving(false); }
+  };
+  if (enabled === null) return null;
+  return (
+    <div className="et-card-elevated p-4" data-testid="retro-email-toggle-card">
+      <div className="text-xs uppercase tracking-wider font-bold text-slate-500 mb-2">Retroattività — Notifiche</div>
+      <SettingSwitch
+        label="Invia email automatica dopo modifica retroattiva"
+        hint="ON: dopo il salvataggio riuscito di una modifica retroattiva viene inviata un'email di notifica ai destinatari già configurati. OFF: nessuna email."
+        checked={enabled}
+        onChange={toggle}
+        disabled={saving}
+        testid="retro-email-toggle"
+      />
     </div>
   );
 }
