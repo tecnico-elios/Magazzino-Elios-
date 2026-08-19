@@ -387,7 +387,7 @@ export default function ChecklistPage() {
                 data-testid="input-structure"
                 value={cliente}
                 onChange={(e) => setCliente(e.target.value)}
-                placeholder="Es. ABC Srl"
+                placeholder=""
                 className="h-12 mt-1 text-base"
               />
             </div>
@@ -778,7 +778,7 @@ export default function ChecklistPage() {
                   value={qrValue}
                   onChange={(e) => setQrValue(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); confirmQR(); } }}
-                  placeholder="Es. QR123456"
+                  placeholder=""
                   className="h-12 text-lg font-mono-tight"
                   data-testid="qr-input"
                   disabled={qrBusy}

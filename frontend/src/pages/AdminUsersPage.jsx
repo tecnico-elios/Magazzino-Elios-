@@ -103,7 +103,7 @@ function CreateUserDialog({ open, onClose, onCreated }) {
               onChange={(e) => setEmail(e.target.value.toLowerCase())}
               className="h-11 mt-1"
               data-testid="new-user-email"
-              placeholder="opzionale — nome.cognome@eliostech.org"
+              placeholder="opzionale"
             />
           </div>
           <div>
@@ -196,7 +196,7 @@ function EditEmailDialog({ user, onClose, onDone }) {
             value={email}
             onChange={(e) => setEmail(e.target.value.toLowerCase())}
             className="h-11"
-            placeholder="nome.cognome@eliostech.org"
+            placeholder=""
             data-testid="edit-email-input"
             autoFocus
           />

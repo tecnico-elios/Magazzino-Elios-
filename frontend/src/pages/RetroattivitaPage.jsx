@@ -112,7 +112,7 @@ export default function RetroattivitaPage() {
           </div>
           <div>
             <Label className="text-slate-700 text-sm font-semibold">Seriale (opz)</Label>
-            <Input value={serial} onChange={(e) => setSerial(e.target.value)} placeholder="Es. 1426770" className="h-11 mt-1 font-mono-tight" data-testid="retro-serial" />
+            <Input value={serial} onChange={(e) => setSerial(e.target.value)} placeholder="" className="h-11 mt-1 font-mono-tight" data-testid="retro-serial" />
           </div>
           <div>
             <Label className="text-slate-700 text-sm font-semibold">
@@ -121,7 +121,7 @@ export default function RetroattivitaPage() {
             <Input
               value={structure}
               onChange={(e) => setStructure(e.target.value)}
-              placeholder={tipo === "spedizione" ? "Es. Casa Vacanze Palmer" : "Es. Daze / Fornitore X"}
+              placeholder=""
               className="h-11 mt-1"
               data-testid={tipo === "spedizione" ? "retro-structure" : "retro-fornitore"}
             />
@@ -316,7 +316,7 @@ function EditDialog({ row, kind, onClose, onDone }) {
                         onChange={(e) => setNewQr(e.target.value)}
                         onBlur={(e) => verifyQr(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); verifyQr(newQr); } }}
-                        placeholder={qrMode === "scan" ? "Scansiona con la fotocamera" : "Es. QR123456"}
+                        placeholder={qrMode === "scan" ? "Scansiona con la fotocamera" : ""}
                         className="h-10 font-mono-tight flex-1"
                         autoFocus
                         data-testid="retro-new-qr"
@@ -338,7 +338,7 @@ function EditDialog({ row, kind, onClose, onDone }) {
           </div>
           <div>
             <Label className="text-xs font-semibold text-red-700">Motivazione (obbligatoria) *</Label>
-            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} placeholder="Es. Correzione seriale inserito erroneamente" className="mt-1" data-testid="retro-reason" />
+            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} placeholder="" className="mt-1" data-testid="retro-reason" />
           </div>
         </div>
         <DialogFooter className="flex-col sm:flex-row gap-2">

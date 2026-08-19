@@ -383,7 +383,7 @@ function RecipientsTab() {
       <div className="flex gap-2">
         <Input
           type="email"
-          placeholder="nuova@destinatario.it"
+          placeholder=""
           value={newEmail}
           onChange={(e) => setNewEmail(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addEmail())}

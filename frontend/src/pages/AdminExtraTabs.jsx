@@ -427,7 +427,7 @@ export function SettingsTab({ filter, saveLabel }) {
             <div className="text-[11px] text-slate-500 mb-1">URL immagine per il logo (lascia vuoto per usare il default)</div>
             <Input value={s.general?.logo_url || ""}
               onChange={(e) => setSection("general", { logo_url: e.target.value })}
-              placeholder="https://…" className="h-10" data-testid="set-gen-logo" />
+              placeholder="" className="h-10" data-testid="set-gen-logo" />
           </div>
           <div className="py-2">
             <Label className="text-sm font-semibold text-slate-800">Colore principale</Label>
@@ -1236,7 +1236,7 @@ export function CleanupTestTab() {
         <div className="flex-1">
           <Label className="text-sm font-semibold">Prefisso (lascia vuoto per usare l'impostazione)</Label>
           <Input value={prefix} onChange={(e) => setPrefix(e.target.value)} className="h-11 font-mono-tight mt-1"
-            placeholder="TEST_" data-testid="cleanup-prefix-input" />
+            placeholder="" data-testid="cleanup-prefix-input" />
         </div>
         <Button onClick={doPreview} disabled={busy} className="h-11 et-btn-primary border-0" data-testid="cleanup-preview-btn">
           {busy ? "…" : "Anteprima"}
@@ -1312,7 +1312,7 @@ export function SerialHistoryTab() {
       <div className="flex gap-2 items-end max-w-lg">
         <div className="flex-1">
           <Label className="text-sm font-semibold">Seriale</Label>
-          <Input value={sn} onChange={(e) => setSn(e.target.value)} placeholder="es. 1384516"
+          <Input value={sn} onChange={(e) => setSn(e.target.value)} placeholder=""
             className="h-11 font-mono-tight mt-1" onKeyDown={(e) => e.key === "Enter" && search()}
             data-testid="serial-history-input" />
         </div>

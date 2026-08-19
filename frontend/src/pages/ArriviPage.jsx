@@ -338,7 +338,7 @@ export default function ArriviPage() {
                 data-testid="input-fornitore"
                 value={fornitore}
                 onChange={(e) => setFornitore(e.target.value)}
-                placeholder="Es. ABB Italia"
+                placeholder=""
                 className="h-12 mt-1 text-base"
               />
               <div className="text-[11px] text-slate-400 mt-1">Solo per l'email — non salvato su Notion.</div>

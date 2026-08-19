@@ -74,6 +74,21 @@
 - Frontend: nuova tab Admin `ManutenzioneTab` con stato Notion (pallino verde/rosso), count prodotti in cache, timestamp ultimo check, bottoni "Sincronizza ora" / "Svuota cache" / "Verifica stato".
 - Nota: gli altri punti F9 (Admin restructure per area, tipizzazione notifiche per evento) sono già stati esplicitamente rifiutati (P2) o richiedono scelta operativa dell'utente — non toccati per evitare regressioni.
 
+## F14 — Rimozione placeholder di esempio dai campi input ✅ (19/02/2026)
+
+Rimossi da tutti i campi del gestionale i placeholder che mostravano valori fittizi/dimostrativi:
+- **ChecklistPage.jsx**: `Es. ABC Srl` (cliente), `Es. QR123456` (QR retro) → vuoti.
+- **ArriviPage.jsx**: `Es. ABB Italia` (fornitore) → vuoto.
+- **RetroattivitaPage.jsx**: `Es. 1426770` (seriale), `Es. Casa Vacanze Palmer / Es. Daze / Fornitore X` (struttura/fornitore), `Es. QR123456` (QR), `Es. Correzione…` (motivazione) → tutti vuoti.
+- **AdminExtraTabs.jsx**: `es. 1384516` (SN admin), `https://…` (logo url), `TEST_` (cleanup prefix) → vuoti.
+- **AdminPage.jsx**: `nuova@destinatario.it` → vuoto.
+- **AdminUsersPage.jsx**: `opzionale — nome.cognome@eliostech.org` → `opzionale`, `nome.cognome@eliostech.org` → vuoto.
+
+Mantenuti (NON sono esempi, sono indicazioni operative o input richiesti):
+- Placeholder di ricerca (`Cerca per nome, codice…`), etichette funzionali (`Password`, `Username`), istruzioni operative (`Inserisci o scansiona seriale`, `ELIMINA` di conferma, `minuscole, numeri, . _ -` per regole formato).
+
+Nessuna modifica alla logica dei campi, al mapping Notion o alla struttura DB.
+
 ## F14 — Completamento finale (correzioni P0) ✅ (19/02/2026)
 
 ### 1. Rimosso campo "Nuova data" da Retroattività (§3)
