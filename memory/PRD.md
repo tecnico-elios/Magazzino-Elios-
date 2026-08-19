@@ -74,6 +74,15 @@
 - Frontend: nuova tab Admin `ManutenzioneTab` con stato Notion (pallino verde/rosso), count prodotti in cache, timestamp ultimo check, bottoni "Sincronizza ora" / "Svuota cache" / "Verifica stato".
 - Nota: gli altri punti F9 (Admin restructure per area, tipizzazione notifiche per evento) sono già stati esplicitamente rifiutati (P2) o richiedono scelta operativa dell'utente — non toccati per evitare regressioni.
 
+## F14 — Ricerca Retroattività: label + colonna + campo dinamici per tipo ✅ (19/02/2026)
+
+- **Backend `routes/retro_routes.py`**: aggiunto campo `fornitore` a `RetroFindBody`. Quando `tipo=arrivo`, i receipts Notion vengono arricchiti con il campo `fornitore` (best-effort) tramite match su `db.arrivi` Mongo per `(arrival_date, serial)` o `(arrival_date, item_name)`. Il filtro server-side usa `structure` se tipo=spedizione, `fornitore` se tipo=arrivo.
+- **Frontend `RetroattivitaPage.jsx`**:
+  * Label filtro dinamica: `Struttura / Cliente (opz)` per Spedizioni · `Fornitore (opz)` per Arrivi (placeholder e data-testid coerenti).
+  * Body della `POST /retro/find` invia il campo corretto in base al tipo (`structure` o `fornitore`).
+  * Colonna risultati dinamica: `Struttura / Cliente` per Spedizioni · `Fornitore` per Arrivi. Cella mostra `r.cliente` o `r.fornitore`.
+- **Non toccati**: `EditDialog`, salvataggio, audit, motivazione, gestione QR (manuale + scan), permessi retroattività, mapping Notion.
+
 ## F14 — CORREZIONI POST-IMPLEMENTAZIONE ✅ (19/02/2026)
 
 ### Correzione 1 — Match struttura su "Modulo Ordine/Struttura" (non più "Ragione sociale")

@@ -40,12 +40,15 @@ export default function RetroattivitaPage() {
   const search = async () => {
     setLoading(true);
     try {
+      const q = structure.trim();
       const { data } = await axios.post(`${API}/retro/find`, {
         tipo,
         date_from: dateFrom || null,
         date_to: dateTo || null,
         serial: serial.trim() || null,
-        structure: structure.trim() || null,
+        // F14 fix: usa il campo semanticamente corretto in base al tipo
+        structure: tipo === "spedizione" && q ? q : null,
+        fornitore: tipo === "arrivo" && q ? q : null,
       });
       setRows(data.items || []);
     } catch (e) {
@@ -112,8 +115,16 @@ export default function RetroattivitaPage() {
             <Input value={serial} onChange={(e) => setSerial(e.target.value)} placeholder="Es. 1426770" className="h-11 mt-1 font-mono-tight" data-testid="retro-serial" />
           </div>
           <div>
-            <Label className="text-slate-700 text-sm font-semibold">Struttura / Cliente (opz)</Label>
-            <Input value={structure} onChange={(e) => setStructure(e.target.value)} placeholder="Es. Casa Vacanze Palmer" className="h-11 mt-1" data-testid="retro-structure" />
+            <Label className="text-slate-700 text-sm font-semibold">
+              {tipo === "spedizione" ? "Struttura / Cliente (opz)" : "Fornitore (opz)"}
+            </Label>
+            <Input
+              value={structure}
+              onChange={(e) => setStructure(e.target.value)}
+              placeholder={tipo === "spedizione" ? "Es. Casa Vacanze Palmer" : "Es. Daze / Fornitore X"}
+              className="h-11 mt-1"
+              data-testid={tipo === "spedizione" ? "retro-structure" : "retro-fornitore"}
+            />
           </div>
           <div className="flex items-end">
             <Button onClick={search} disabled={loading} className="h-11 bg-amber-600 hover:bg-amber-700 text-white font-semibold w-full" data-testid="retro-search-btn">
@@ -138,7 +149,7 @@ export default function RetroattivitaPage() {
                   <th className="py-2 pr-3">Prodotto</th>
                   <th className="py-2 pr-3">Seriale/SN</th>
                   <th className="py-2 pr-3">Qty</th>
-                  <th className="py-2 pr-3">{tipo === "spedizione" ? "Cliente" : ""}</th>
+                  <th className="py-2 pr-3">{tipo === "spedizione" ? "Struttura / Cliente" : "Fornitore"}</th>
                   <th className="py-2 pr-3 text-right">Azioni</th>
                 </tr>
               </thead>
@@ -149,7 +160,7 @@ export default function RetroattivitaPage() {
                     <td className="py-2 pr-3">{r.item_name || (r.item_names || []).join(", ") || "—"}</td>
                     <td className="py-2 pr-3 font-mono-tight">{r.sn || "—"}</td>
                     <td className="py-2 pr-3">{r.quantity ?? "—"}</td>
-                    <td className="py-2 pr-3">{r.cliente || "—"}</td>
+                    <td className="py-2 pr-3">{tipo === "spedizione" ? (r.cliente || "—") : (r.fornitore || "—")}</td>
                     <td className="py-2 pr-3 text-right">
                       <Button size="sm" variant="outline" onClick={() => setEditing({ row: r, kind: tipo })} data-testid={`retro-edit-${r.id}`}>
                         <PencilSimple size={14} weight="bold" className="mr-1" /> Modifica

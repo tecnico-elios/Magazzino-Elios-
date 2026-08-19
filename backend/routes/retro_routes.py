@@ -44,6 +44,7 @@ class RetroFindBody(BaseModel):
     date_to: Optional[str] = None
     serial: Optional[str] = None
     structure: Optional[str] = None
+    fornitore: Optional[str] = None  # F14 fix: usato SOLO per tipo=arrivo
 
 
 class ShipmentPatchBody(BaseModel):
@@ -94,16 +95,37 @@ def build_router(db, deps) -> APIRouter:
             rows = await svc.list_exits(date_from=body.date_from, date_to=body.date_to)
         elif body.tipo == "arrivo":
             rows = await svc.list_receipts_all(date_from=body.date_from, date_to=body.date_to)
+            # F14 fix: arricchisci ogni receipt col fornitore da Mongo `arrivi` (best-effort match per SN + data)
+            try:
+                mongo_arrivi = await db.arrivi.find({}).to_list(2000)
+            except Exception:
+                mongo_arrivi = []
+            def _find_fornitore(sn: str, date: str) -> str:
+                sn_low = (sn or "").strip().lower()
+                for a in mongo_arrivi:
+                    if a.get("arrival_date") != date:
+                        continue
+                    for it in (a.get("items") or []):
+                        if sn_low and sn_low in [(s or "").strip().lower() for s in (it.get("serials") or [])]:
+                            return a.get("fornitore") or ""
+                        if not sn_low and (it.get("name") or "").strip().lower() == (sn or "").strip().lower():
+                            return a.get("fornitore") or ""
+                return ""
+            for r in rows:
+                r["fornitore"] = _find_fornitore(r.get("sn") or "", r.get("date") or "")
         else:
             raise HTTPException(400, "tipo deve essere 'spedizione' o 'arrivo'")
 
         q_sn = (body.serial or "").strip().lower()
         q_st = (body.structure or "").strip().lower()
+        q_fn = (body.fornitore or "").strip().lower()
 
         def _match(r: Dict[str, Any]) -> bool:
             if q_sn and q_sn not in (r.get("sn") or "").lower():
                 return False
-            if q_st and q_st not in (r.get("cliente") or "").lower():
+            if body.tipo == "spedizione" and q_st and q_st not in (r.get("cliente") or "").lower():
+                return False
+            if body.tipo == "arrivo" and q_fn and q_fn not in (r.get("fornitore") or "").lower():
                 return False
             return True
 
