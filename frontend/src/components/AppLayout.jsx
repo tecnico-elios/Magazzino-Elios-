@@ -4,8 +4,6 @@ import { toast } from "sonner";
 import {
   House,
   Package,
-  ArrowSquareIn,
-  ArrowSquareOut,
   ArrowsClockwise,
   Warning,
   Gear,
@@ -23,8 +21,8 @@ import { fmtTime, useTz } from "../lib/tz";
 const BASE_NAV = [
   { to: "/", label: "Dashboard", icon: House, end: true, testid: "nav-dashboard" },
   { to: "/inventario", label: "Inventario", icon: Package, testid: "nav-inventario" },
-  { to: "/arrivi", label: "Arrivi", icon: ArrowSquareIn, testid: "nav-arrivi" },
-  { to: "/spedizioni", label: "Spedizioni", icon: ArrowSquareOut, testid: "nav-spedizioni" },
+  // F14 (20/02) — Arrivi e Spedizioni RIMOSSI dalla nav principale su richiesta utente.
+  //   Restano raggiungibili dalle card grandi in Dashboard e via URL diretti /arrivi /spedizioni.
   { to: "/movimenti", label: "Movimenti", icon: ArrowsClockwise, testid: "nav-movimenti" },
   { to: "/anomalie", label: "Anomalie", icon: Warning, testid: "nav-anomalie" },
 ];

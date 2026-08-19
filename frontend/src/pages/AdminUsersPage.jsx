@@ -499,7 +499,7 @@ export default function AdminUsersPage() {
   return (
     <div className="min-h-screen bg-slate-50" data-testid="admin-users-page">
       <header className="et-header-dark sticky top-0 z-30">
-        <div className="max-w-5xl mx-auto px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-2 flex-wrap">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 sm:flex-none">
             <Link
               to="/"
@@ -507,14 +507,15 @@ export default function AdminUsersPage() {
             >
               <ArrowLeft size={16} className="mr-1" /> <span className="hidden xs:inline sm:inline">Magazzino</span>
             </Link>
-            <div className="min-w-0">
-              <div className="text-[10px] tracking-[0.22em] uppercase text-amber-300/80 font-semibold truncate">
-                Amministrazione
+            {/* F14 (20/02) — Brand cliccabile → torna alla Dashboard. */}
+            <Link to="/" className="min-w-0 group focus:outline-none rounded-md" title="Torna alla Dashboard" data-testid="users-brand-home">
+              <div className="text-[10px] tracking-[0.22em] uppercase text-amber-300/80 font-semibold truncate group-hover:text-amber-200 transition-colors">
+                Elios Tech — Amministrazione
               </div>
-              <h1 className="font-display text-lg sm:text-2xl font-bold text-white leading-tight">
+              <h1 className="font-display text-lg sm:text-2xl font-bold text-white leading-tight group-hover:text-amber-50 transition-colors">
                 Gestione Utenti
               </h1>
-            </div>
+            </Link>
           </div>
           <Button
             onClick={() => setCreateOpen(true)}
@@ -526,7 +527,7 @@ export default function AdminUsersPage() {
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
         <div className="flex items-center justify-between mb-3">
           <div className="text-xs text-slate-500 uppercase tracking-wider">
             {users.length} utenti
@@ -539,11 +540,11 @@ export default function AdminUsersPage() {
         <div className="et-card-elevated overflow-hidden hidden sm:block">
           <table className="et-table w-full table-fixed">
             <colgroup>
-              <col style={{ width: "35%" }} />
-              <col style={{ width: "20%" }} />
+              <col style={{ width: "42%" }} />
+              <col style={{ width: "16%" }} />
               <col style={{ width: "10%" }} />
-              <col style={{ width: "15%" }} />
-              <col style={{ width: "20%" }} />
+              <col style={{ width: "16%" }} />
+              <col style={{ width: "16%" }} />
             </colgroup>
             <thead>
               <tr>

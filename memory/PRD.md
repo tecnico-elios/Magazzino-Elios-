@@ -52,6 +52,13 @@
   - Mobile card view invariato — resta ottimo su smartphone
 
 
+
+## F14 (Nav + Logo cliccabile + Utenti larghezza) ✅ (20/02/2026)
+- **`AppLayout.jsx` — nav semplificata**: rimossi `Arrivi` e `Spedizioni` da `BASE_NAV`. Nuova barra: Dashboard | Inventario | Movimenti | Anomalie | (Admin | Utenti). Pagine `/arrivi` e `/spedizioni` restano operative e raggiungibili dalle card grandi in Dashboard e via URL diretto. Rimossi import icone inutilizzate (`ArrowSquareIn`/`ArrowSquareOut`).
+- **Brand cliccabile in Admin/Users headers**: sia in `AdminPage.jsx` sia in `AdminUsersPage.jsx` il blocco titolo "Elios Tech — …" è ora un `Link to="/"` con hover amber → torna alla Dashboard.
+- **`AdminUsersPage.jsx` — desktop più largo**: `max-w-5xl` → `max-w-7xl` sia sull'header sia sul main. Colgroup ribilanciato 42/16/10/16/16 % per mostrare tutta l'email nella colonna Utente senza taglio.
+
+
 ## Fasi
 - **F0-F6** ✅ (scanner, cache O(1), Notion SSOT, conferma finale, mapping strict)
 - **Phase-2 Auth & RBAC** ✅ (15/02/2026)

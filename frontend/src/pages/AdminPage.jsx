@@ -881,14 +881,15 @@ export default function AdminPage() {
             >
               <ArrowLeft size={16} className="mr-1" /> <span className="hidden xs:inline sm:inline">Magazzino</span>
             </Link>
-            <div className="min-w-0">
-              <div className="text-[10px] tracking-[0.22em] uppercase text-amber-300/80 font-semibold truncate">
+            {/* F14 (20/02) — Brand cliccabile → torna alla Dashboard. */}
+            <Link to="/" className="min-w-0 group focus:outline-none rounded-md" title="Torna alla Dashboard" data-testid="admin-brand-home">
+              <div className="text-[10px] tracking-[0.22em] uppercase text-amber-300/80 font-semibold truncate group-hover:text-amber-200 transition-colors">
                 Elios Tech — Magazzino
               </div>
-              <h1 className="font-display text-lg sm:text-2xl font-bold text-white leading-tight">
+              <h1 className="font-display text-lg sm:text-2xl font-bold text-white leading-tight group-hover:text-amber-50 transition-colors">
                 Pannello Admin
               </h1>
-            </div>
+            </Link>
           </div>
           <Link
             to="/admin/utenti"
