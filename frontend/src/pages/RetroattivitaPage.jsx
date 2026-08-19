@@ -389,7 +389,6 @@ function EditDialog({ row, kind, onClose, onDone }) {
         {/* F14 §2-14 — Aggiungi wallbox/seriale dimenticato senza creare nuove righe */}
         <AddForgottenItem row={row} kind={kind} onDone={onDone} />
       </DialogContent>
-      </DialogContent>
       {/* F14 — Fotocamera per scansione QR (riusa componente esistente) */}
       <BarcodeScanner
         open={qrScannerOpen}
