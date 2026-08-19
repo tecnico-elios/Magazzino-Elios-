@@ -393,7 +393,8 @@ async def find_order_by_structure(structure: str) -> Dict[str, Any]:
 
 async def append_shipment_to_order(order_page_id: str, serials: List[str], qr_codes: List[str]) -> None:
     """F14 — Aggiunge SN a "SN WB" e QR a "CODICI QR" sull'ordine.
-    Merge idempotente (case-insensitive). QTY WB NON viene mai toccato."""
+    Merge idempotente (case-insensitive).
+    QTY WB (colonna 16, number) viene sempre riportata a len(SN WB) attuali dopo il merge."""
     if not NOTION_TOKEN or not order_page_id:
         raise RuntimeError("Ordine non configurato")
     async with httpx.AsyncClient(timeout=25) as client:
@@ -404,8 +405,10 @@ async def append_shipment_to_order(order_page_id: str, serials: List[str], qr_co
         props = (r.json() or {}).get("properties", {})
         sn_prop = _get_prop(props, NOTION_ORDINE_SN_PROP)
         qr_prop = _get_prop(props, NOTION_ORDINE_QR_PROP)
+        qty_prop = _get_prop(props, "QTY WB")
         cur_sn = _parse_serials(_plain_text(sn_prop)) if sn_prop else []
         cur_qr = _parse_serials(_plain_text(qr_prop)) if qr_prop else []
+        cur_qty = qty_prop.get("number") if qty_prop and qty_prop.get("type") == "number" else None
         sn_low = {s.lower() for s in cur_sn}
         qr_low = {q.lower() for q in cur_qr}
         new_sn = list(cur_sn) + [s.strip() for s in (serials or []) if s and s.strip() and s.strip().lower() not in sn_low]
@@ -415,6 +418,11 @@ async def append_shipment_to_order(order_page_id: str, serials: List[str], qr_co
             updates[NOTION_ORDINE_SN_PROP] = {"rich_text": [{"type": "text", "text": {"content": "\n".join(new_sn)[:1990]}}]}
         if len(new_qr) != len(cur_qr):
             updates[NOTION_ORDINE_QR_PROP] = {"rich_text": [{"type": "text", "text": {"content": "\n".join(new_qr)[:1990]}}]}
+        # F14 fix (utente 20/02): QTY WB deve riflettere il conteggio Wallbox nell'ordine.
+        # Scrivi len(new_sn). Se new_sn è invariato ma cur_qty è disallineato, ricalibra comunque.
+        target_qty = len(new_sn)
+        if cur_qty is None or float(cur_qty) != float(target_qty):
+            updates["QTY WB"] = {"number": target_qty}
         if not updates:
             return
         resp = await client.patch(f"{NOTION_BASE}/pages/{order_page_id}", headers=_headers(), json={"properties": updates})
@@ -424,7 +432,8 @@ async def append_shipment_to_order(order_page_id: str, serials: List[str], qr_co
 
 
 async def remove_shipment_from_order(order_page_id: str, serials: List[str], qr_codes: List[str]) -> None:
-    """F14 — Rimuove SN/QR dall'ordine (retroattività/annullamento). Idempotente."""
+    """F14 — Rimuove SN/QR dall'ordine (retroattività/annullamento). Idempotente.
+    Aggiorna QTY WB = len(SN WB) rimanenti."""
     if not NOTION_TOKEN or not order_page_id:
         raise RuntimeError("Ordine non configurato")
     sn_rm = {(s or "").strip().lower() for s in (serials or []) if (s or "").strip()}
@@ -438,8 +447,10 @@ async def remove_shipment_from_order(order_page_id: str, serials: List[str], qr_
         props = (r.json() or {}).get("properties", {})
         sn_prop = _get_prop(props, NOTION_ORDINE_SN_PROP)
         qr_prop = _get_prop(props, NOTION_ORDINE_QR_PROP)
+        qty_prop = _get_prop(props, "QTY WB")
         cur_sn = _parse_serials(_plain_text(sn_prop)) if sn_prop else []
         cur_qr = _parse_serials(_plain_text(qr_prop)) if qr_prop else []
+        cur_qty = qty_prop.get("number") if qty_prop and qty_prop.get("type") == "number" else None
         new_sn = [s for s in cur_sn if s.strip().lower() not in sn_rm]
         new_qr = [q for q in cur_qr if q.strip().lower() not in qr_rm]
         updates: Dict[str, Any] = {}
@@ -447,6 +458,9 @@ async def remove_shipment_from_order(order_page_id: str, serials: List[str], qr_
             updates[NOTION_ORDINE_SN_PROP] = {"rich_text": [{"type": "text", "text": {"content": "\n".join(new_sn)[:1990]}}]}
         if len(new_qr) != len(cur_qr):
             updates[NOTION_ORDINE_QR_PROP] = {"rich_text": [{"type": "text", "text": {"content": "\n".join(new_qr)[:1990]}}]}
+        target_qty = len(new_sn)
+        if cur_qty is None or float(cur_qty) != float(target_qty):
+            updates["QTY WB"] = {"number": target_qty}
         if not updates:
             return
         resp = await client.patch(f"{NOTION_BASE}/pages/{order_page_id}", headers=_headers(), json={"properties": updates})

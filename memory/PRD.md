@@ -74,6 +74,32 @@
 - Frontend: nuova tab Admin `ManutenzioneTab` con stato Notion (pallino verde/rosso), count prodotti in cache, timestamp ultimo check, bottoni "Sincronizza ora" / "Svuota cache" / "Verifica stato".
 - Nota: gli altri punti F9 (Admin restructure per area, tipizzazione notifiche per evento) sono già stati esplicitamente rifiutati (P2) o richiedono scelta operativa dell'utente — non toccati per evitare regressioni.
 
+## F14 — QTY WB colonna 16 + Precaricamento Retroattività + Separazione reale Arrivi/Spedizioni ✅ (20/02/2026)
+
+### 1. QTY WB scritto in colonna 16 (Ordini)
+- **`notion_service.py` `append_shipment_to_order`**: aggiunto write su proprietà `"QTY WB"` (type=number). Dopo il merge di SN WB, `QTY WB = len(new_sn)` — riallineato al conteggio Wallbox effettivo. Se `cur_qty` è disallineato viene comunque ricalibrato.
+- **`remove_shipment_from_order`** (usato da retro/annullamento): stesso comportamento — dopo rimozione seriali, `QTY WB = len(new_sn)` rimanenti.
+- **Regola invariata**: nessuna nuova colonna, nessun cambio di mapping. La proprietà usata è **esattamente `"QTY WB"`** già presente (type `number`).
+
+### 2. Precaricamento automatico Retroattività
+- **`RetroattivitaPage.jsx` `EditDialog`**: gli state `newSn`, `newQty`, `newStructure` sono ora **inizializzati con il valore attuale del record** (`row.sn`, `row.quantity`, `row.cliente`).
+- **Backend nuovo endpoint `GET /api/qr/by-serial?sn=X`** (in `qr_routes.py`): restituisce il QR attualmente associato al seriale. `EditDialog` lo chiama all'apertura via `useEffect(kind, row.sn)` — se esiste QR, precarica `newQr` e attiva mode `manual`.
+- **Submit intelligente**: il body invia SOLO i campi effettivamente modificati (confronto con `row.sn/quantity/cliente`). Se non è cambiato, non viene inviato → il backend non tocca il campo.
+
+### 3. Separazione reale Arrivi ↔ Spedizioni
+- **`useEffect(() => setRows([]), [tipo])`**: cambiando tipo la lista si svuota istantaneamente. Nessun dato stale del tipo precedente.
+- `search()`: `setRows([])` prima della fetch. Il pulsante Modifica passa `kind={tipo}` che determina l'endpoint PATCH corretto (`/retro/shipment/…` vs `/retro/arrivo/…`).
+- Backend `POST /retro/find`: usa `list_exits` per spedizione, `list_receipts_all` (+ enrichment fornitore da Mongo) per arrivo — endpoints REALMENTE separati a livello dati.
+
+### Test superati (curl + import + lint)
+- `GET /api/qr/by-serial` → 401 senza JWT ✅
+- `POST /api/retro/find` → 401 senza JWT ✅
+- `append_shipment_to_order` contiene write `"QTY WB"` ✅ (verifica AST inspect)
+- `remove_shipment_from_order` contiene write `"QTY WB"` ✅
+- Backend compila + restart OK
+- Frontend lint 0 errori
+- Struttura Notion **NON modificata** ✅
+
 ## F14 — Rimozione placeholder di esempio dai campi input ✅ (19/02/2026)
 
 Rimossi da tutti i campi del gestionale i placeholder che mostravano valori fittizi/dimostrativi:

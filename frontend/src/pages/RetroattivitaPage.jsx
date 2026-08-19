@@ -37,8 +37,14 @@ export default function RetroattivitaPage() {
       .catch(() => setAuthorized(false));
   }, []);
 
+  // F14 fix (20/02): cambio tipo → svuota risultati per evitare dati stale del tipo precedente.
+  useEffect(() => {
+    setRows([]);
+  }, [tipo]);
+
   const search = async () => {
     setLoading(true);
+    setRows([]);  // ricarica netta ad ogni ricerca
     try {
       const q = structure.trim();
       const { data } = await axios.post(`${API}/retro/find`, {
@@ -46,7 +52,6 @@ export default function RetroattivitaPage() {
         date_from: dateFrom || null,
         date_to: dateTo || null,
         serial: serial.trim() || null,
-        // F14 fix: usa il campo semanticamente corretto in base al tipo
         structure: tipo === "spedizione" && q ? q : null,
         fornitore: tipo === "arrivo" && q ? q : null,
       });
@@ -188,14 +193,28 @@ export default function RetroattivitaPage() {
 
 function EditDialog({ row, kind, onClose, onDone }) {
   const [reason, setReason] = useState("");
-  const [newSn, setNewSn] = useState("");
-  const [newQty, setNewQty] = useState("");
-  const [newStructure, setNewStructure] = useState("");
+  // F14 fix (20/02): precarica i valori esistenti del record. L'utente modifica SOLO ciò che serve.
+  const [newSn, setNewSn] = useState(row?.sn || "");
+  const [newQty, setNewQty] = useState(row?.quantity != null ? String(row.quantity) : "");
+  const [newStructure, setNewStructure] = useState(row?.cliente || "");
   const [newQr, setNewQr] = useState("");
   const [qrMode, setQrMode] = useState(null); // null | "manual" | "scan"
   const [qrScannerOpen, setQrScannerOpen] = useState(false);
   const [qrChecking, setQrChecking] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // F14 fix (20/02): recupera QR esistente per il seriale (se presente)
+  useEffect(() => {
+    if (kind !== "spedizione" || !row?.sn) return;
+    axios.get(`${API}/qr/by-serial`, { params: { sn: row.sn } })
+      .then(({ data }) => {
+        if (data?.exists && data?.qr_code) {
+          setNewQr(data.qr_code);
+          setQrMode("manual"); // apre il campo con valore precaricato
+        }
+      })
+      .catch(() => {});
+  }, [kind, row?.sn]);
 
   // Verifica QR live tramite /api/qr/check quando l'utente inserisce/scansiona
   const verifyQr = async (val) => {
@@ -228,10 +247,17 @@ function EditDialog({ row, kind, onClose, onDone }) {
     setBusy(true);
     try {
       const body = { reason: reason.trim() };
-      if (newSn.trim()) body.new_sn = newSn.trim();
-      if (newQty !== "" && !isNaN(parseFloat(newQty))) body.new_quantity = parseFloat(newQty);
+      // F14 fix (20/02): invia SOLO i campi effettivamente modificati.
+      // Il backend aggiornerà unicamente quei campi (§7 modifica parziale).
+      const sn0 = row?.sn || "";
+      const qty0 = row?.quantity != null ? String(row.quantity) : "";
+      const struct0 = row?.cliente || "";
+      if (newSn.trim() && newSn.trim() !== sn0) body.new_sn = newSn.trim();
+      if (newQty !== "" && !isNaN(parseFloat(newQty)) && String(newQty) !== qty0) {
+        body.new_quantity = parseFloat(newQty);
+      }
       if (kind === "spedizione") {
-        if (newStructure.trim()) body.new_structure = newStructure.trim();
+        if (newStructure.trim() && newStructure.trim() !== struct0) body.new_structure = newStructure.trim();
         if (newQr.trim()) body.new_qr_code = newQr.trim();
       }
       const path = kind === "spedizione" ? `retro/shipment/${row.id}` : `retro/arrivo/${row.id}`;

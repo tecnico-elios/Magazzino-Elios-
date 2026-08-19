@@ -49,6 +49,23 @@ def build_router(db, deps) -> APIRouter:
             "associated_by": doc.get("associated_by"),
         }
 
+    @router.get("/by-serial")
+    async def get_qr_by_serial(sn: str = Query(..., min_length=1), current=Depends(deps.get_current_user)):
+        """F14 fix (20/02) — restituisce il QR attualmente associato al seriale (per precaricamento Retroattività)."""
+        s = (sn or "").strip()
+        if not s:
+            raise HTTPException(400, "Seriale mancante")
+        doc = await db.qr_associations.find_one({"serial_lower": s.lower(), "active": True})
+        if not doc:
+            return {"exists": False, "serial": s}
+        return {
+            "exists": True,
+            "qr_code": doc.get("qr_code"),
+            "serial": doc.get("serial"),
+            "product_name": doc.get("product_name"),
+            "structure": doc.get("structure"),
+        }
+
     @router.get("/associations")
     async def list_associations(
         limit: int = Query(default=200, ge=1, le=2000),
