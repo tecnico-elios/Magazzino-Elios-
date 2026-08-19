@@ -537,8 +537,14 @@ export default function AdminUsersPage() {
         </div>
 
         <div className="et-card-elevated overflow-hidden hidden sm:block">
-          <div className="overflow-x-auto scrollbar-thin">
-            <table className="et-table min-w-[820px]">
+          <table className="et-table w-full table-fixed">
+            <colgroup>
+              <col style={{ width: "35%" }} />
+              <col style={{ width: "20%" }} />
+              <col style={{ width: "10%" }} />
+              <col style={{ width: "15%" }} />
+              <col style={{ width: "20%" }} />
+            </colgroup>
             <thead>
               <tr>
                 <th>Utente</th>
@@ -555,133 +561,140 @@ export default function AdminUsersPage() {
                 const lockChange = isMe || isMaster;
                 return (
                   <tr key={u.id} data-testid={`user-row-${u.username}`}>
-                    <td className="px-4 py-3">
-                      <div className="font-semibold text-slate-900">{u.full_name || u.username}</div>
-                      <div className="text-xs font-mono-tight text-slate-500">@{u.username}</div>
-                      <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
+                    <td className="px-3 py-3 align-top">
+                      <div className="font-semibold text-slate-900 text-sm truncate">{u.full_name || u.username}</div>
+                      <div className="text-xs font-mono-tight text-slate-500 truncate">@{u.username}</div>
+                      <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-1 min-w-0">
                         {u.email ? (
-                          <span className="font-mono-tight">{u.email}</span>
+                          <span className="font-mono-tight truncate">{u.email}</span>
                         ) : (
                           <span className="text-slate-400 italic">nessuna email</span>
                         )}
                         <button
                           type="button"
                           onClick={() => setEmailTarget(u)}
-                          className="text-[10px] uppercase tracking-wider text-slate-500 hover:text-slate-900 underline underline-offset-2"
+                          className="text-[10px] uppercase tracking-wider text-slate-500 hover:text-slate-900 underline underline-offset-2 shrink-0"
                           data-testid={`edit-email-${u.username}`}
                         >
                           modifica
                         </button>
                       </div>
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-1 flex-wrap">
+                    <td className="px-3 py-3 align-top">
+                      <div className="inline-flex rounded-md border border-slate-200 overflow-hidden">
                         <button
                           type="button"
                           onClick={() => changeRole(u, "operator")}
                           disabled={lockChange}
-                          className={`px-2 h-7 rounded-md text-xs font-semibold border ${
+                          className={`px-2 h-7 text-[11px] font-semibold border-r border-slate-200 last:border-r-0 ${
                             u.role === "operator"
-                              ? "bg-slate-900 text-white border-slate-900"
-                              : "bg-white border-slate-300 text-slate-600 hover:border-slate-500"
+                              ? "bg-slate-900 text-white"
+                              : "bg-white text-slate-600 hover:bg-slate-50"
                           } disabled:opacity-40`}
                           data-testid={`role-operator-${u.username}`}
+                          title="Operatore"
                         >
-                          Operatore
+                          Op
                         </button>
                         <button
                           type="button"
                           onClick={() => changeRole(u, "responsabile")}
                           disabled={lockChange}
-                          className={`px-2 h-7 rounded-md text-xs font-semibold border ${
+                          className={`px-2 h-7 text-[11px] font-semibold border-r border-slate-200 last:border-r-0 ${
                             u.role === "responsabile"
-                              ? "bg-sky-700 text-white border-sky-700"
-                              : "bg-white border-slate-300 text-slate-600 hover:border-sky-500"
+                              ? "bg-sky-700 text-white"
+                              : "bg-white text-slate-600 hover:bg-slate-50"
                           } disabled:opacity-40`}
                           data-testid={`role-responsabile-${u.username}`}
+                          title="Responsabile"
                         >
-                          Responsabile
+                          Resp
                         </button>
                         <button
                           type="button"
                           onClick={() => changeRole(u, "admin")}
                           disabled={lockChange}
-                          className={`px-2 h-7 rounded-md text-xs font-semibold border ${
+                          className={`px-2 h-7 text-[11px] font-semibold ${
                             u.role === "admin"
-                              ? "bg-amber-600 text-white border-amber-600"
-                              : "bg-white border-slate-300 text-slate-600 hover:border-amber-500"
+                              ? "bg-amber-600 text-white"
+                              : "bg-white text-slate-600 hover:bg-slate-50"
                           } disabled:opacity-40`}
                           data-testid={`role-admin-${u.username}`}
+                          title="Admin"
                         >
-                          Admin
+                          Adm
                         </button>
                       </div>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3 align-top">
                       {u.active ? (
-                        <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 hover:bg-emerald-100">
+                        <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 hover:bg-emerald-100 text-[10px]">
                           Attivo
                         </Badge>
                       ) : (
-                        <Badge variant="outline" className="border-red-200 text-red-700 bg-red-50">
-                          Disattivato
+                        <Badge variant="outline" className="border-red-200 text-red-700 bg-red-50 text-[10px]">
+                          Disatt.
                         </Badge>
                       )}
                       {isMe && (
-                        <span className="ml-2 text-[10px] uppercase tracking-wider text-slate-400">tu</span>
+                        <div className="text-[10px] uppercase tracking-wider text-slate-400 mt-0.5">tu</div>
                       )}
                       {isMaster && iAmMaster && (
-                        <span className="ml-2 text-[10px] uppercase tracking-wider text-amber-600 font-bold" title="Account master protetto">🔒 master</span>
+                        <div className="text-[10px] uppercase tracking-wider text-amber-600 font-bold mt-0.5" title="Account master protetto">🔒 master</div>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-xs text-slate-500 font-mono-tight">
+                    <td className="px-3 py-3 align-top text-[11px] text-slate-500 font-mono-tight truncate">
                       {fmtDate(u.last_login)}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3 align-top">
                       <div className="flex items-center gap-1 justify-end">
                         <Button
-                          size="sm"
+                          size="icon"
                           variant="outline"
                           onClick={() => setPermTarget(u)}
                           disabled={isMaster || u.role !== "responsabile"}
-                          className="h-8"
+                          className="h-8 w-8"
                           data-testid={`perm-${u.username}`}
                           title={u.role !== "responsabile" ? "Solo per Responsabile" : "Permessi configurabili"}
+                          aria-label="Permessi"
                         >
-                          <PencilSimple size={14} className="mr-1" /> Permessi
+                          <PencilSimple size={14} weight="bold" />
                         </Button>
                         <Button
-                          size="sm"
+                          size="icon"
                           variant="outline"
                           onClick={() => setResetTarget(u)}
-                          className="h-8"
+                          className="h-8 w-8"
                           data-testid={`reset-${u.username}`}
                           disabled={isMaster}
                           title={isMaster ? "Account master protetto" : "Reset password"}
+                          aria-label="Reset password"
                         >
-                          <Key size={14} className="mr-1" /> Reset PW
+                          <Key size={14} weight="bold" />
                         </Button>
                         <Button
-                          size="sm"
+                          size="icon"
                           variant="outline"
                           onClick={() => toggleActive(u)}
                           disabled={isMe || isMaster}
-                          className={`h-8 ${u.active ? "border-red-300 text-red-600 hover:bg-red-50" : "border-emerald-300 text-emerald-700 hover:bg-emerald-50"}`}
+                          className={`h-8 w-8 ${u.active ? "border-red-300 text-red-600 hover:bg-red-50" : "border-emerald-300 text-emerald-700 hover:bg-emerald-50"}`}
                           data-testid={`toggle-active-${u.username}`}
-                          title={isMaster ? "Account master protetto" : ""}
+                          title={isMaster ? "Account master protetto" : (u.active ? "Disattiva utente" : "Riattiva utente")}
+                          aria-label={u.active ? "Disattiva" : "Riattiva"}
                         >
-                          <Prohibit size={14} className="mr-1" /> {u.active ? "Disattiva" : "Riattiva"}
+                          <Prohibit size={14} weight="bold" />
                         </Button>
                         <Button
-                          size="sm"
+                          size="icon"
                           variant="outline"
                           onClick={() => setDeleteTarget(u)}
                           disabled={isMe || isMaster}
-                          className="h-8 border-red-400 text-red-700 hover:bg-red-50"
+                          className="h-8 w-8 border-red-400 text-red-700 hover:bg-red-50"
                           data-testid={`delete-${u.username}`}
                           title={isMaster ? "Account master protetto" : "Elimina definitivamente"}
+                          aria-label="Elimina utente"
                         >
-                          <Trash size={14} className="mr-1" /> Elimina
+                          <Trash size={14} weight="bold" />
                         </Button>
                       </div>
                     </td>
@@ -697,7 +710,6 @@ export default function AdminUsersPage() {
               )}
             </tbody>
           </table>
-          </div>
         </div>
 
         {/* Card view mobile — visibile solo <640px, dati identici ma verticali */}

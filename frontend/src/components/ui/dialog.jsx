@@ -53,7 +53,12 @@ const DialogHeader = ({
   ...props
 }) => (
   <div
-    className={cn("flex flex-col space-y-1.5 text-center sm:text-left", className)}
+    className={cn(
+      // F14 (ott. popup 20/02) — Header STICKY: rimane visibile mentre l'utente scorre
+      // il corpo del popup su schermi piccoli. -mx-6 -mt-6 compensano il p-6 di DialogContent.
+      "flex flex-col space-y-1.5 text-center sm:text-left sticky top-0 z-20 -mx-6 -mt-6 px-6 pt-6 pb-3 bg-background border-b border-slate-100",
+      className
+    )}
     {...props} />
 )
 DialogHeader.displayName = "DialogHeader"
@@ -63,7 +68,12 @@ const DialogFooter = ({
   ...props
 }) => (
   <div
-    className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2", className)}
+    className={cn(
+      // F14 (ott. popup 20/02) — Footer STICKY: pulsanti sempre in vista anche con contenuto lungo.
+      // -mx-6 -mb-6 compensano il p-6 del contenitore. Border-top per separazione visiva dallo scroll.
+      "flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 sticky bottom-0 z-20 -mx-6 -mb-6 px-6 pt-3 pb-6 bg-background border-t border-slate-100",
+      className
+    )}
     {...props} />
 )
 DialogFooter.displayName = "DialogFooter"

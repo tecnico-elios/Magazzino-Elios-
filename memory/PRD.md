@@ -37,6 +37,21 @@
   - Motivazione garantita sempre raggiungibile grazie allo scroll globale
 
 
+
+## F14 (Sticky Header/Footer + Utenti desktop no-scroll) ✅ (20/02/2026)
+- **`dialog.jsx` — Header & Footer STICKY globali** su tutti i 40+ popup:
+  - `DialogHeader`: `sticky top-0 z-20 -mx-6 -mt-6 px-6 pt-6 pb-3 bg-background border-b border-slate-100`
+  - `DialogFooter`: `sticky bottom-0 z-20 -mx-6 -mb-6 px-6 pt-3 pb-6 bg-background border-t border-slate-100`
+  - Titolo e pulsanti restano visibili durante lo scroll interno anche su smartphone/palmare
+  - Nessuna modifica necessaria alle Dialog usages esistenti (i negative margin compensano il p-6 di DialogContent)
+- **`AdminUsersPage.jsx` — tabella desktop ottimizzata (no scroll orizzontale)**:
+  - Rimosso `min-w-[820px]` e `overflow-x-auto`; ora `table-fixed` con `<colgroup>` (35% / 20% / 10% / 15% / 20%)
+  - Ruoli compattati: `Op | Resp | Adm` in segmented control unico
+  - Azioni **icon-only** con `title` tooltip: Permessi (matita), Reset PW (chiave), Disattiva/Riattiva (divieto), Elimina (cestino)
+  - Padding celle ridotto da `px-4 py-3` a `px-3 py-3` per ottimizzare lo spazio
+  - Mobile card view invariato — resta ottimo su smartphone
+
+
 ## Fasi
 - **F0-F6** ✅ (scanner, cache O(1), Notion SSOT, conferma finale, mapping strict)
 - **Phase-2 Auth & RBAC** ✅ (15/02/2026)
