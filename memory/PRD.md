@@ -73,6 +73,23 @@
 - **Phase-2 Auth & RBAC** ✅ (15/02/2026)
   - JWT + bcrypt + MongoDB (users, audit_logs)
   - Bootstrap sicuro primo admin → Admin reale: **Riccardo Biuso** (`riccardo`)
+
+## F15 — Aggiungi Accessorio dimenticato (Retroattività) ✅ (20/02/2026)
+- **Nuovo pulsante** `➕ Aggiungi Accessorio dimenticato` nella Retroattività (Spedizione e Arrivo), separato e indipendente da `Aggiungi Wallbox dimenticata` (che resta invariato).
+- **Componente**: `AddForgottenAccessory` in `RetroattivitaPage.jsx` — picker prodotto (cerca su Inventario), rispetta `tipo_gestione`:
+  - `a_seriale` → richiede seriale + QR opzionale (con scanner/fotocamera/manuale)
+  - `a_quantita` → richiede solo quantità
+- **Backend `retro_routes.py`** (2 nuovi endpoint):
+  - `POST /api/retro/shipment/{tracker_page_id}/add-accessory`
+  - `POST /api/retro/arrivo/{receipt_page_id}/add-accessory`
+  - Body: `AddAccessoryBody{reason, product_page_id, quantity, serial?, qr_code?}`
+  - **Riuso funzioni esistenti**: `svc.create_pick` (spedizione) / `svc.create_receipt` (arrivo) — stesso identico flusso di `submit_checklist`
+  - Eredita contesto (cliente, data, taken_by) dalla riga originale — nessuna nuova spedizione/arrivo
+  - Aggiornamenti: Inventario col.16 (add/remove SN), Eliostech Ordini (append SN WB + CODICI QR se A Seriale), QR association, Audit log
+  - Motivazione obbligatoria, permessi Retroattività identici (Admin/Responsabile con `modifica_retroattiva`)
+  - Email retroattività riusata (rispetta il toggle globale + chip `retroattivita` per destinatario)
+
+
   - Ruoli operator|admin, session invalidation via `password_version`
 - **Phase-3 P1 Admin Extra** ✅ (15/02/2026)
   - Audit Log, Anomalie delete, Storico Seriali, Ricerca globale, Cleanup TEST_

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { useAuth } from "../lib/AuthContext";
@@ -360,6 +360,8 @@ function EditDialog({ row, kind, onClose, onDone }) {
         {/* F14 (ott. popup 20/02) — Ordine §18: Dati → Campi modificabili → Aggiungi Wallbox dimenticata → Motivazione → Footer.
             L'AddForgottenItem sta PRIMA della Motivazione e del footer. Nulla sotto Annulla|Conferma. */}
         <AddForgottenItem row={row} kind={kind} onDone={onDone} />
+        {/* F15 — Aggiungi Accessorio dimenticato (voce separata, funzione WB invariata) */}
+        <AddForgottenAccessory row={row} kind={kind} onDone={onDone} />
         <div>
           <Label className="text-xs font-semibold text-red-700">Motivazione (obbligatoria) *</Label>
           <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} placeholder="" className="mt-1" data-testid="retro-reason" />
@@ -512,6 +514,234 @@ function AddForgottenItem({ row, kind, onDone }) {
                 Aggiungo…
               </span>
             ) : "Aggiungi"}
+          </Button>
+        </div>
+      </div>
+      <BarcodeScanner
+        open={scanFor !== null}
+        onClose={() => setScanFor(null)}
+        label={scanFor === "qr" ? "Scansiona QR Code" : "Scansiona seriale"}
+        onDetected={(val) => {
+          const v = (val || "").trim();
+          if (scanFor === "sn") setAddSn(v);
+          else if (scanFor === "qr") setAddQr(v);
+          setScanFor(null);
+        }}
+      />
+    </>
+  );
+}
+
+// F15 — Sub-form per aggiungere un ACCESSORIO dimenticato all'operazione esistente.
+// Rispetta il tipo_gestione del prodotto: 'a_seriale' → SN + QR opz, 'a_quantita' → solo quantità.
+// Nessun impatto sul componente AddForgottenItem (WB dimenticata) che resta invariato.
+function AddForgottenAccessory({ row, kind, onDone }) {
+  const [open, setOpen] = useState(false);
+  const [inventory, setInventory] = useState([]);
+  const [loadingInv, setLoadingInv] = useState(false);
+  const [q, setQ] = useState("");
+  const [selected, setSelected] = useState(null); // {page_id, name, tipo_gestione}
+  const [reason, setReason] = useState("");
+  const [addSn, setAddSn] = useState("");
+  const [addQr, setAddQr] = useState("");
+  const [qty, setQty] = useState("1");
+  const [scanFor, setScanFor] = useState(null); // "sn" | "qr" | null
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open || inventory.length > 0) return;
+    setLoadingInv(true);
+    axios.get(`${API}/inventory`).then(({ data }) => {
+      const items = (data?.items || []).filter((it) => it.active !== false);
+      setInventory(items);
+    }).catch((e) => toast.error("Errore caricamento inventario", { description: formatError(e) }))
+      .finally(() => setLoadingInv(false));
+  }, [open, inventory.length]);
+
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return inventory.slice(0, 40);
+    return inventory.filter((it) =>
+      (it.name || "").toLowerCase().includes(s) ||
+      (it.code || "").toLowerCase().includes(s) ||
+      (it.category || "").toLowerCase().includes(s)
+    ).slice(0, 40);
+  }, [inventory, q]);
+
+  const reset = () => {
+    setOpen(false); setSelected(null); setReason("");
+    setAddSn(""); setAddQr(""); setQty("1"); setQ("");
+  };
+
+  const submit = async () => {
+    if (!selected) { toast.error("Seleziona un prodotto"); return; }
+    if (!reason.trim()) { toast.error("Motivazione obbligatoria"); return; }
+    const tg = selected.tipo_gestione;
+    if (tg === "a_seriale" && !addSn.trim()) { toast.error("Seriale obbligatorio"); return; }
+    if (tg === "a_quantita" && (!qty || Number(qty) <= 0)) { toast.error("Quantità obbligatoria"); return; }
+    setBusy(true);
+    try {
+      const body = {
+        reason: reason.trim(),
+        product_page_id: selected.page_id,
+        quantity: tg === "a_quantita" ? Number(qty) : 1,
+      };
+      if (tg === "a_seriale") {
+        body.serial = addSn.trim();
+        if (kind === "spedizione" && addQr.trim()) body.qr_code = addQr.trim();
+      }
+      const path = kind === "spedizione"
+        ? `retro/shipment/${row.id}/add-accessory`
+        : `retro/arrivo/${row.id}/add-accessory`;
+      const { data } = await axios.post(`${API}/${path}`, body);
+      toast.success("Accessorio dimenticato aggiunto", {
+        description: `${data.product} · ${tg === "a_seriale" ? `SN ${data.serial}` : `Qty ${data.quantity}`}`,
+      });
+      reset();
+      onDone();
+    } catch (e) {
+      toast.error("Aggiunta fallita", { description: formatError(e) });
+    } finally { setBusy(false); }
+  };
+
+  if (!open) {
+    return (
+      <div className="mt-2">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setOpen(true)}
+          className="w-full sm:w-auto sm:min-w-[280px] mx-auto flex border-2 border-sky-400 bg-sky-50 hover:bg-sky-100 text-sky-800 font-semibold h-11"
+          data-testid="retro-add-accessory-btn"
+        >
+          ➕ Aggiungi Accessorio dimenticato
+        </Button>
+        <p className="text-[11px] text-slate-400 mt-2 text-center">
+          Aggiunge un accessorio (A Seriale o A Quantità) allo stesso record ({kind}). Nessuna nuova operazione.
+        </p>
+      </div>
+    );
+  }
+
+  const tg = selected?.tipo_gestione;
+
+  return (
+    <>
+      <div className="mt-2 border-t border-slate-200 pt-3 space-y-3 bg-sky-50/50 -mx-6 px-6 pb-4 rounded-b-md">
+        <div className="text-xs uppercase tracking-wider font-bold text-sky-800">➕ Aggiungi Accessorio dimenticato</div>
+
+        {/* STEP 1 — Selezione prodotto */}
+        {!selected ? (
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold">Cerca prodotto / accessorio</Label>
+            <Input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Nome, codice o categoria"
+              className="h-10"
+              autoComplete="off"
+              data-testid="retro-acc-search"
+            />
+            <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-md bg-white">
+              {loadingInv ? (
+                <div className="p-3 text-sm text-slate-400">Caricamento…</div>
+              ) : filtered.length === 0 ? (
+                <div className="p-3 text-sm text-slate-400">Nessun prodotto trovato.</div>
+              ) : (
+                filtered.map((it) => (
+                  <button
+                    key={it.page_id}
+                    type="button"
+                    onClick={() => setSelected({ page_id: it.page_id, name: it.name, tipo_gestione: it.tipo_gestione, code: it.code })}
+                    className="w-full text-left px-3 py-2 hover:bg-sky-50 border-b border-slate-100 last:border-b-0 flex items-center justify-between gap-2"
+                    data-testid={`retro-acc-item-${it.page_id}`}
+                  >
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-slate-900 truncate">{it.name || "—"}</div>
+                      <div className="text-[11px] text-slate-500 font-mono-tight truncate">{it.code || "—"} · {it.category || "—"}</div>
+                    </div>
+                    <span className={`text-[10px] px-2 h-6 inline-flex items-center rounded-full font-semibold shrink-0 ${
+                      it.tipo_gestione === "a_seriale" ? "bg-emerald-100 text-emerald-800" :
+                      it.tipo_gestione === "a_quantita" ? "bg-sky-100 text-sky-800" : "bg-red-100 text-red-800"
+                    }`}>
+                      {it.tipo_gestione === "a_seriale" ? "A Seriale" : it.tipo_gestione === "a_quantita" ? "A Quantità" : "N/C"}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between gap-2 border border-slate-200 rounded-md bg-white px-3 py-2">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-slate-900 truncate">{selected.name}</div>
+                <div className="text-[11px] text-slate-500 font-mono-tight truncate">
+                  {selected.code || "—"} · {tg === "a_seriale" ? "A Seriale" : tg === "a_quantita" ? "A Quantità" : "N/C"}
+                </div>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => setSelected(null)} data-testid="retro-acc-change">
+                Cambia
+              </Button>
+            </div>
+
+            {tg === "a_seriale" && (
+              <>
+                <div>
+                  <Label className="text-xs font-semibold">Seriale *</Label>
+                  <div className="flex gap-2 mt-1">
+                    <Input value={addSn} onChange={(e) => setAddSn(e.target.value)} className="h-10 font-mono-tight flex-1" placeholder="Digita o scansiona" autoComplete="off" data-testid="retro-acc-sn" />
+                    <Button type="button" variant="outline" onClick={() => setScanFor("sn")} className="h-10 w-10 shrink-0" data-testid="retro-acc-sn-scan" title="Apri fotocamera" aria-label="Scansiona seriale">
+                      <Camera size={14} weight="bold" />
+                    </Button>
+                  </div>
+                </div>
+                {kind === "spedizione" && (
+                  <div>
+                    <Label className="text-xs font-semibold">QR Code (opzionale)</Label>
+                    <div className="flex gap-2 mt-1">
+                      <Input value={addQr} onChange={(e) => setAddQr(e.target.value)} placeholder="Digita, scansiona o usa la fotocamera" className="h-10 font-mono-tight flex-1" autoComplete="off" data-testid="retro-acc-qr" />
+                      <Button type="button" variant="outline" onClick={() => setScanFor("qr")} className="h-10 w-10 shrink-0 border-amber-300 text-amber-700 hover:bg-amber-50" data-testid="retro-acc-qr-scan" title="Apri fotocamera" aria-label="Scansiona QR">
+                        <Camera size={14} weight="bold" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {tg === "a_quantita" && (
+              <div>
+                <Label className="text-xs font-semibold">Quantità *</Label>
+                <Input type="number" min="0.01" step="any" value={qty} onChange={(e) => setQty(e.target.value)} className="h-10 mt-1 font-mono-tight" data-testid="retro-acc-qty" />
+              </div>
+            )}
+
+            <div>
+              <Label className="text-xs font-semibold text-red-700">Motivazione *</Label>
+              <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} className="mt-1" data-testid="retro-acc-reason" />
+            </div>
+          </>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="outline" onClick={reset} disabled={busy}>Annulla</Button>
+          <Button
+            type="button"
+            onClick={submit}
+            disabled={busy || !selected || !reason.trim() || (tg === "a_seriale" && !addSn.trim()) || (tg === "a_quantita" && (!qty || Number(qty) <= 0))}
+            className="bg-sky-600 hover:bg-sky-700 text-white min-w-[140px]"
+            data-testid="retro-acc-confirm"
+          >
+            {busy ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <circle cx="12" cy="12" r="10" strokeWidth="4" className="opacity-25" />
+                  <path d="M4 12a8 8 0 018-8v0" strokeWidth="4" className="opacity-75" />
+                </svg>
+                Aggiungo…
+              </span>
+            ) : "Aggiungi accessorio"}
           </Button>
         </div>
       </div>

@@ -151,6 +151,19 @@ class AddItemBody(BaseModel):
     new_qr_code: Optional[str] = None
 
 
+class AddAccessoryBody(BaseModel):
+    """F15 — Aggiungi ACCESSORIO dimenticato alla stessa operazione (spedizione/arrivo).
+    Crea una nuova riga tracker/receipt per il prodotto accessorio con lo stesso contesto
+    (data, cliente/fornitore, operatore) — riutilizza le funzioni di create già esistenti.
+    Rispetta il tipo_gestione: 'a_seriale' richiede `serial`, 'a_quantita' richiede `quantity`."""
+    model_config = ConfigDict(extra="ignore")
+    reason: str
+    product_page_id: str
+    quantity: float = 1
+    serial: Optional[str] = None
+    qr_code: Optional[str] = None
+
+
 def build_router(db, deps, send_email_fn=None) -> APIRouter:
     router = APIRouter(prefix="/retro", tags=["retro"])
 
@@ -612,5 +625,264 @@ def build_router(db, deps, send_email_fn=None) -> APIRouter:
         })
         notion_service.invalidate_inventory_cache()
         return {"ok": True, "new_qty": new_qty, "sn_list": new_sns}
+
+    # ─────────────────────────────────────────────────────────────────
+    # F15 — Aggiungi Accessorio dimenticato (spedizione / arrivo)
+    # ─────────────────────────────────────────────────────────────────
+
+    async def _load_product_for_accessory(product_page_id: str):
+        """Fetch product from Inventario Notion. Enforces tipo_gestione configurato."""
+        from inventory_router import get_svc as _get_inv_svc
+        svc = await _get_inv_svc(db)
+        try:
+            item = await svc.get_item(product_page_id)
+        except Exception as e:
+            raise HTTPException(502, f"Impossibile leggere il prodotto: {e}")
+        if not item:
+            raise HTTPException(404, "Prodotto non trovato in Inventario")
+        tg = item.get("tipo_gestione")
+        if tg not in ("a_seriale", "a_quantita"):
+            raise HTTPException(400, f"Prodotto '{item.get('name')}' senza Tipo Gestione configurato")
+        return svc, item
+
+    @router.post("/shipment/{tracker_page_id}/add-accessory")
+    async def add_forgotten_accessory_shipment(tracker_page_id: str, body: AddAccessoryBody, current=Depends(deps.get_current_user)):
+        """F15 — Aggiungi ACCESSORIO dimenticato a una Spedizione esistente.
+        Crea una NUOVA riga tracker con stesso contesto (cliente, data, taken_by) dell'operazione.
+        Riuso di `create_pick` (stesso identico flusso del submit_checklist). Nessuna nuova spedizione."""
+        _require_retro(current)
+        if not (body.reason or "").strip():
+            raise HTTPException(400, "Motivazione obbligatoria")
+
+        # 1) Trova la spedizione originale per ereditare il contesto
+        try:
+            exits = await notion_service.list_exits()
+        except Exception as e:
+            raise HTTPException(502, f"Errore lettura uscite: {e}")
+        row = next((r for r in exits if r.get("id") == tracker_page_id), None)
+        if not row:
+            raise HTTPException(404, "Riga uscita non trovata")
+
+        structure = row.get("cliente") or ""
+        data_uscita = row.get("date") or datetime.now(timezone.utc).date().isoformat()
+        taken_by = row.get("taken_by") or (current.get("username") or "")
+
+        # 2) Prodotto + validazione tipo_gestione
+        svc, product = await _load_product_for_accessory(body.product_page_id)
+        tg = product.get("tipo_gestione")
+        product_name = product.get("name") or "—"
+
+        serial = (body.serial or "").strip()
+        qr = (body.qr_code or "").strip()
+        qty = float(body.quantity or 0)
+
+        if tg == "a_seriale":
+            if not serial:
+                raise HTTPException(400, "Seriale obbligatorio per prodotto A Seriale")
+            # SN deve essere in Inventario (disponibile)
+            match = await notion_service.find_serial_in_inventory(serial)
+            if not match:
+                raise HTTPException(409, f"SN {serial} non disponibile in magazzino")
+            # QR univoco
+            if qr:
+                existing_qr = await db.qr_associations.find_one({"qr_code_lower": qr.lower(), "active": True})
+                if existing_qr and existing_qr.get("serial_lower") != serial.lower():
+                    raise HTTPException(409, f"QR {qr} già associato ad altro seriale")
+            sn_title = serial
+            qty_final = 1.0
+        else:  # a_quantita
+            if qty <= 0:
+                raise HTTPException(400, "Quantità obbligatoria per prodotto A Quantità")
+            sn_title = product_name
+            qty_final = qty
+
+        # 3) Crea NUOVA riga tracker (stesso identico flusso di submit_checklist)
+        try:
+            new_pid = await svc.create_pick(
+                item_page_id=body.product_page_id,
+                sn_title=sn_title,
+                quantity=qty_final,
+                cliente=structure,
+                data_uscita=data_uscita,
+                taken_by=taken_by,
+            )
+        except Exception as e:
+            raise HTTPException(502, f"Creazione riga uscita fallita: {e}")
+
+        # 4) Se A Seriale → rimuovi dalla colonna 16 Inventario
+        if tg == "a_seriale":
+            try:
+                await svc.remove_inventory_serials(body.product_page_id, [serial])
+            except Exception as e:
+                logger.warning(f"remove_inventory_serials (accessory) fallito: {e}")
+
+        # 5) Update Eliostech Ordini (solo se A Seriale e ordine trovato — coerente con submit_checklist)
+        order_page_id_used: Optional[str] = None
+        if tg == "a_seriale":
+            try:
+                order = await notion_service.find_order_by_structure(structure)
+                if order.get("status") == "found":
+                    order_page_id_used = order.get("id")
+                    await notion_service.append_shipment_to_order(
+                        order_page_id_used, [serial], [qr] if qr else [],
+                    )
+            except Exception as e:
+                logger.warning(f"append order (accessory) fallito: {e}")
+
+        # 6) QR association
+        if qr and tg == "a_seriale":
+            await db.qr_associations.update_one(
+                {"qr_code_lower": qr.lower()},
+                {"$set": {
+                    "qr_code": qr, "qr_code_lower": qr.lower(),
+                    "serial": serial, "serial_lower": serial.lower(),
+                    "product_page_id": body.product_page_id,
+                    "product_name": product_name,
+                    "structure": structure,
+                    "order_page_id": order_page_id_used,
+                    "associated_at": datetime.now(timezone.utc).isoformat(),
+                    "associated_by": current.get("username"),
+                    "active": True,
+                    "note": "retro-add-accessory",
+                }},
+                upsert=True,
+            )
+
+        # 7) Audit
+        await db.audit_logs.insert_one({
+            "at": datetime.now(timezone.utc).isoformat(),
+            "actor_id": str(current.get("_id")),
+            "actor_username": current.get("username"),
+            "action": "retro.shipment.add-accessory",
+            "target": tracker_page_id,
+            "meta": {
+                "reason": body.reason,
+                "product_page_id": body.product_page_id,
+                "product_name": product_name,
+                "tipo_gestione": tg,
+                "quantity": qty_final,
+                "serial": serial or None,
+                "qr_code": qr or None,
+                "new_tracker_page_id": new_pid,
+                "cliente": structure,
+                "date": data_uscita,
+                "order_page_id": order_page_id_used,
+                "date_registrazione": datetime.now(timezone.utc).isoformat(),
+            },
+        })
+        notion_service.invalidate_inventory_cache()
+
+        email_sent = False
+        if send_email_fn:
+            email_sent = await _send_retro_email_if_enabled(
+                db, send_email_fn, "spedizione",
+                {"sn": row.get("sn"), "cliente": structure},
+                {"sn": sn_title, "quantity": qty_final, "cliente": structure, "added_accessory": product_name, "added_qr": qr or None},
+                body.reason, current.get("username") or "",
+            )
+        return {
+            "ok": True,
+            "new_tracker_page_id": new_pid,
+            "product": product_name,
+            "tipo_gestione": tg,
+            "quantity": qty_final,
+            "serial": serial or None,
+            "qr_code": qr or None,
+            "email_sent": email_sent,
+        }
+
+    @router.post("/arrivo/{receipt_page_id}/add-accessory")
+    async def add_forgotten_accessory_arrivo(receipt_page_id: str, body: AddAccessoryBody, current=Depends(deps.get_current_user)):
+        """F15 — Aggiungi ACCESSORIO dimenticato a un Arrivo esistente.
+        Crea una NUOVA riga receipt con stesso contesto (data). Nessun nuovo arrivo."""
+        _require_retro(current)
+        if not (body.reason or "").strip():
+            raise HTTPException(400, "Motivazione obbligatoria")
+
+        try:
+            recs = await notion_service.list_receipts_all()
+        except Exception as e:
+            raise HTTPException(502, f"Errore lettura entrate: {e}")
+        row = next((r for r in recs if r.get("id") == receipt_page_id), None)
+        if not row:
+            raise HTTPException(404, "Riga arrivo non trovata")
+
+        data_consegna = row.get("date") or datetime.now(timezone.utc).date().isoformat()
+
+        svc, product = await _load_product_for_accessory(body.product_page_id)
+        tg = product.get("tipo_gestione")
+        product_name = product.get("name") or "—"
+
+        serial = (body.serial or "").strip()
+        qty = float(body.quantity or 0)
+
+        if tg == "a_seriale":
+            if not serial:
+                raise HTTPException(400, "Seriale obbligatorio per prodotto A Seriale")
+            match = await notion_service.find_serial_in_inventory(serial)
+            if match is not None:
+                raise HTTPException(409, f"SN {serial} già presente in magazzino")
+            sn_title = serial
+            qty_final = 1.0
+        else:
+            if qty <= 0:
+                raise HTTPException(400, "Quantità obbligatoria per prodotto A Quantità")
+            sn_title = product_name
+            qty_final = qty
+
+        try:
+            new_pid = await svc.create_receipt(
+                item_page_id=body.product_page_id,
+                sn_title=sn_title,
+                quantity=qty_final,
+                data_consegna=data_consegna,
+            )
+        except Exception as e:
+            raise HTTPException(502, f"Creazione riga arrivo fallita: {e}")
+
+        # A Seriale → aggiungi alla colonna 16 Inventario
+        if tg == "a_seriale":
+            try:
+                await svc.update_inventory_serials(body.product_page_id, [serial])
+            except Exception as e:
+                logger.warning(f"update_inventory_serials (accessory) fallito: {e}")
+
+        await db.audit_logs.insert_one({
+            "at": datetime.now(timezone.utc).isoformat(),
+            "actor_id": str(current.get("_id")),
+            "actor_username": current.get("username"),
+            "action": "retro.arrivo.add-accessory",
+            "target": receipt_page_id,
+            "meta": {
+                "reason": body.reason,
+                "product_page_id": body.product_page_id,
+                "product_name": product_name,
+                "tipo_gestione": tg,
+                "quantity": qty_final,
+                "serial": serial or None,
+                "new_receipt_page_id": new_pid,
+                "date": data_consegna,
+                "date_registrazione": datetime.now(timezone.utc).isoformat(),
+            },
+        })
+        notion_service.invalidate_inventory_cache()
+
+        email_sent = False
+        if send_email_fn:
+            email_sent = await _send_retro_email_if_enabled(
+                db, send_email_fn, "arrivo",
+                {"sn": row.get("sn")},
+                {"sn": sn_title, "quantity": qty_final, "added_accessory": product_name},
+                body.reason, current.get("username") or "",
+            )
+        return {
+            "ok": True,
+            "new_receipt_page_id": new_pid,
+            "product": product_name,
+            "tipo_gestione": tg,
+            "quantity": qty_final,
+            "serial": serial or None,
+            "email_sent": email_sent,
+        }
 
     return router
