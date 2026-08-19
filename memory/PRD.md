@@ -74,6 +74,44 @@
 - Frontend: nuova tab Admin `ManutenzioneTab` con stato Notion (pallino verde/rosso), count prodotti in cache, timestamp ultimo check, bottoni "Sincronizza ora" / "Svuota cache" / "Verifica stato".
 - Nota: gli altri punti F9 (Admin restructure per area, tipizzazione notifiche per evento) sono già stati esplicitamente rifiutati (P2) o richiedono scelta operativa dell'utente — non toccati per evitare regressioni.
 
+## F14 — Retroattività: aggiungi Wallbox/QR dimenticato (in-place) ✅ (20/02/2026)
+
+### Backend — nuovi endpoint `retro_routes.py`
+- `POST /api/retro/shipment/{tracker_page_id}/add-item` — aggiunge seriale (+ QR opzionale) alla Spedizione esistente:
+  1. Legge tracker Notion, valida SN (§16: `find_serial_in_inventory` + no-duplicati locali + QR univoco)
+  2. Aggiorna IN-PLACE il tracker (`SN` title = "\n".join(SN esistenti + nuovo SN), `Quantità` = len)
+  3. Rimuove il SN dalla colonna 16 Inventario Notion
+  4. `append_shipment_to_order()` sul relativo ordine (SN WB + CODICI QR merge idempotente, QTY WB = len(SN))
+  5. Upsert `qr_associations` (Mongo)
+  6. Audit `retro.shipment.add-item` con before/after + `added_sn/added_qr`
+  7. Email post-save se `retroattivita.email_enabled = ON`
+- `POST /api/retro/arrivo/{receipt_page_id}/add-item` — aggiunge seriale a un Arrivo esistente:
+  1. Valida SN NON già in magazzino
+  2. Aggiorna IN-PLACE il receipt (`Item` title + Quantità)
+  3. Aggiorna colonna 16 Inventario Notion (aggiunge il SN)
+  4. Audit `retro.arrivo.add-item`
+- Guardia `_require_retro` invariata (Admin/Master/Responsabile con permesso).
+
+### Frontend `RetroattivitaPage.jsx`
+- Nuovo sub-form **`AddForgottenItem`** dentro `EditDialog`: banner "➕ Aggiungi Wallbox dimenticata"
+  * Input seriale + bottone fotocamera (`BarcodeScanner` esistente)
+  * QR opzionale con scelta `MANUALE` / `📷 SCANSIONA` (solo Spedizione)
+  * Motivazione obbligatoria + spinner disabilita doppio invio
+- Nessuna nuova riga creata — endpoint backend aggiorna in-place lo stesso record.
+
+### Multi seriali/QR su "Eliostech Ordini" (§1) — GIÀ funzionante
+- `append_shipment_to_order` in `notion_service.py` è già idempotente e cumulativo:
+  * Merge case-insensitive con SN/QR esistenti (nessuna sovrascrittura, nessun duplicato)
+  * Formato `"\n".join(...)` coerente col resto del gestionale (colonna 16 Inventario usa stesso separator)
+  * `QTY WB = len(SN WB)` sempre riallineato
+
+### Test superati
+- Backend compila + restart OK · `AddItemBody` importabile (fields: reason, new_sn, new_qr_code) ✅
+- Endpoint `add-item` shipment/arrivo → 401 senza JWT ✅
+- Frontend lint 0 errori
+- Struttura Notion **NON modificata**
+
+
 ## F14 — QTY WB colonna 16 + Precaricamento Retroattività + Separazione reale Arrivi/Spedizioni ✅ (20/02/2026)
 
 ### 1. QTY WB scritto in colonna 16 (Ordini)

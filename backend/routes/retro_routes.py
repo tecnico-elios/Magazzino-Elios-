@@ -134,6 +134,15 @@ class CancelBody(BaseModel):
     reason: str
 
 
+class AddItemBody(BaseModel):
+    """F14 §2-4 — Aggiungi wallbox dimenticata a un tracker/receipt esistente.
+    Non crea una nuova riga: aggiorna in-place SN (title) + Quantità del record esistente."""
+    model_config = ConfigDict(extra="ignore")
+    reason: str
+    new_sn: str
+    new_qr_code: Optional[str] = None
+
+
 def build_router(db, deps, send_email_fn=None) -> APIRouter:
     router = APIRouter(prefix="/retro", tags=["retro"])
 
@@ -428,5 +437,172 @@ def build_router(db, deps, send_email_fn=None) -> APIRouter:
         })
         notion_service.invalidate_inventory_cache()
         return {"ok": True}
+
+    @router.post("/shipment/{tracker_page_id}/add-item")
+    async def add_forgotten_shipment(tracker_page_id: str, body: AddItemBody, current=Depends(deps.get_current_user)):
+        """F14 §2-11 — Aggiungi Wallbox dimenticata a una Spedizione esistente.
+        Aggiorna in-place: SN title (concatenato), Quantità. Aggiorna Eliostech Ordini (SN WB + CODICI QR)."""
+        _require_retro(current)
+        if not (body.reason or "").strip():
+            raise HTTPException(400, "Motivazione obbligatoria")
+        new_sn = (body.new_sn or "").strip()
+        if not new_sn:
+            raise HTTPException(400, "Nuovo seriale mancante")
+        new_qr = (body.new_qr_code or "").strip()
+
+        # 1) Carica il tracker row esistente
+        try:
+            exits = await notion_service.list_exits()
+        except Exception as e:
+            raise HTTPException(502, f"Errore lettura uscite: {e}")
+        row = next((r for r in exits if r.get("id") == tracker_page_id), None)
+        if not row:
+            raise HTTPException(404, "Riga uscita non trovata")
+
+        # 2) §16 — Validazioni COMPLETE identiche a spedizione normale
+        current_sns = notion_service._parse_serials(row.get("sn") or "")
+        current_sns_low = {s.lower() for s in current_sns}
+        if new_sn.lower() in current_sns_low:
+            raise HTTPException(409, f"SN {new_sn} già presente in questa spedizione")
+        match = await notion_service.find_serial_in_inventory(new_sn)
+        if not match:
+            raise HTTPException(409, f"SN {new_sn} non disponibile in magazzino")
+        # QR uniqueness
+        if new_qr:
+            existing_qr = await db.qr_associations.find_one({"qr_code_lower": new_qr.lower(), "active": True})
+            if existing_qr and existing_qr.get("serial_lower") != new_sn.lower():
+                raise HTTPException(409, f"QR {new_qr} già associato ad altro seriale ({existing_qr.get('serial')})")
+
+        # 3) Aggiorna in-place il tracker Notion (SN title + Quantità = len(SN))
+        new_sns = current_sns + [new_sn]
+        new_title = "\n".join(new_sns)[:1990]
+        new_qty = float(len(new_sns))
+        before = {"sn": row.get("sn"), "quantity": row.get("quantity")}
+        try:
+            await notion_service.update_tracker_row(tracker_page_id, new_sn=new_title, new_qty=new_qty)
+        except Exception as e:
+            raise HTTPException(502, f"Aggiornamento tracker fallito: {e}")
+
+        # 4) Rimuovi il nuovo SN dalla colonna 16 Inventario (best-effort)
+        try:
+            item_ids = row.get("item_ids") or []
+            if item_ids:
+                await notion_service.remove_inventory_serials(item_ids[0], [new_sn])
+        except Exception as e:
+            logger.warning(f"remove_inventory_serials fallito: {e}")
+
+        # 5) Aggiorna Eliostech Ordini (append SN WB + CODICI QR + QTY WB=len(SN WB))
+        structure = row.get("cliente") or ""
+        order_updated_id: Optional[str] = None
+        try:
+            order = await notion_service.find_order_by_structure(structure)
+            if order.get("status") == "found":
+                order_updated_id = order.get("id")
+                await notion_service.append_shipment_to_order(
+                    order_updated_id, [new_sn], [new_qr] if new_qr else [],
+                )
+        except Exception as e:
+            logger.warning(f"append order fallito: {e}")
+
+        # 6) Persisti QR association
+        if new_qr:
+            await db.qr_associations.update_one(
+                {"qr_code_lower": new_qr.lower()},
+                {"$set": {
+                    "qr_code": new_qr, "qr_code_lower": new_qr.lower(),
+                    "serial": new_sn, "serial_lower": new_sn.lower(),
+                    "structure": structure, "order_page_id": order_updated_id,
+                    "associated_at": datetime.now(timezone.utc).isoformat(),
+                    "associated_by": current.get("username"), "active": True,
+                    "note": "retro-add-item",
+                }},
+                upsert=True,
+            )
+
+        # 7) Audit
+        after = {"sn": new_title, "quantity": new_qty}
+        await db.audit_logs.insert_one({
+            "at": datetime.now(timezone.utc).isoformat(),
+            "actor_id": str(current.get("_id")),
+            "actor_username": current.get("username"),
+            "action": "retro.shipment.add-item",
+            "target": tracker_page_id,
+            "meta": {
+                "reason": body.reason, "before": before, "after": after,
+                "added_sn": new_sn, "added_qr": new_qr or None,
+                "order_page_id": order_updated_id,
+                "date_registrazione": datetime.now(timezone.utc).isoformat(),
+            },
+        })
+        notion_service.invalidate_inventory_cache()
+
+        email_sent = False
+        if send_email_fn:
+            email_sent = await _send_retro_email_if_enabled(
+                db, send_email_fn, "spedizione", before, {**after, "added_sn": new_sn, "added_qr": new_qr},
+                body.reason, current.get("username") or "",
+            )
+        return {"ok": True, "new_qty": new_qty, "sn_list": new_sns, "email_sent": email_sent}
+
+    @router.post("/arrivo/{receipt_page_id}/add-item")
+    async def add_forgotten_arrivo(receipt_page_id: str, body: AddItemBody, current=Depends(deps.get_current_user)):
+        """F14 §12-14 — Aggiungi Wallbox dimenticata a un Arrivo esistente.
+        Aggiorna in-place il receipt Notion (Item title + Quantità) + colonna 16 Inventario."""
+        _require_retro(current)
+        if not (body.reason or "").strip():
+            raise HTTPException(400, "Motivazione obbligatoria")
+        new_sn = (body.new_sn or "").strip()
+        if not new_sn:
+            raise HTTPException(400, "Nuovo seriale mancante")
+
+        try:
+            recs = await notion_service.list_receipts_all()
+        except Exception as e:
+            raise HTTPException(502, f"Errore lettura entrate: {e}")
+        row = next((r for r in recs if r.get("id") == receipt_page_id), None)
+        if not row:
+            raise HTTPException(404, "Riga arrivo non trovata")
+
+        current_sns = notion_service._parse_serials(row.get("sn") or row.get("item_name") or "")
+        current_sns_low = {s.lower() for s in current_sns}
+        if new_sn.lower() in current_sns_low:
+            raise HTTPException(409, f"SN {new_sn} già presente in questo arrivo")
+        # Arrivo: seriale non deve essere già in magazzino
+        match = await notion_service.find_serial_in_inventory(new_sn)
+        if match is not None:
+            raise HTTPException(409, f"SN {new_sn} già presente in magazzino")
+
+        new_sns = current_sns + [new_sn]
+        new_title = "\n".join(new_sns)[:1990]
+        new_qty = float(len(new_sns))
+        before = {"sn": row.get("sn"), "quantity": row.get("quantity")}
+        try:
+            await notion_service.update_receipt_row(receipt_page_id, new_sn=new_title, new_qty=new_qty)
+        except Exception as e:
+            raise HTTPException(502, f"Aggiornamento arrivo fallito: {e}")
+
+        # Aggiorna Inventario colonna 16
+        try:
+            item_ids = row.get("item_ids") or []
+            if item_ids:
+                await notion_service.update_inventory_serials(item_ids[0], [new_sn])
+        except Exception as e:
+            logger.warning(f"update_inventory_serials fallito: {e}")
+
+        after = {"sn": new_title, "quantity": new_qty}
+        await db.audit_logs.insert_one({
+            "at": datetime.now(timezone.utc).isoformat(),
+            "actor_id": str(current.get("_id")),
+            "actor_username": current.get("username"),
+            "action": "retro.arrivo.add-item",
+            "target": receipt_page_id,
+            "meta": {
+                "reason": body.reason, "before": before, "after": after,
+                "added_sn": new_sn,
+                "date_registrazione": datetime.now(timezone.utc).isoformat(),
+            },
+        })
+        notion_service.invalidate_inventory_cache()
+        return {"ok": True, "new_qty": new_qty, "sn_list": new_sns}
 
     return router

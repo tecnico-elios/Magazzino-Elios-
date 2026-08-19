@@ -386,6 +386,9 @@ function EditDialog({ row, kind, onClose, onDone }) {
             )}
           </Button>
         </DialogFooter>
+        {/* F14 §2-14 — Aggiungi wallbox/seriale dimenticato senza creare nuove righe */}
+        <AddForgottenItem row={row} kind={kind} onDone={onDone} />
+      </DialogContent>
       </DialogContent>
       {/* F14 — Fotocamera per scansione QR (riusa componente esistente) */}
       <BarcodeScanner
@@ -401,5 +404,120 @@ function EditDialog({ row, kind, onClose, onDone }) {
         }}
       />
     </Dialog>
+  );
+}
+
+// F14 §2-14 — Sub-form per aggiungere una Wallbox dimenticata all'operazione esistente
+function AddForgottenItem({ row, kind, onDone }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [addSn, setAddSn] = useState("");
+  const [addQr, setAddQr] = useState("");
+  const [qrMode, setQrMode] = useState(null);
+  const [scanFor, setScanFor] = useState(null); // "sn" | "qr" | null
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (!reason.trim() || !addSn.trim()) {
+      toast.error("Seriale e motivazione obbligatori");
+      return;
+    }
+    setBusy(true);
+    try {
+      const body = { reason: reason.trim(), new_sn: addSn.trim() };
+      if (kind === "spedizione" && addQr.trim()) body.new_qr_code = addQr.trim();
+      const path = kind === "spedizione"
+        ? `retro/shipment/${row.id}/add-item`
+        : `retro/arrivo/${row.id}/add-item`;
+      const { data } = await axios.post(`${API}/${path}`, body);
+      toast.success("Wallbox dimenticata aggiunta", {
+        description: `Nuova quantità: ${data.new_qty} · Seriali: ${(data.sn_list || []).length}`,
+      });
+      setOpen(false); setReason(""); setAddSn(""); setAddQr(""); setQrMode(null);
+      onDone();
+    } catch (e) {
+      toast.error("Aggiunta fallita", { description: formatError(e) });
+    } finally { setBusy(false); }
+  };
+
+  if (!open) {
+    return (
+      <div className="mt-4 border-t border-slate-200 pt-3">
+        <Button type="button" variant="outline" onClick={() => setOpen(true)} className="w-full border-amber-300 text-amber-800" data-testid="retro-add-forgotten-btn">
+          ➕ Aggiungi Wallbox dimenticata
+        </Button>
+        <p className="text-[11px] text-slate-400 mt-1">
+          Aggiunge un seriale{kind === "spedizione" ? " + QR opzionale" : ""} allo stesso record ({kind}). Nessuna nuova riga.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="mt-4 border-t border-slate-200 pt-3 space-y-3 bg-amber-50/40 -mx-6 px-6 pb-4 rounded-b-md">
+        <div className="text-xs uppercase tracking-wider font-bold text-amber-800">➕ Aggiungi Wallbox dimenticata</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="sm:col-span-2">
+            <Label className="text-xs font-semibold">Nuovo seriale *</Label>
+            <div className="flex gap-2 mt-1">
+              <Input value={addSn} onChange={(e) => setAddSn(e.target.value)} className="h-10 font-mono-tight flex-1" data-testid="retro-add-sn" />
+              <Button type="button" variant="outline" size="sm" onClick={() => setScanFor("sn")} data-testid="retro-add-sn-scan">
+                <Camera size={14} weight="bold" />
+              </Button>
+            </div>
+          </div>
+          {kind === "spedizione" && (
+            <div className="sm:col-span-2">
+              <Label className="text-xs font-semibold">QR Code (opz)</Label>
+              {qrMode === null ? (
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  <Button type="button" variant="outline" onClick={() => setQrMode("manual")} className="h-10 text-xs" data-testid="retro-add-qr-manual">
+                    <Keyboard size={14} weight="bold" className="mr-1" /> MANUALE
+                  </Button>
+                  <Button type="button" onClick={() => { setQrMode("scan"); setScanFor("qr"); }} className="h-10 text-xs bg-amber-600 text-white" data-testid="retro-add-qr-scan">
+                    <Camera size={14} weight="bold" className="mr-1" /> 📷 SCANSIONA
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex gap-2 mt-1">
+                  <Input value={addQr} onChange={(e) => setAddQr(e.target.value)} className="h-10 font-mono-tight flex-1" data-testid="retro-add-qr" />
+                  <Button type="button" variant="outline" size="sm" onClick={() => { setQrMode(null); setAddQr(""); }}>×</Button>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="sm:col-span-2">
+            <Label className="text-xs font-semibold text-red-700">Motivazione *</Label>
+            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} className="mt-1" data-testid="retro-add-reason" />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={busy}>Annulla</Button>
+          <Button type="button" onClick={submit} disabled={busy || !addSn.trim() || !reason.trim()} className="bg-amber-600 hover:bg-amber-700 text-white min-w-[140px]" data-testid="retro-add-confirm">
+            {busy ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <circle cx="12" cy="12" r="10" strokeWidth="4" className="opacity-25" />
+                  <path d="M4 12a8 8 0 018-8v0" strokeWidth="4" className="opacity-75" />
+                </svg>
+                Aggiungo…
+              </span>
+            ) : "Aggiungi"}
+          </Button>
+        </div>
+      </div>
+      <BarcodeScanner
+        open={scanFor !== null}
+        onClose={() => setScanFor(null)}
+        label={scanFor === "qr" ? "Scansiona QR Code" : "Scansiona seriale"}
+        onDetected={(val) => {
+          const v = (val || "").trim();
+          if (scanFor === "sn") setAddSn(v);
+          else if (scanFor === "qr") setAddQr(v);
+          setScanFor(null);
+        }}
+      />
+    </>
   );
 }
