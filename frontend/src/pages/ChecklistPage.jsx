@@ -197,10 +197,7 @@ export default function ChecklistPage() {
         setLastScan({
           type: "error",
           title: "🔴 SERIALE NON DISPONIBILE IN MAGAZZINO",
-          subtitle:
-            `SN ${code} è stato spedito` +
-            (data.shipped_date ? ` il ${data.shipped_date}` : "") +
-            (data.shipped_to ? ` a ${data.shipped_to}` : ""),
+          subtitle: `SN ${code}`,
           code,
         });
         return;
@@ -238,10 +235,10 @@ export default function ChecklistPage() {
         setPending({ id: product.id, name: product.name });
         return;
       }
-      // status === "not_found" → mai entrato
+      // status === "not_found" → seriale non presente nell'Inventario Notion
       setLastScan({
         type: "error",
-        title: "🔴 SERIALE NON RISULTA MAI ENTRATO IN MAGAZZINO",
+        title: "🔴 SERIALE NON DISPONIBILE IN MAGAZZINO",
         subtitle: `${code}`,
         code,
       });

@@ -123,6 +123,42 @@ async def remove_inventory_serials(page_id: str, serials_to_remove: List[str]) -
     return None
 
 
+async def find_serial_in_inventory(sn: str) -> Optional[Dict[str, Any]]:
+    """F13 — Parity con notion_service.find_serial_in_inventory.
+
+    Nel gestionale locale, un seriale è disponibile se esiste in `product_serials`
+    con status='available'. Restituisce il prodotto associato o None.
+    """
+    sn_clean = (sn or "").strip()
+    if not sn_clean:
+        return None
+    db = _db()
+    row = await db.product_serials.find_one({
+        "serial_lower": sn_clean.lower(),
+        "status": "available",
+    })
+    if not row:
+        return None
+    product = await db.products.find_one({"id": row["product_id"]})
+    if not product:
+        return None
+    # Ricostruisci una forma "list_inventory" per uniformità con notion_service.
+    avail = await db.product_serials.count_documents({
+        "product_id": product["id"], "status": "available",
+    })
+    return {
+        "id": product["id"],
+        "name": product.get("name") or "Senza nome",
+        "code": product.get("code") or "",
+        "quantity": avail,
+        "unit": product.get("unit") or "pz",
+        "category": product.get("category"),
+        "tipo_gestione": product.get("tipo_gestione"),
+        "url": None,
+        "serials": [row["serial"]],
+    }
+
+
 # ---------- Serials ----------
 
 async def latest_serial_status(sn: str) -> Dict[str, Any]:

@@ -511,29 +511,22 @@ async def inventory_lookup(code: str):
                 "code": code_clean,
             }
 
-    # 2) SN → latest-movement status
+    # 2) F13 — SN → cerca SOLO nella colonna 16 "SN /codice" dell'Inventario.
+    #    NIENTE query a Entrate/Uscite/Consegne per determinare la disponibilità.
     try:
-        st = await svc.latest_serial_status(code_clean)
+        matched_item = await svc.find_serial_in_inventory(code_clean)
     except Exception as e:
-        raise HTTPException(502, f"Errore ricerca seriale: {e}")
+        raise HTTPException(502, f"Errore ricerca seriale in Inventario: {e}")
 
-    if st["status"] == "unseen":
+    if not matched_item:
         return {"status": "not_found", "code": code_clean}
 
-    last = st.get("last") or {}
-    matched_item = None
-    item_ids = last.get("item_ids") or []
-    if item_ids:
-        for i in items:
-            if i["id"] == item_ids[0]:
-                annotate_item(i)
-                matched_item = i
-                break
+    annotate_item(matched_item)
 
     # F6-quantita: se il prodotto è A Quantità, il valore trovato nella colonna
-    # "Item"/"SN" è un BARCODE (non un seriale univoco). Trattalo come match SKU
+    # "SN /codice" è un BARCODE (non un seriale univoco). Trattalo come match SKU
     # → nessuna validazione seriale, apri QtyDialog.
-    if matched_item and matched_item.get("tipo_gestione") == "a_quantita":
+    if matched_item.get("tipo_gestione") == "a_quantita":
         return {
             "status": "ok",
             "matched_by": "barcode",
@@ -541,26 +534,13 @@ async def inventory_lookup(code: str):
             "code": code_clean,
         }
 
-    if st["status"] == "in_warehouse":
-        return {
-            "status": "in_warehouse",
-            "matched_by": "sn",
-            "code": code_clean,
-            "serial": last.get("matched_serial") or code_clean,
-            "item": matched_item,
-            "receipt_date": last.get("date"),
-            "receipt_url": last.get("url"),
-        }
-    # status == "out"
+    # Seriale presente in Inventario colonna 16 → DISPONIBILE.
     return {
-        "status": "out",
+        "status": "in_warehouse",
         "matched_by": "sn",
         "code": code_clean,
-        "serial": last.get("matched_serial") or code_clean,
+        "serial": code_clean,
         "item": matched_item,
-        "shipped_to": last.get("cliente"),
-        "shipped_date": last.get("date"),
-        "tracker_url": last.get("url"),
     }
 
 
@@ -627,19 +607,19 @@ async def submit_checklist(
                 serial_errors.append(f"{it.name} — SN {sn_c} inserito più volte nella stessa spedizione")
                 continue
             seen_serials.add(sn_key)
+            # F13 — Availability check SOLO su Inventario Notion (colonna 16).
+            #       NIENTE query a Entrate/Uscite per determinare la disponibilità.
             try:
-                st = await svc.latest_serial_status(sn_c)
+                match = await svc.find_serial_in_inventory(sn_c)
             except Exception as e:
-                raise HTTPException(502, f"Errore verifica stato seriale: {e}")
-            if st["status"] == "unseen":
-                serial_errors.append(f"{it.name} — SN {sn_c} non risulta mai entrato in magazzino")
+                raise HTTPException(502, f"Errore verifica disponibilità seriale: {e}")
+            if not match:
+                serial_errors.append(f"{it.name} — SN {sn_c} non disponibile in magazzino")
                 continue
-            if st["status"] == "out":
-                last = st.get("last") or {}
+            # Il seriale deve appartenere al prodotto scelto in payload.
+            if match.get("id") != it.page_id:
                 serial_errors.append(
                     f"{it.name} — SN {sn_c} non disponibile in magazzino"
-                    + (f" (uscito il {last.get('date')}" if last.get("date") else "")
-                    + (f" — cliente {last.get('cliente')})" if last.get("cliente") else (")" if last.get("date") else ""))
                 )
     if serial_errors:
         # F4: log anomaly for auditability
@@ -1105,15 +1085,15 @@ async def submit_arrivo(
                 serial_errors.append(f"{it.name} — SN {sn_c} inserito più volte")
                 continue
             seen.add(key)
+            # F13 — Arrivi: seriale "nuovo" = non presente nella colonna 16
+            #       dell'Inventario Notion. NIENTE query a Entrate/Uscite.
             try:
-                st = await svc.latest_serial_status(sn_c)
+                match = await svc.find_serial_in_inventory(sn_c)
             except Exception as e:
-                raise HTTPException(502, f"Errore verifica stato seriale: {e}")
-            if st["status"] == "in_warehouse":
-                last = st.get("last") or {}
+                raise HTTPException(502, f"Errore verifica seriale in Inventario: {e}")
+            if match is not None:
                 serial_errors.append(
                     f"{it.name} — SN {sn_c} già presente in magazzino"
-                    + (f" (entrato il {last.get('date')})" if last.get("date") else "")
                 )
     if serial_errors:
         await log_anomaly(

@@ -74,6 +74,25 @@
 - Frontend: nuova tab Admin `ManutenzioneTab` con stato Notion (pallino verde/rosso), count prodotti in cache, timestamp ultimo check, bottoni "Sincronizza ora" / "Svuota cache" / "Verifica stato".
 - Nota: gli altri punti F9 (Admin restructure per area, tipizzazione notifiche per evento) sono già stati esplicitamente rifiutati (P2) o richiedono scelta operativa dell'utente — non toccati per evitare regressioni.
 
+## F13 — Disponibilità seriali: SOLO Inventario Notion colonna 16 ✅ (19/02/2026)
+- **Regola nuova**: la disponibilità di un seriale è determinata ESCLUSIVAMENTE dalla presenza in colonna 16 "SN /codice" dell'Inventario Notion. Nessuna query a Entrate/Uscite/Consegne per la disponibilità.
+- **Backend `notion_service.py`**:
+  * `parse_item()` ora popola il campo `serials` leggendo la colonna 16 "SN /codice" per ogni item Inventario (cache O(1)).
+  * Nuova funzione `find_serial_in_inventory(sn)` — cerca il SN nella lista in cache, ritorna item o `None`. Nessuna nuova chiamata HTTP nel caso comune (usa `list_inventory` con TTL cache).
+- **Backend `inventory_local.py`**: aggiunta `find_serial_in_inventory(sn)` per parity — cerca in `product_serials` con `status='available'`. Contratto identico a `notion_service`.
+- **Backend `server.py`** — 3 punti di verifica riscritti:
+  1. `GET /api/inventory/lookup`: rimossa chiamata a `latest_serial_status`. Ora: dopo SKU-match cerca solo in colonna 16 → `in_warehouse` o `not_found`. Nessuna risposta "out" con `shipped_to/shipped_date/tracker_url`.
+  2. `POST /api/checklist/send` (STRICT validation Spedizioni): sostituito `latest_serial_status` con `find_serial_in_inventory`. Messaggio errore ridotto a "SN X non disponibile in magazzino" — nessuna data/cliente uscita.
+  3. `POST /api/arrivi/send` (STRICT validation Arrivi): sostituito `latest_serial_status` con `find_serial_in_inventory`. "Seriale nuovo" = non in colonna 16. Blocca se già presente.
+- **Frontend `ChecklistPage.jsx`**: rimossa la stringa `SN X è stato spedito il DATA a CLIENTE`. Nuovo messaggio: `SERIALE NON DISPONIBILE IN MAGAZZINO — SN <code>`. Il branch `status === "out"` resta come no-op difensivo (backend non lo restituisce più).
+- **Storico intatto**: `list_receipts_all`, `list_exits`, admin `/admin/serial-history`, `/admin/global-search` continuano a leggere Entrate/Uscite per tracciabilità — invariati.
+- **Notion**: 0 modifiche a struttura/proprietà/mapping.
+- **Test end-to-end reali** (backend live):
+  * `GET /inventory/lookup?code=1364820` (SN reale in colonna 16) → `in_warehouse` con item correttamente identificato (Pulsar Pro 22kw 5M) ✅
+  * `GET /inventory/lookup?code=SN1426770` (caso segnalato utente — era "spedito il 2026-08-18 a Casa vacanze Palmer") → ora `not_found` pulito ✅
+  * `GET /inventory/lookup?code=FAKE_XXX` → `not_found` ✅
+- **Funzioni che ancora usano `latest_serial_status`** (solo per storico/tracciabilità admin, NON per disponibilità): `admin_extra_routes.py:323` (Storico SN) e `:567` (Ricerca globale). Corrette by design — sono viste di history.
+
 ## F8 — Switch fonte inventario riservato al Master + fix import useAuth ✅ (18/02/2026)
 - **Frontend `InventorySourceTab`**: switch Notion↔Gestionale ora visibile e operativo SOLO per l'account Master (`tecnico@eliostech.org`). Gli altri Admin vedono badge read-only "🔒 Solo Master" e bottone disabilitato.
 - **Backend**: la guardia `POST /api/admin/inventory/source` era già in place (403 se non Master) — nessuna modifica.

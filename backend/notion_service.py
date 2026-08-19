@@ -85,6 +85,11 @@ def parse_item(page: Dict[str, Any]) -> Dict[str, Any]:
     name = _plain_text(_get_prop(props, "Nome prodotto", "Materiale", "Name"))
     code = _plain_text(_get_prop(props, "Codice prodotto", "Codice", "Code"))
 
+    # F13 — Availability SSOT: leggi la colonna 16 "SN /codice" dell'Inventario.
+    # Questa è ora l'UNICA fonte per determinare la disponibilità di un seriale.
+    sn_prop = _get_prop(props, "SN /codice", "SN / CODICI", "SN /CODICI", "SN/codice")
+    serials_list = _parse_serials(_plain_text(sn_prop)) if sn_prop else []
+
     qty_prop = _get_prop(props, "QTA in magazzino", "Quantità", "Quantita", "Quantity")
     quantity: Optional[float] = None
     if qty_prop:
@@ -135,6 +140,9 @@ def parse_item(page: Dict[str, Any]) -> Dict[str, Any]:
         "category": category,
         "tipo_gestione": tipo_gestione,
         "url": page.get("url"),
+        # F13 — seriali disponibili in magazzino (colonna 16 Inventario Notion).
+        # Fonte UNICA per la verifica di disponibilità.
+        "serials": serials_list,
     }
 
 
@@ -284,6 +292,30 @@ async def get_item(page_id: str) -> Dict[str, Any]:
             logger.error(f"Notion get_item failed: {resp.status_code} {resp.text[:300]}")
             resp.raise_for_status()
         return parse_item(resp.json())
+
+
+async def find_serial_in_inventory(sn: str) -> Optional[Dict[str, Any]]:
+    """F13 — Fonte UNICA per la disponibilità dei seriali.
+
+    Cerca il seriale `sn` nella colonna 16 "SN /codice" dell'Inventario Notion
+    iterando la cache già presente (nessuna nuova query a Notion nel caso comune).
+
+    NON consulta Entrate, Uscite, Consegne Wallbox o altri database.
+
+    Returns:
+      - dict item se trovato (con name, id, code, ecc.)
+      - None se il seriale non è presente nell'Inventario → NON DISPONIBILE.
+    """
+    sn_clean = (sn or "").strip()
+    if not sn_clean:
+        return None
+    sn_lower = sn_clean.lower()
+    items = await list_inventory()
+    for it in items:
+        for s in (it.get("serials") or []):
+            if s.strip().lower() == sn_lower:
+                return it
+    return None
 
 
 async def create_pick(
