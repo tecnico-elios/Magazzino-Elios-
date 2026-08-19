@@ -13,6 +13,7 @@ import AnomaliePage from "@/pages/AnomaliePage";
 import ChecklistPage from "@/pages/ChecklistPage";
 import AdminPage from "@/pages/AdminPage";
 import AdminUsersPage from "@/pages/AdminUsersPage";
+import RetroattivitaPage from "@/pages/RetroattivitaPage";
 import LoginPage from "@/pages/LoginPage";
 import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import ForceChangePasswordPage from "@/pages/ForceChangePasswordPage";
@@ -60,6 +61,7 @@ function App() {
                 <Route path="/spedizioni" element={<ChecklistPage />} />
                 <Route path="/movimenti" element={<MovimentiPage />} />
                 <Route path="/anomalie" element={<AnomaliePage />} />
+                <Route path="/retroattivita" element={<RetroattivitaPage />} />
               </Route>
               <Route
                 path="/admin"

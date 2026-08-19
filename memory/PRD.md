@@ -74,6 +74,55 @@
 - Frontend: nuova tab Admin `ManutenzioneTab` con stato Notion (pallino verde/rosso), count prodotti in cache, timestamp ultimo check, bottoni "Sincronizza ora" / "Svuota cache" / "Verifica stato".
 - Nota: gli altri punti F9 (Admin restructure per area, tipizzazione notifiche per evento) sono già stati esplicitamente rifiutati (P2) o richiedono scelta operativa dell'utente — non toccati per evitare regressioni.
 
+## F14 — QR opzionale Spedizioni + Sync "Eliostech Ordini" + Operazione Retroattiva ✅ (19/02/2026)
+
+### Blocco A — QR Code opzionale Spedizioni (§1-7)
+- **Frontend `ChecklistPage.jsx`**: nuovo dialog `qr-prompt-dialog` che compare DOPO ogni seriale aggiunto (sia da scan singolo che da `SerialCollector` batch). Coda `qrQueue` processa un seriale per volta con 2 azioni: `SALTA` / `ASSOCIA QR`. In modalità ASSOCIA: input testuale (supporta scanner hardware + digitazione manuale) con verifica live via `GET /api/qr/check`.
+- **Backend `routes/qr_routes.py`** (nuovo file): `GET /api/qr/check`, `GET /api/qr/associations`, `POST /api/qr/detach`. Univocità globale QR ↔ SN garantita da indice unico `qr_associations.qr_code_lower`.
+- **Persistenza MongoDB**: nuova collection `qr_associations` con indici unique. Al submit spedizione, upsert automatico { qr_code, serial, product, structure, order_page_id, associated_at, associated_by }.
+- **Controlli**: (a) QR già associato ad altro SN → 409; (b) duplicato QR nella stessa spedizione → 409; (c) lista qr_codes non allineata a serials → 400.
+
+### Blocco B — Sync Notion "Eliostech Ordini" (§8-14)
+- **Backend `notion_service.py`**:
+  * Nuove costanti: `NOTION_ORDINI_DS_ID` (env), `NOTION_ORDINE_STRUCTURE_FIELD="Ragione sociale"` (default, seconda colonna configurabile via env), `NOTION_ORDINE_SN_PROP="SN WB"`, `NOTION_ORDINE_QR_PROP="CODICI QR"`.
+  * `find_order_by_structure(structure)` → itera DS Ordini, match case-insensitive esatto su campo Ragione sociale. Returns `{status: found|not_found|multiple|not_configured}`.
+  * `append_shipment_to_order(page_id, serials, qr_codes)` — merge idempotente su SN WB e CODICI QR. **QTY WB MAI toccato**.
+  * `remove_shipment_from_order(...)` per retroattività.
+- **`server.py` submit_checklist**: PRIMA di scrivere in Notion Tracker, cerca l'ordine dalla struttura; `not_found` → 409 "Ordine non trovato per la struttura selezionata"; `multiple` → 409 "Trovati N ordini". Solo se `found` procede.
+- **Post-scrittura Tracker**: append_shipment_to_order su Notion Ordini con tutti i seriali + QR raccolti (best-effort, se fallisce logga anomalia ma non rollback).
+- **Verifica reale su Notion**: DS `26ba9b09-6783-81ce-9e33-000b68307eaa` confermato attivo. Test parziale: match "Alessandra Cannazza" → `found`, match `STRUTTURA_XYZ` → `not_found` ✅.
+
+### Blocco C — Operazione Retroattiva (§15-51)
+- **Nuovo permesso** `modifica_retroattiva` in `auth.PERMISSION_MODULES` — assegnabile al RESPONSABILE dall'Admin via UI esistente `PermissionsDialog`.
+- **Backend `routes/retro_routes.py`** (nuovo file):
+  * `GET /api/retro/authorized` — usato dal frontend per decidere se mostrare la card Dashboard.
+  * `POST /api/retro/find` — cerca operazioni esistenti (LIVE da Notion via `list_exits`/`list_receipts_all`) con filtri tipo/data/seriale/struttura.
+  * `PATCH /api/retro/shipment/{tracker_page_id}` — modifica riga Uscite esistente. Cambi consentiti: seriale/quantità/struttura/data/preso da/QR. Aggiorna anche l'ordine collegato (rimozione da vecchio + append al nuovo) + colonna 16 Inventario. Motivazione + audit before/after obbligatori.
+  * `PATCH /api/retro/arrivo/{receipt_page_id}` — modifica riga Entrate esistente (SN/qty/data).
+  * `POST /api/retro/cancel/{tipo}/{page_id}` — archiviazione soft (Notion archive) + audit. Storico preservato.
+- **Guardia `_require_retro(current)`**: Admin/Master sempre; Responsabile solo con `modifica_retroattiva`; Operator sempre 403 "Operazione retroattiva non autorizzata".
+- **Nuova pagina `RetroattivitaPage.jsx`** su route `/retroattivita` — form ricerca + tabella risultati + `EditDialog` modale con campi editabili SOLO se compilati (§22 minimamente invasiva), motivazione obbligatoria, pulsante `Annulla operazione` separato.
+- **Card Dashboard** "↩️ Operazione Retroattiva" — visibile SOLO se `/api/retro/authorized` ritorna `authorized: true`. Operator: card invisibile. Responsabile senza permesso: card invisibile.
+- **Regola fondamentale §19 §20 §21**: le PATCH modificano il RECORD esistente (Notion `update_tracker_row`/`update_receipt_row` + `append/remove_shipment_from_order`), MAI creano nuove righe.
+- **Audit obbligatorio**: ogni retro insert in `audit_logs` con action `retro.shipment.update|retro.arrivo.update|retro.cancel`, meta `{reason, before, after, date_registrazione}`.
+
+### Struttura Notion invariata
+- 0 modifiche a: database Inventario, Entrate, Uscite, Ordini, proprietà, tipi, mapping, viste, relazioni, formule.
+- Il campo di match struttura è configurabile via env `NOTION_ORDINE_STRUCTURE_FIELD` (default `Ragione sociale`).
+
+### Test superati
+- Backend compila 5 file (server, notion_service, qr_routes, retro_routes, auth) ✅
+- Frontend lint 0 errori su ChecklistPage/DashboardPage/RetroattivitaPage/App.js ✅
+- Endpoint `/api/qr/check` e `/api/retro/authorized` protetti (401 senza JWT) ✅
+- Match `find_order_by_structure` reale su Notion: 1 struttura esistente → `found`, 1 inesistente → `not_found` ✅
+- 0 modifiche alla struttura Notion ✅
+
+### File aggiunti/modificati
+- Backend NEW: `routes/qr_routes.py`, `routes/retro_routes.py`
+- Backend EDIT: `auth.py` (+1 permesso), `notion_service.py` (+5 funzioni Ordini/retroattività), `server.py` (payload qr_codes + sync ordini + include router + indexes), `.env` (+2 env vars)
+- Frontend NEW: `pages/RetroattivitaPage.jsx`
+- Frontend EDIT: `App.js` (route), `pages/DashboardPage.jsx` (card retro), `pages/ChecklistPage.jsx` (QR dialog + payload), `pages/AdminUsersPage.jsx` (+1 permesso UI)
+
 ## F13 — Disponibilità seriali: SOLO Inventario Notion colonna 16 ✅ (19/02/2026)
 - **Regola nuova**: la disponibilità di un seriale è determinata ESCLUSIVAMENTE dalla presenza in colonna 16 "SN /codice" dell'Inventario Notion. Nessuna query a Entrate/Uscite/Consegne per la disponibilità.
 - **Backend `notion_service.py`**:

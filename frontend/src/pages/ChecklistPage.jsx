@@ -25,7 +25,13 @@ import {
   User,
   CalendarBlank,
   Barcode,
+  QrCode,
+  SkipForward,
+  Check,
 } from "@phosphor-icons/react";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "../components/ui/dialog";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -55,6 +61,23 @@ export default function ChecklistPage() {
   const [confirmError, setConfirmError] = useState(null);
   // F8 UI iniziale — 2 card grandi in stile Dashboard finché l'operatore non sceglie un flusso.
   const [initialAction, setInitialAction] = useState(null);
+
+  // F14 — QR Code opzionale: coda dei seriali appena aggiunti da chiedere "Associa QR?"
+  //       + mappa seriale → QR persistente in memoria (allineata a submit payload).
+  const [qrQueue, setQrQueue] = useState([]); // [{productId, productName, serial}]
+  const [qrMap, setQrMap] = useState({}); // { serialLower: {serial, qr} }
+  const [qrPromptOpen, setQrPromptOpen] = useState(false);
+  const [qrScanOpen, setQrScanOpen] = useState(false); // dentro il popup: input attivo
+  const [qrValue, setQrValue] = useState("");
+  const [qrBusy, setQrBusy] = useState(false);
+  const enqueueForQR = (product, serials) => {
+    if (!product || !serials || serials.length === 0) return;
+    setQrQueue((prev) => [
+      ...prev,
+      ...serials.map((s) => ({ productId: product.id, productName: product.name, serial: s })),
+    ]);
+    setQrPromptOpen(true);
+  };
 
   const focusScanner = () =>
     setTimeout(() => document.getElementById("scanner-input")?.focus(), 0);
@@ -233,6 +256,8 @@ export default function ChecklistPage() {
           code,
         });
         setPending({ id: product.id, name: product.name });
+        // F14 — Popup QR opzionale post scansione
+        enqueueForQR(product, [code]);
         return;
       }
       // status === "not_found" → seriale non presente nell'Inventario Notion
@@ -291,6 +316,8 @@ export default function ChecklistPage() {
           serialized: !!li.serialized,
           quantity: li.quantity,
           serials: li.serialized ? li.serials : [],
+          // F14 — QR allineati ai seriali (stringa vuota per i seriali senza QR)
+          qr_codes: li.serialized ? (li.serials || []).map((sn) => qrMap[(sn || "").toLowerCase()]?.qr || "") : [],
         })),
       };
       const { data } = await axios.post(`${API}/checklist/send`, payload);
@@ -302,6 +329,12 @@ export default function ChecklistPage() {
       setLastScan(null);
       setShowConfirm(false);
       setInitialAction(null);
+      // F14 — reset QR state
+      setQrQueue([]);
+      setQrMap({});
+      setQrPromptOpen(false);
+      setQrScanOpen(false);
+      setQrValue("");
       await refresh();
     } catch (e) {
       const msg = e?.response?.data?.detail || e?.message || "Errore invio";
@@ -647,6 +680,8 @@ export default function ChecklistPage() {
                 title: "🟢 SERIALI AGGIUNTI",
                 subtitle: `${sess.name} — ${sess.quantity} pz`,
               });
+              // F14 — Popup QR opzionale per ogni seriale committato
+              enqueueForQR({ id: sess.id, name: sess.name }, sess.serials.filter(Boolean));
               setSerialSession(null);
             }}
           />
@@ -696,6 +731,108 @@ export default function ChecklistPage() {
         }}
         onConfirm={submit}
       />
+
+      {/* F14 — Popup opzionale QR Code per il primo elemento della coda */}
+      {qrPromptOpen && qrQueue.length > 0 && (
+        <Dialog open={true} onOpenChange={(v) => { if (!v && !qrBusy) { setQrPromptOpen(false); setQrScanOpen(false); setQrValue(""); } }}>
+          <DialogContent className="max-w-md" data-testid="qr-prompt-dialog">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <QrCode size={22} weight="bold" className="text-amber-600" />
+                Associa QR Code
+              </DialogTitle>
+              <DialogDescription>
+                <b>{qrQueue[0].productName}</b> — SN <span className="font-mono-tight">{qrQueue[0].serial}</span>
+                <br />Vuoi associare un QR Code a questa Wallbox? (opzionale)
+              </DialogDescription>
+            </DialogHeader>
+            {!qrScanOpen ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 py-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    // SALTA — passa al prossimo
+                    setQrQueue((q) => q.slice(1));
+                    setQrValue("");
+                    setQrScanOpen(false);
+                    if (qrQueue.length <= 1) setQrPromptOpen(false);
+                  }}
+                  className="h-14 text-base"
+                  data-testid="qr-skip-btn"
+                >
+                  <SkipForward size={18} weight="bold" className="mr-2" /> SALTA
+                </Button>
+                <Button
+                  onClick={() => setQrScanOpen(true)}
+                  className="h-14 text-base bg-amber-600 hover:bg-amber-700 text-white"
+                  data-testid="qr-associate-btn"
+                >
+                  <QrCode size={18} weight="bold" className="mr-2" /> ASSOCIA QR
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <Label className="text-sm font-semibold">Scansiona o digita il QR Code</Label>
+                <Input
+                  autoFocus
+                  value={qrValue}
+                  onChange={(e) => setQrValue(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); confirmQR(); } }}
+                  placeholder="Es. QR123456"
+                  className="h-12 text-lg font-mono-tight"
+                  data-testid="qr-input"
+                  disabled={qrBusy}
+                />
+                <p className="text-xs text-slate-500">
+                  Puoi usare lo scanner hardware o digitare manualmente. Verifica automatica di univocità.
+                </p>
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" onClick={() => { setQrScanOpen(false); setQrValue(""); }} disabled={qrBusy}>Indietro</Button>
+                  <Button onClick={confirmQR} disabled={qrBusy || !qrValue.trim()} className="bg-amber-600 hover:bg-amber-700 text-white" data-testid="qr-confirm-btn">
+                    {qrBusy ? <CircleNotch size={16} className="animate-spin mr-1" /> : <Check size={16} weight="bold" className="mr-1" />}
+                    Conferma QR
+                  </Button>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
+
+  async function confirmQR() {
+    const q = qrValue.trim();
+    if (!q) return;
+    setQrBusy(true);
+    try {
+      // Check globale su MongoDB
+      const { data } = await axios.get(`${API}/qr/check`, { params: { qr: q } });
+      const currentSn = qrQueue[0]?.serial || "";
+      if (data.exists && (data.serial || "").toLowerCase() !== currentSn.toLowerCase()) {
+        toast.error("🔴 QR CODE GIÀ ASSOCIATO", {
+          description: `Questo QR Code è già associato a un'altra Wallbox (SN ${data.serial}).`,
+        });
+        setQrBusy(false);
+        return;
+      }
+      // Anche verifica duplicati locali nella spedizione corrente
+      const isDupLocal = Object.values(qrMap).some((m) => m.qr.toLowerCase() === q.toLowerCase());
+      if (isDupLocal) {
+        toast.error("QR già usato in questa spedizione");
+        setQrBusy(false);
+        return;
+      }
+      setQrMap((prev) => ({ ...prev, [currentSn.toLowerCase()]: { serial: currentSn, qr: q } }));
+      toast.success(`✅ QR associato a ${currentSn}`, { description: q });
+      setQrQueue((prev) => prev.slice(1));
+      setQrValue("");
+      setQrScanOpen(false);
+      if (qrQueue.length <= 1) setQrPromptOpen(false);
+    } catch (e) {
+      toast.error("Verifica QR fallita", { description: e?.response?.data?.detail || e?.message || "" });
+    } finally {
+      setQrBusy(false);
+    }
+  }
 }

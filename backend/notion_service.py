@@ -22,6 +22,11 @@ NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "")
 NOTION_INVENTARIO_DS_ID = os.environ.get("NOTION_INVENTARIO_DS_ID", "")
 NOTION_TRACKER_DS_ID = os.environ.get("NOTION_TRACKER_DS_ID", "")
 NOTION_RECEIPTS_DS_ID = os.environ.get("NOTION_RECEIPTS_DS_ID", "")
+NOTION_ORDINI_DS_ID = os.environ.get("NOTION_ORDINI_DS_ID", "")
+# F14 — Nome esatto del campo (seconda colonna) su cui matchare la struttura in "Eliostech Ordini".
+NOTION_ORDINE_STRUCTURE_FIELD = os.environ.get("NOTION_ORDINE_STRUCTURE_FIELD", "Ragione sociale")
+NOTION_ORDINE_SN_PROP = "SN WB"
+NOTION_ORDINE_QR_PROP = "CODICI QR"
 NOTION_VERSION = os.environ.get("NOTION_VERSION", "2025-09-03")
 NOTION_BASE = "https://api.notion.com/v1"
 
@@ -316,6 +321,189 @@ async def find_serial_in_inventory(sn: str) -> Optional[Dict[str, Any]]:
             if s.strip().lower() == sn_lower:
                 return it
     return None
+
+
+# ---------- F14 — Eliostech Ordini ----------
+
+async def find_order_by_structure(structure: str) -> Dict[str, Any]:
+    """F14 — Trova l'ordine in "Eliostech Ordini" cercando `structure` nel campo
+    NOTION_ORDINE_STRUCTURE_FIELD (default: "Ragione sociale" — 2ª colonna del db).
+    Confronto case-insensitive esatto sul valore trimato.
+
+    Returns:
+      {"status": "not_configured"}                                       — DS non configurato
+      {"status": "not_found"}                                            — 0 match
+      {"status": "multiple", "count": N, "ids": [...], "titles": [...]}  — >1 match
+      {"status": "found", "id": pid, "structure": "...", "sn_wb": [...],
+       "qr_codes": [...], "qty_wb": <num|None>, "title": "...", "url": "..."}
+    """
+    if not NOTION_TOKEN or not NOTION_ORDINI_DS_ID:
+        return {"status": "not_configured"}
+    q = (structure or "").strip()
+    if not q:
+        return {"status": "not_found"}
+    q_low = q.lower()
+    url = f"{NOTION_BASE}/data_sources/{NOTION_ORDINI_DS_ID}/query"
+    matches: List[Dict[str, Any]] = []
+    body: Dict[str, Any] = {"page_size": 100}
+    async with httpx.AsyncClient(timeout=30) as client:
+        while True:
+            resp = await client.post(url, headers=_headers(), json=body)
+            if resp.status_code >= 400:
+                logger.error(f"Ordini query failed: {resp.status_code} {resp.text[:200]}")
+                resp.raise_for_status()
+            data = resp.json()
+            for p in data.get("results", []):
+                props = p.get("properties", {})
+                struct_prop = _get_prop(props, NOTION_ORDINE_STRUCTURE_FIELD)
+                struct_text = _plain_text(struct_prop).strip() if struct_prop else ""
+                if struct_text and struct_text.lower() == q_low:
+                    sn_prop = _get_prop(props, NOTION_ORDINE_SN_PROP)
+                    qr_prop = _get_prop(props, NOTION_ORDINE_QR_PROP)
+                    qty_prop = _get_prop(props, "QTY WB")
+                    title_prop = None
+                    for k, v in props.items():
+                        if v.get("type") == "title":
+                            title_prop = v
+                            break
+                    matches.append({
+                        "id": p["id"],
+                        "structure": struct_text,
+                        "title": _plain_text(title_prop),
+                        "sn_wb": _parse_serials(_plain_text(sn_prop)) if sn_prop else [],
+                        "qr_codes": _parse_serials(_plain_text(qr_prop)) if qr_prop else [],
+                        "qty_wb": qty_prop.get("number") if qty_prop and qty_prop.get("type") == "number" else None,
+                        "url": p.get("url"),
+                    })
+            if not data.get("has_more"):
+                break
+            body["start_cursor"] = data.get("next_cursor")
+    if not matches:
+        return {"status": "not_found"}
+    if len(matches) > 1:
+        return {
+            "status": "multiple",
+            "count": len(matches),
+            "ids": [m["id"] for m in matches],
+            "titles": [m.get("title") or "" for m in matches],
+        }
+    m = matches[0]
+    return {"status": "found", **m}
+
+
+async def append_shipment_to_order(order_page_id: str, serials: List[str], qr_codes: List[str]) -> None:
+    """F14 — Aggiunge SN a "SN WB" e QR a "CODICI QR" sull'ordine.
+    Merge idempotente (case-insensitive). QTY WB NON viene mai toccato."""
+    if not NOTION_TOKEN or not order_page_id:
+        raise RuntimeError("Ordine non configurato")
+    async with httpx.AsyncClient(timeout=25) as client:
+        r = await client.get(f"{NOTION_BASE}/pages/{order_page_id}", headers=_headers())
+        if r.status_code >= 400:
+            logger.warning(f"Ordine GET failed: {r.status_code} {r.text[:200]}")
+            r.raise_for_status()
+        props = (r.json() or {}).get("properties", {})
+        sn_prop = _get_prop(props, NOTION_ORDINE_SN_PROP)
+        qr_prop = _get_prop(props, NOTION_ORDINE_QR_PROP)
+        cur_sn = _parse_serials(_plain_text(sn_prop)) if sn_prop else []
+        cur_qr = _parse_serials(_plain_text(qr_prop)) if qr_prop else []
+        sn_low = {s.lower() for s in cur_sn}
+        qr_low = {q.lower() for q in cur_qr}
+        new_sn = list(cur_sn) + [s.strip() for s in (serials or []) if s and s.strip() and s.strip().lower() not in sn_low]
+        new_qr = list(cur_qr) + [q.strip() for q in (qr_codes or []) if q and q.strip() and q.strip().lower() not in qr_low]
+        updates: Dict[str, Any] = {}
+        if len(new_sn) != len(cur_sn):
+            updates[NOTION_ORDINE_SN_PROP] = {"rich_text": [{"type": "text", "text": {"content": "\n".join(new_sn)[:1990]}}]}
+        if len(new_qr) != len(cur_qr):
+            updates[NOTION_ORDINE_QR_PROP] = {"rich_text": [{"type": "text", "text": {"content": "\n".join(new_qr)[:1990]}}]}
+        if not updates:
+            return
+        resp = await client.patch(f"{NOTION_BASE}/pages/{order_page_id}", headers=_headers(), json={"properties": updates})
+        if resp.status_code >= 400:
+            logger.error(f"Ordine PATCH failed: {resp.status_code} {resp.text[:300]}")
+            resp.raise_for_status()
+
+
+async def remove_shipment_from_order(order_page_id: str, serials: List[str], qr_codes: List[str]) -> None:
+    """F14 — Rimuove SN/QR dall'ordine (retroattività/annullamento). Idempotente."""
+    if not NOTION_TOKEN or not order_page_id:
+        raise RuntimeError("Ordine non configurato")
+    sn_rm = {(s or "").strip().lower() for s in (serials or []) if (s or "").strip()}
+    qr_rm = {(q or "").strip().lower() for q in (qr_codes or []) if (q or "").strip()}
+    if not sn_rm and not qr_rm:
+        return
+    async with httpx.AsyncClient(timeout=25) as client:
+        r = await client.get(f"{NOTION_BASE}/pages/{order_page_id}", headers=_headers())
+        if r.status_code >= 400:
+            r.raise_for_status()
+        props = (r.json() or {}).get("properties", {})
+        sn_prop = _get_prop(props, NOTION_ORDINE_SN_PROP)
+        qr_prop = _get_prop(props, NOTION_ORDINE_QR_PROP)
+        cur_sn = _parse_serials(_plain_text(sn_prop)) if sn_prop else []
+        cur_qr = _parse_serials(_plain_text(qr_prop)) if qr_prop else []
+        new_sn = [s for s in cur_sn if s.strip().lower() not in sn_rm]
+        new_qr = [q for q in cur_qr if q.strip().lower() not in qr_rm]
+        updates: Dict[str, Any] = {}
+        if len(new_sn) != len(cur_sn):
+            updates[NOTION_ORDINE_SN_PROP] = {"rich_text": [{"type": "text", "text": {"content": "\n".join(new_sn)[:1990]}}]}
+        if len(new_qr) != len(cur_qr):
+            updates[NOTION_ORDINE_QR_PROP] = {"rich_text": [{"type": "text", "text": {"content": "\n".join(new_qr)[:1990]}}]}
+        if not updates:
+            return
+        resp = await client.patch(f"{NOTION_BASE}/pages/{order_page_id}", headers=_headers(), json={"properties": updates})
+        if resp.status_code >= 400:
+            resp.raise_for_status()
+
+
+async def update_tracker_row(page_id: str, new_sn: Optional[str] = None,
+                              new_qty: Optional[float] = None,
+                              new_cliente: Optional[str] = None,
+                              new_date: Optional[str] = None,
+                              new_taken_by: Optional[str] = None) -> None:
+    """F14 §20 — Retroattività: modifica riga esistente in Inventory Tracker (Uscite).
+    Aggiorna SOLO i campi non-None. Non crea nuove righe."""
+    if not NOTION_TOKEN or not page_id:
+        raise RuntimeError("Notion non configurato")
+    props: Dict[str, Any] = {}
+    if new_sn is not None:
+        props["SN"] = {"title": [{"type": "text", "text": {"content": (new_sn or "—")[:200]}}]}
+    if new_qty is not None:
+        props["Quantità"] = {"number": float(new_qty)}
+    if new_cliente is not None:
+        props["Preso per"] = {"rich_text": [{"type": "text", "text": {"content": (new_cliente or "")[:2000]}}]}
+    if new_date is not None:
+        props["Data Uscita"] = {"date": {"start": new_date}}
+    if new_taken_by is not None:
+        props["Preso da"] = {"rich_text": [{"type": "text", "text": {"content": (new_taken_by or "")[:2000]}}]}
+    if not props:
+        return
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.patch(f"{NOTION_BASE}/pages/{page_id}", headers=_headers(), json={"properties": props})
+        if resp.status_code >= 400:
+            logger.error(f"update_tracker_row failed: {resp.status_code} {resp.text[:200]}")
+            resp.raise_for_status()
+    invalidate_inventory_cache()
+
+
+async def update_receipt_row(page_id: str, new_sn: Optional[str] = None,
+                              new_qty: Optional[float] = None,
+                              new_date: Optional[str] = None) -> None:
+    """F14 §20 — Retroattività: modifica riga esistente in Inventory Receipts (Entrate)."""
+    if not NOTION_TOKEN or not page_id:
+        raise RuntimeError("Notion non configurato")
+    props: Dict[str, Any] = {}
+    if new_sn is not None:
+        props["Item"] = {"title": [{"type": "text", "text": {"content": (new_sn or "—")[:200]}}]}
+    if new_qty is not None:
+        props["Quantità"] = {"number": float(new_qty)}
+    if new_date is not None:
+        props["Data Consegna"] = {"date": {"start": new_date}}
+    if not props:
+        return
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.patch(f"{NOTION_BASE}/pages/{page_id}", headers=_headers(), json={"properties": props})
+        if resp.status_code >= 400:
+            resp.raise_for_status()
+    invalidate_inventory_cache()
 
 
 async def create_pick(

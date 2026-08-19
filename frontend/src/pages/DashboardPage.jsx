@@ -10,6 +10,7 @@ import {
   WarningCircle,
   Warning,
   ArrowClockwise,
+  ArrowUUpLeft,
 } from "@phosphor-icons/react";
 import { fmtTime, useTz } from "../lib/tz";
 
@@ -28,6 +29,11 @@ export default function DashboardPage() {
   const [error, setError] = useState(null);
   const [refreshedAt, setRefreshedAt] = useState(null);
   const [warnCfg, setWarnCfg] = useState({ low: true, oos: true });
+  // F14 — mostra la card "Operazione Retroattiva" solo se l'utente è autorizzato lato backend
+  const [retroAuthorized, setRetroAuthorized] = useState(false);
+  useEffect(() => {
+    axios.get(`${API}/retro/authorized`).then(({ data }) => setRetroAuthorized(!!data?.authorized)).catch(() => setRetroAuthorized(false));
+  }, []);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -144,6 +150,30 @@ export default function DashboardPage() {
           </div>
         </Link>
       </div>
+
+      {/* F14 — Card "Operazione Retroattiva" visibile solo agli utenti autorizzati */}
+      {retroAuthorized && (
+        <Link
+          to="/retroattivita"
+          data-testid="dash-retro-card"
+          className="group relative overflow-hidden rounded-xl p-6 text-white border border-amber-400/20 bg-gradient-to-br from-amber-900/95 via-amber-950 to-slate-900 hover:border-amber-300/70 transition-all shadow-[0_10px_40px_-15px_rgba(2,6,23,0.5)] hover:shadow-[0_20px_60px_-15px_rgba(250,204,21,0.28)] block"
+        >
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_90%_10%,rgba(250,204,21,0.22),transparent_60%)]" aria-hidden />
+          <div className="relative flex items-center gap-4">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-amber-400/15 border border-amber-300/30 text-amber-300 shrink-0">
+              <ArrowUUpLeft size={26} weight="bold" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-xs uppercase tracking-[0.15em] text-amber-300/80 font-semibold">Rettifica controllata</div>
+              <div className="text-xl sm:text-2xl font-display font-black mt-1 tracking-tight">↩️ Operazione Retroattiva</div>
+              <div className="text-slate-200/80 text-xs sm:text-sm mt-1">
+                Correggi Arrivi/Spedizioni ESISTENTI. Modifica seriale · QR · quantità · struttura. Motivazione obbligatoria.
+              </div>
+            </div>
+            <span className="text-amber-300/90 text-xs font-mono-tight hidden sm:inline">apri →</span>
+          </div>
+        </Link>
+      )}
 
       {error && (
         <div className="border border-red-200 bg-red-50 text-red-700 p-4 rounded-md text-sm">

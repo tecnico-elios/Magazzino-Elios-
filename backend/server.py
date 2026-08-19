@@ -20,7 +20,7 @@ import notion_service
 import inventory_local
 from inventory_router import get_svc as _get_inv_svc, get_source as _get_inv_source
 import auth as auth_mod
-from routes import auth_routes, admin_users_routes, admin_extra_routes
+from routes import auth_routes, admin_users_routes, admin_extra_routes, qr_routes, retro_routes
 try:
     from zoneinfo import ZoneInfo
     ROME_TZ = ZoneInfo("Europe/Rome")
@@ -201,6 +201,9 @@ class ProductItem(BaseModel):
     serialized: bool = False
     quantity: float = 0
     serials: List[str] = Field(default_factory=list)
+    # F14 — QR codes opzionali associati ai seriali (stessa lunghezza di `serials`,
+    # con "" per i seriali senza QR). Ignorato per prodotti non serializzati.
+    qr_codes: List[str] = Field(default_factory=list)
 
 
 class ChecklistPayload(BaseModel):
@@ -595,6 +598,28 @@ async def submit_checklist(
     #    Il check è LIVE al submit per proteggere da race multi-operatore.
     serial_errors: List[str] = []
     seen_serials: set = set()
+    # F13 — Availability check SOLO su Inventario Notion (colonna 16).
+    #       NIENTE query a Entrate/Uscite per determinare la disponibilità.
+    #
+    # F14 — Duplicato QR nella stessa spedizione + validazione lunghezza.
+    qr_seen_in_shipment: set = set()
+    for it in filled:
+        if not it.serialized:
+            continue
+        if it.qr_codes and len(it.qr_codes) != len(it.serials or []):
+            raise HTTPException(
+                400,
+                f"{it.name} — lista QR non allineata ai seriali. "
+                f"Attesi {len(it.serials or [])}, ricevuti {len(it.qr_codes)}",
+            )
+        for qr in (it.qr_codes or []):
+            q = (qr or "").strip()
+            if not q:
+                continue
+            if q.lower() in qr_seen_in_shipment:
+                raise HTTPException(409, f"QR Code {q} inserito più volte nella stessa spedizione")
+            qr_seen_in_shipment.add(q.lower())
+
     for it in filled:
         if not it.serialized:
             continue
@@ -652,6 +677,57 @@ async def submit_checklist(
             source="spedizione",
         )
         raise HTTPException(409, "Quantità non disponibile. " + " • ".join(shortages))
+
+    # F14 — Verifica QR non già associati (globale, MongoDB collection qr_associations).
+    # Un QR può essere usato una sola volta. Se già associato → blocca.
+    qr_to_check: List[Dict[str, str]] = []
+    for it in filled:
+        if not it.serialized or not it.qr_codes:
+            continue
+        for sn_x, qr_x in zip(it.serials or [], it.qr_codes):
+            qq = (qr_x or "").strip()
+            if not qq:
+                continue
+            qr_to_check.append({"qr": qq, "sn": (sn_x or "").strip(), "product": it.name})
+    if qr_to_check:
+        qr_lows = [x["qr"].lower() for x in qr_to_check]
+        cursor = db.qr_associations.find({"qr_code_lower": {"$in": qr_lows}, "active": True})
+        existing = {d["qr_code_lower"]: d async for d in cursor}
+        for entry in qr_to_check:
+            hit = existing.get(entry["qr"].lower())
+            if hit and hit.get("serial_lower") != entry["sn"].lower():
+                raise HTTPException(
+                    409,
+                    f"QR Code {entry['qr']} già associato ad un altro seriale ({hit.get('serial') or '—'})",
+                )
+
+    # F14 — Sync "Eliostech Ordini": cerca l'ordine dalla struttura PRIMA di scrivere.
+    # Se non trovato / ambiguo → blocca la spedizione (nessuna scrittura parziale).
+    order_info: Optional[Dict[str, Any]] = None
+    if notion_service.NOTION_ORDINI_DS_ID:
+        try:
+            order_info = await notion_service.find_order_by_structure(payload.structure)
+        except Exception as e:
+            raise HTTPException(502, f"Errore ricerca ordine Notion: {e}")
+        if order_info.get("status") == "not_found":
+            await log_anomaly(
+                kind="order_not_found",
+                description=f"Nessun ordine per struttura '{payload.structure}'",
+                operator=payload.operator, source="spedizione",
+            )
+            raise HTTPException(409, f"Ordine non trovato per la struttura selezionata: '{payload.structure}'")
+        if order_info.get("status") == "multiple":
+            await log_anomaly(
+                kind="order_multiple",
+                description=f"{order_info.get('count')} ordini per '{payload.structure}'",
+                operator=payload.operator, source="spedizione",
+            )
+            raise HTTPException(
+                409,
+                f"Sono stati trovati {order_info.get('count')} ordini per questa struttura. "
+                f"Verificare l'ordine selezionato.",
+            )
+        # status == "not_configured" → passa oltre (retrocompatibile se ENV non impostato)
 
     # 3) Create Inventory Tracker rows in Notion (one per SN for serialized, one aggregated otherwise)
     tracker_ids: List[str] = []
@@ -711,6 +787,70 @@ async def submit_checklist(
     except Exception as e:
         logging.warning(f"remove_inventory_serials fallito (non blocca la spedizione): {e}")
     svc.invalidate_inventory_cache()
+
+    # F14 — Aggiorna "Eliostech Ordini": append SN WB + CODICI QR sull'ordine trovato.
+    # QTY WB NON viene toccato. Best-effort: se fallisce logga anomalia ma non rollback.
+    order_page_id_used: Optional[str] = None
+    if order_info and order_info.get("status") == "found":
+        order_page_id_used = order_info.get("id")
+        try:
+            all_sn: List[str] = []
+            all_qr: List[str] = []
+            for it in filled:
+                if not it.serialized:
+                    continue
+                for i_sn, s in enumerate(it.serials or []):
+                    ss = (s or "").strip()
+                    if not ss:
+                        continue
+                    all_sn.append(ss)
+                    qr_here = ""
+                    if it.qr_codes and i_sn < len(it.qr_codes):
+                        qr_here = (it.qr_codes[i_sn] or "").strip()
+                    if qr_here:
+                        all_qr.append(qr_here)
+            if all_sn or all_qr:
+                await notion_service.append_shipment_to_order(order_page_id_used, all_sn, all_qr)
+        except Exception as e:
+            logging.error(f"append_shipment_to_order fallito: {e}")
+            await log_anomaly(
+                kind="order_update_failed",
+                description=f"Aggiornamento ordine {order_page_id_used} fallito: {e}",
+                operator=payload.operator, source="spedizione",
+            )
+
+    # F14 — Persisti le associazioni QR ↔ Seriale in MongoDB (retroattività + audit)
+    try:
+        checklist_id_for_qr = str(uuid.uuid4())  # will overwrite record.id below
+        for it in filled:
+            if not it.serialized or not it.qr_codes:
+                continue
+            for i_sn, s in enumerate(it.serials or []):
+                ss = (s or "").strip()
+                if not ss or i_sn >= len(it.qr_codes):
+                    continue
+                qq = (it.qr_codes[i_sn] or "").strip()
+                if not qq:
+                    continue
+                await db.qr_associations.update_one(
+                    {"qr_code_lower": qq.lower()},
+                    {"$set": {
+                        "qr_code": qq,
+                        "qr_code_lower": qq.lower(),
+                        "serial": ss,
+                        "serial_lower": ss.lower(),
+                        "product_page_id": it.page_id,
+                        "product_name": it.name,
+                        "structure": payload.structure,
+                        "order_page_id": order_page_id_used,
+                        "associated_at": datetime.now(timezone.utc).isoformat(),
+                        "associated_by": payload.operator,
+                        "active": True,
+                    }},
+                    upsert=True,
+                )
+    except Exception as e:
+        logging.warning(f"qr_associations save failed: {e}")
 
     # 4) Send email(s) — email failure does not invalidate the shipment
     # F9 §28: filtra per evento "spedizioni"
@@ -1404,6 +1544,8 @@ app.include_router(api_router)
 app.include_router(auth_routes.build_router(db, auth_deps, send_email_fn=send_email, frontend_base_url=os.environ.get("PUBLIC_FRONTEND_URL") or os.environ.get("REACT_APP_BACKEND_URL", "")), prefix="/api")
 app.include_router(admin_users_routes.build_router(db, auth_deps), prefix="/api")
 app.include_router(admin_extra_routes.build_router(db, auth_deps), prefix="/api")
+app.include_router(qr_routes.build_router(db, auth_deps), prefix="/api")
+app.include_router(retro_routes.build_router(db, auth_deps), prefix="/api")
 
 
 @app.on_event("startup")
@@ -1419,6 +1561,9 @@ async def _phase2_startup_indexes():
         await db.product_serials.create_index("serial_lower")
         await db.local_receipts.create_index([("data_consegna", -1)])
         await db.local_picks.create_index([("data_uscita", -1)])
+        # F14 — QR associations (persistente, univocità globale su qr_code)
+        await db.qr_associations.create_index("qr_code_lower", unique=True)
+        await db.qr_associations.create_index("serial_lower")
     except Exception as e:
         logging.error(f"MongoDB index creation failed: {e}")
 

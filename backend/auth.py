@@ -40,6 +40,9 @@ PERMISSION_MODULES = [
     "dashboard", "inventario", "arrivi", "spedizioni", "movimenti",
     "anomalie", "gestione_prodotti", "gestione_utenti", "impostazioni",
     "notifiche", "registro_attivita", "manutenzione",
+    # F14 — Retroattività: permesso extra concedibile al RESPONSABILE
+    # (Admin lo ha implicitamente, Operator mai).
+    "modifica_retroattiva",
 ]
 
 

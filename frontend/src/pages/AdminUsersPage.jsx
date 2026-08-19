@@ -282,6 +282,7 @@ const PERMISSION_MODULES = [
   { key: "notifiche", label: "Notifiche", implicit: false },
   { key: "registro_attivita", label: "Registro Attività", implicit: false },
   { key: "manutenzione", label: "Manutenzione", implicit: false },
+  { key: "modifica_retroattiva", label: "Modifica Retroattiva", implicit: false },
 ];
 const IMPLICIT_MODULES = ["Dashboard", "Inventario", "Arrivi", "Spedizioni", "Movimenti", "Anomalie"];
 
