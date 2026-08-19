@@ -356,13 +356,14 @@ function EditDialog({ row, kind, onClose, onDone }) {
               </>
             )}
           </div>
-          <div>
-            <Label className="text-xs font-semibold text-red-700">Motivazione (obbligatoria) *</Label>
-            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} placeholder="" className="mt-1" data-testid="retro-reason" />
-          </div>
         </div>
-        {/* F14 (BLOCCO 2) — Sub-form "Aggiungi Wallbox dimenticata": posizionato PRIMA del footer per garantire visibilità su mobile/tablet/palmare (evita clip su max-height del dialog). */}
+        {/* F14 (ott. popup 20/02) — Ordine §18: Dati → Campi modificabili → Aggiungi Wallbox dimenticata → Motivazione → Footer.
+            L'AddForgottenItem sta PRIMA della Motivazione e del footer. Nulla sotto Annulla|Conferma. */}
         <AddForgottenItem row={row} kind={kind} onDone={onDone} />
+        <div>
+          <Label className="text-xs font-semibold text-red-700">Motivazione (obbligatoria) *</Label>
+          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} placeholder="" className="mt-1" data-testid="retro-reason" />
+        </div>
         <DialogFooter className="flex-col sm:flex-row gap-2">
           <Button variant="outline" onClick={onClose} disabled={busy}>Chiudi</Button>
           <Button variant="destructive" onClick={cancelOp} disabled={busy} data-testid="retro-cancel-op">

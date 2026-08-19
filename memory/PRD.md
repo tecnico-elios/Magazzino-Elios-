@@ -23,6 +23,20 @@
   - Backend `POST /api/admin/users` verificato: usa solo `CreateUserBody` esplicito, nessun prefill dall'utente loggato
 
 
+
+## F14 (Ottimizzazione popup/modali) ✅ (20/02/2026)
+- **Fix globale `dialog.jsx`** (base shadcn) — TUTTI i 40+ popup del gestionale eredita ora:
+  - `max-h-[calc(100dvh-2rem)]` (dvh = dynamic viewport height, iOS/Android safe)
+  - `overflow-y-auto overscroll-contain` — scroll verticale automatico senza bleed
+  - `w-[calc(100vw-1.5rem)] max-w-lg` — margine su mobile, resta max-w-lg su desktop
+  - Interessa: Arrivi, Spedizioni, Reintegra, Retroattività, Utenti (Crea/Reset/Permessi/Delete/Email), Anomalie, QR, Conferme, Sessioni, Impostazioni, Registro
+  - `command.jsx` mantiene il proprio `overflow-hidden p-0` (Command palette non deve scrollare) via override className
+- **Retroattività → Modifica Spedizione — riordino §18**:
+  - Dati attuali → Campi modificabili (SN/Qty/Structure/QR) → **Aggiungi Wallbox dimenticata** → **Motivazione obbligatoria** → **Annulla | Conferma**
+  - Nessun elemento più sotto il footer Annulla|Conferma
+  - Motivazione garantita sempre raggiungibile grazie allo scroll globale
+
+
 ## Fasi
 - **F0-F6** ✅ (scanner, cache O(1), Notion SSOT, conferma finale, mapping strict)
 - **Phase-2 Auth & RBAC** ✅ (15/02/2026)
