@@ -33,7 +33,7 @@ import {
   ListMagnifyingGlass,
   UsersFour,
 } from "@phosphor-icons/react";
-import { AuditLogTab, SettingsTab, SettingsGeneralTab, SettingsMagazzinoTab, SettingsScannerTab, SettingsSicurezzaTab, SettingsArriviTab, SettingsSpedizioniTab, ProductsAdminTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab, SessionsTab, InventorySourceTab, ManutenzioneTab, NotionSettingsTab } from "./AdminExtraTabs";
+import { AuditLogTab, SettingsTab, SettingsGeneralTab, SettingsMagazzinoTab, SettingsScannerTab, SettingsSicurezzaTab, SettingsArriviTab, SettingsSpedizioniTab, ProductsAdminTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab, SessionsTab, InventorySourceTab, ManutenzioneTab, NotionSettingsTab, RetroattivitaEmailToggle } from "./AdminExtraTabs";
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // Auth is now handled by AuthContext + axios interceptor (Bearer token).
@@ -293,6 +293,7 @@ function RecipientsTab() {
             events: {
               arrivi: (it.events?.arrivi ?? true) === true,
               spedizioni: (it.events?.spedizioni ?? true) === true,
+              retroattivita: (it.events?.retroattivita ?? true) === true,
               sotto_scorta: (it.events?.sotto_scorta ?? true) === true,
               esauriti: (it.events?.esauriti ?? true) === true,
               anomalie: (it.events?.anomalie ?? true) === true,
@@ -302,7 +303,7 @@ function RecipientsTab() {
         : (data.emails || []).map((e) => ({
             email: String(e).toLowerCase(),
             enabled: true,
-            events: { arrivi: true, spedizioni: true, sotto_scorta: true, esauriti: true, anomalie: true, errori_notion: true },
+            events: { arrivi: true, spedizioni: true, retroattivita: true, sotto_scorta: true, esauriti: true, anomalie: true, errori_notion: true },
           }));
       setItems(list);
     } catch (e) {
@@ -330,7 +331,7 @@ function RecipientsTab() {
     setItems((prev) => [...prev, {
       email: v,
       enabled: true,
-      events: { arrivi: true, spedizioni: true, sotto_scorta: true, esauriti: true, anomalie: true, errori_notion: true },
+      events: { arrivi: true, spedizioni: true, retroattivita: true, sotto_scorta: true, esauriti: true, anomalie: true, errori_notion: true },
     }]);
     setNewEmail("");
   };
@@ -376,6 +377,8 @@ function RecipientsTab() {
 
   return (
     <div className="space-y-4 max-w-2xl">
+      {/* F14 (20/02) — Kill-switch globale email retroattività. Sopra la lista destinatari. */}
+      <RetroattivitaEmailToggle />
       <div className="text-sm text-slate-600">
         Email a cui verrà inviata ogni spedizione/arrivo registrato dal magazzino.
         Usa il toggle per escludere temporaneamente un destinatario senza rimuoverlo.
@@ -441,6 +444,7 @@ function RecipientsTab() {
               {[
                 { key: "arrivi", label: "Arrivi" },
                 { key: "spedizioni", label: "Spedizioni" },
+                { key: "retroattivita", label: "Retroattività" },
                 { key: "sotto_scorta", label: "Sotto scorta" },
                 { key: "esauriti", label: "Esauriti" },
                 { key: "anomalie", label: "Anomalie" },

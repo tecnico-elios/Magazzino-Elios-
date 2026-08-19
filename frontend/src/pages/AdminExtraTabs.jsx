@@ -714,8 +714,6 @@ export function SettingsSpedizioniTab() {
         <Toggle k="allow_partial_shipment" label="Consenti spedizioni parziali" desc="Se disponibile solo parte della quantità richiesta, procedi con quella disponibile." />
       </div>
 
-      <RetroattivitaEmailToggle />
-
       <div className="flex justify-end">
         <Button onClick={save} disabled={saving} data-testid="save-spedizioni-settings-btn">
           {saving ? "Salvataggio…" : "Salva Impostazioni Spedizioni"}
@@ -726,7 +724,8 @@ export function SettingsSpedizioniTab() {
 }
 
 // F14 §9 — Toggle email automatica dopo modifica retroattiva
-function RetroattivitaEmailToggle() {
+// Esportato per essere renderizzato nel tab "Notifiche" di AdminPage.
+export function RetroattivitaEmailToggle() {
   const [enabled, setEnabled] = useState(null);
   const [saving, setSaving] = useState(false);
   useEffect(() => {

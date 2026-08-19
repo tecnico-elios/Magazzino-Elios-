@@ -47,9 +47,17 @@ async def _send_retro_email_if_enabled(db, send_email_fn, tipo: str, before: Dic
             elif isinstance(r, dict) and r.get("email"):
                 if r.get("enabled") is False:
                     continue
-                ev_key = "spedizioni" if tipo == "spedizione" else "arrivi"
-                if (r.get("events") or {}).get(ev_key, True):
-                    emails.append(r["email"])
+                # F14 (20/02) — priorità evento specifico `retroattivita`. Se non definito
+                # dal destinatario, fallback su `spedizioni`/`arrivi` (retro-compat).
+                events = r.get("events") or {}
+                if "retroattivita" in events:
+                    if not events.get("retroattivita"):
+                        continue
+                else:
+                    ev_key = "spedizioni" if tipo == "spedizione" else "arrivi"
+                    if not events.get(ev_key, True):
+                        continue
+                emails.append(r["email"])
         if not emails:
             return False
         subject = f"[Retroattività] {tipo.capitalize()} modificata — {after.get('sn') or before.get('sn') or ''}"

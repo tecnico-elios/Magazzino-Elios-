@@ -61,6 +61,15 @@
 
 ## Fasi
 - **F0-F6** ✅ (scanner, cache O(1), Notion SSOT, conferma finale, mapping strict)
+
+## F14 (Email Retroattività + Toggle in Notifiche) ✅ (20/02/2026)
+- **Fix email retroattività** (`retro_routes.py`): il filtro per-destinatario ora usa priorità `events.retroattivita` (se definito) e fallback su `events.spedizioni`/`events.arrivi` (retro-compat). Il kill-switch globale `settings.retroattivita.email_enabled` rimane il gate primario.
+- **Toggle spostato in Notifiche** (`AdminPage.jsx` → `RecipientsTab`): il `RetroattivitaEmailToggle` è stato spostato dalla tab "Impostazioni → Spedizioni" alla tab "Notifiche", allineato al modello degli altri toggle. Esportato da `AdminExtraTabs.jsx` per il riuso.
+- **Chip "Retroattività" per destinatario**: aggiunto nella lista chip di ogni destinatario (default ON, retro-compat) tra `Spedizioni` e `Sotto scorta`.
+
+**Come abilitare le email**: Admin → **Notifiche** → attivare "Invia email automatica dopo modifica retroattiva" + verificare che ogni destinatario abbia il chip **Retroattività** attivo (verde).
+
+
 - **Phase-2 Auth & RBAC** ✅ (15/02/2026)
   - JWT + bcrypt + MongoDB (users, audit_logs)
   - Bootstrap sicuro primo admin → Admin reale: **Riccardo Biuso** (`riccardo`)
