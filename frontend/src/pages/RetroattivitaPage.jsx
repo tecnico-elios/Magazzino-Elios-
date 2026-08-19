@@ -17,7 +17,14 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 function formatError(err) {
-  return err?.response?.data?.detail || err?.message || "Errore";
+  const d = err?.response?.data?.detail;
+  if (typeof d === "string") return d;
+  if (Array.isArray(d)) {
+    // Pydantic 422 → array di oggetti {type, loc, msg, input, url}
+    return d.map((it) => (typeof it === "string" ? it : (it?.msg || JSON.stringify(it)))).join(" · ");
+  }
+  if (d && typeof d === "object") return d.msg || JSON.stringify(d);
+  return err?.message || "Errore";
 }
 
 export default function RetroattivitaPage() {
@@ -554,8 +561,18 @@ function AddForgottenAccessory({ row, kind, onDone }) {
     axios.get(`${API}/inventory`).then(({ data }) => {
       const items = (data?.items || []).filter((it) => it.active !== false);
       setInventory(items);
+      // F15 fix — prefill prodotto già presente nella riga (item_ids[0] su Notion Uscite/Entrate).
+      // Utente può comunque cliccare "Cambia" per selezionarne un altro.
+      const prefillId = (row?.item_ids && row.item_ids[0]) || null;
+      if (prefillId) {
+        const found = items.find((x) => x.page_id === prefillId);
+        if (found) {
+          setSelected({ page_id: found.page_id, name: found.name, tipo_gestione: found.tipo_gestione, code: found.code });
+        }
+      }
     }).catch((e) => toast.error("Errore caricamento inventario", { description: formatError(e) }))
       .finally(() => setLoadingInv(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, inventory.length]);
 
   const filtered = useMemo(() => {
