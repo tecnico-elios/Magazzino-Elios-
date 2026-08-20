@@ -228,16 +228,21 @@ function EditDialog({ row, kind, onClose, onDone }) {
   const [productMeta, setProductMeta] = useState({ name: null, code: null, page_id: null });
   useEffect(() => {
     const pid = (row?.item_ids && row.item_ids[0]) || null;
-    if (!pid) return;
+    const rowName = (row?.item_name || (row?.item_names || [])[0] || "").trim().toLowerCase();
+    if (!pid && !rowName) return;
     axios.get(`${API}/inventory`).then(({ data }) => {
       const items = data?.items || [];
-      const p = items.find((x) => x.page_id === pid);
+      // 1° tentativo: match esatto per page_id (SSOT). 2° tentativo: match per nome (SOLO per
+      // recuperare l'entry Inventario — il tipo_gestione viene sempre LETTO da Notion, mai dedotto).
+      const p = (pid && items.find((x) => x.page_id === pid))
+        || (rowName && items.find((x) => (x.name || "").trim().toLowerCase() === rowName))
+        || null;
       if (p) {
         setProductTipo(p.tipo_gestione || null);
         setProductMeta({ name: p.name, code: p.code, page_id: p.page_id });
       }
     }).catch(() => {});
-  }, [row?.item_ids]);
+  }, [row?.item_ids, row?.item_name, row?.item_names]);
 
   // F14 fix (20/02): recupera QR esistente per il seriale (se presente)
   useEffect(() => {
@@ -355,15 +360,12 @@ function EditDialog({ row, kind, onClose, onDone }) {
               <div><b>Quantità attuale:</b> <span className="font-mono-tight">{row.quantity ?? "—"}</span></div>
             )}
             {productTipo === null && (
-              <>
-                <div><b>Seriale attuale:</b> <span className="font-mono-tight">{row.sn || "—"}</span></div>
-                <div><b>Quantità attuale:</b> <span className="font-mono-tight">{row.quantity ?? "—"}</span></div>
-              </>
+              <div className="text-slate-500 italic">Rilevamento Tipo Gestione in corso…</div>
             )}
             {kind === "spedizione" && <div><b>Struttura attuale:</b> {row.cliente || "—"}</div>}
           </div>
 
-          {/* F15 (§1/§2) — Campi modificabili adattivi al Tipo Gestione */}
+          {/* F15 (§1/§2) — Campi modificabili adattivi al Tipo Gestione — mostrati SOLO quando il tipo è noto */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {productTipo === "a_seriale" && (
               <div className="sm:col-span-2">
@@ -373,32 +375,20 @@ function EditDialog({ row, kind, onClose, onDone }) {
             )}
             {productTipo === "a_quantita" && (
               <div className="sm:col-span-2">
-                <Label className="text-xs font-semibold">Nuova quantità <span className="text-slate-400 font-normal">(totale corretta — lascia vuoto per non modificare)</span></Label>
+                <Label className="text-xs font-semibold">Nuova quantità <span className="text-slate-400 font-normal">(totale corretta)</span></Label>
                 <Input type="number" step="any" value={newQty} onChange={(e) => setNewQty(e.target.value)} placeholder={String(row.quantity ?? "")} className="h-11 mt-1 font-mono-tight" data-testid="retro-new-qty" />
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Attuale <b>{row.quantity ?? "—"}</b> → Nuova <b className="text-amber-700">{newQty !== "" ? newQty : (row.quantity ?? "—")}</b>. Per aggiungere invece una quantità dimenticata, usa il pulsante <i>Aggiungi Accessorio dimenticato</i> qui sotto.
+                  Inserisci la nuova quantità totale. Lascia vuoto per non modificare. (Attuale <b>{row.quantity ?? "—"}</b> → Nuova <b className="text-amber-700">{newQty !== "" ? newQty : (row.quantity ?? "—")}</b>)
                 </p>
               </div>
             )}
-            {productTipo === null && (
-              <>
-                <div>
-                  <Label className="text-xs font-semibold">Nuovo seriale (opz)</Label>
-                  <Input value={newSn} onChange={(e) => setNewSn(e.target.value)} placeholder={row.sn || ""} className="h-10 mt-1 font-mono-tight" data-testid="retro-new-sn" />
-                </div>
-                <div>
-                  <Label className="text-xs font-semibold">Nuova quantità (opz)</Label>
-                  <Input type="number" step="any" value={newQty} onChange={(e) => setNewQty(e.target.value)} placeholder={String(row.quantity ?? "")} className="h-10 mt-1 font-mono-tight" data-testid="retro-new-qty" />
-                </div>
-              </>
-            )}
-            {kind === "spedizione" && (
+            {kind === "spedizione" && productTipo !== null && (
               <>
                 <div className="sm:col-span-2">
                   <Label className="text-xs font-semibold">Nuova struttura <span className="text-slate-400 font-normal">(lascia vuoto per non modificare)</span></Label>
                   <Input value={newStructure} onChange={(e) => setNewStructure(e.target.value)} placeholder={row.cliente || ""} className="h-10 mt-1" data-testid="retro-new-structure" />
                 </div>
-                {productTipo !== "a_quantita" && (
+                {productTipo === "a_seriale" && (
                   <div className="sm:col-span-2">
                     <Label className="text-xs font-semibold">QR Code <span className="text-slate-400 font-normal">(aggiungi/modifica — opzionale)</span></Label>
                     <div className="mt-1 flex items-center gap-2">
