@@ -86,6 +86,16 @@
   - **Riuso funzioni esistenti**: `svc.create_pick` (spedizione) / `svc.create_receipt` (arrivo) — stesso identico flusso di `submit_checklist`
   - Eredita contesto (cliente, data, taken_by) dalla riga originale — nessuna nuova spedizione/arrivo
   - Aggiornamenti: Inventario col.16 (add/remove SN), Eliostech Ordini (append SN WB + CODICI QR se A Seriale), QR association, Audit log
+
+## F15 (rev.) — Retroattività: riconoscimento automatico Tipo Gestione ✅ (20/02/2026)
+- **EditDialog rileva `tipo_gestione` del prodotto** dalla configurazione Inventario (Notion) via `row.item_ids[0]` — nessuna deduzione dal nome.
+- **Rendering condizionale**:
+  - **A Seriale**: mostra "Seriale attuale" + campo "Nuovo seriale" + QR opzionale (con scanner/fotocamera/manuale — validazione seriale esistente riusata) + pulsante `➕ Aggiungi Wallbox dimenticata` (comportamento WB invariato)
+  - **A Quantità**: mostra "Quantità attuale" + campo "Nuova quantità" + pulsante `➕ Aggiungi Accessorio dimenticato` (nessun SN/QR)
+- **`AddForgottenAccessory` semplificato**: nessun product picker, nessun SN/QR. Chiede solo Quantità da aggiungere + Motivazione. Somma alla quantità corrente e chiama l'endpoint **PATCH `/api/retro/{shipment|arrivo}/{id}`** esistente con `new_quantity = current + delta` → **non crea nuove righe Notion**. Anteprima live `2 + 3 = 5` in UI.
+- **Zero nuove API**: gli endpoint F15 `add-accessory` restano nel codice backend ma non vengono più chiamati (dead code, mantenuti per compat retroattiva).
+
+
   - Motivazione obbligatoria, permessi Retroattività identici (Admin/Responsabile con `modifica_retroattiva`)
   - Email retroattività riusata (rispetta il toggle globale + chip `retroattivita` per destinatario)
 

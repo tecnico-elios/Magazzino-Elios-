@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { useAuth } from "../lib/AuthContext";
@@ -208,6 +208,22 @@ function EditDialog({ row, kind, onClose, onDone }) {
   const [qrScannerOpen, setQrScannerOpen] = useState(false);
   const [qrChecking, setQrChecking] = useState(false);
   const [busy, setBusy] = useState(false);
+  // F15 (§3) — rileva Tipo Gestione del prodotto dalla configurazione Inventario.
+  // Usa item_ids[0] dalla riga Notion Uscite/Entrate. Riuso: nessuna nuova API.
+  const [productTipo, setProductTipo] = useState(null); // null | "a_seriale" | "a_quantita"
+  const [productMeta, setProductMeta] = useState({ name: null, code: null, page_id: null });
+  useEffect(() => {
+    const pid = (row?.item_ids && row.item_ids[0]) || null;
+    if (!pid) return;
+    axios.get(`${API}/inventory`).then(({ data }) => {
+      const items = data?.items || [];
+      const p = items.find((x) => x.page_id === pid);
+      if (p) {
+        setProductTipo(p.tipo_gestione || null);
+        setProductMeta({ name: p.name, code: p.code, page_id: p.page_id });
+      }
+    }).catch(() => {});
+  }, [row?.item_ids]);
 
   // F14 fix (20/02): recupera QR esistente per il seriale (se presente)
   useEffect(() => {
@@ -308,67 +324,107 @@ function EditDialog({ row, kind, onClose, onDone }) {
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
+          {/* F15 (§3) — Info readonly adattive al Tipo Gestione */}
           <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs space-y-1">
             <div><b>Data operazione:</b> {row.date || "—"}</div>
-            <div><b>Seriale attuale:</b> <span className="font-mono-tight">{row.sn || "—"}</span></div>
-            <div><b>Quantità attuale:</b> {row.quantity ?? "—"}</div>
+            <div><b>Prodotto:</b> {productMeta.name || (row.item_name || (row.item_names || []).join(", ")) || "—"}
+              {productTipo && (
+                <span className={`ml-2 text-[9px] px-1.5 h-4 inline-flex items-center rounded-full font-semibold ${productTipo === "a_seriale" ? "bg-emerald-100 text-emerald-800" : "bg-sky-100 text-sky-800"}`}>
+                  {productTipo === "a_seriale" ? "A Seriale" : "A Quantità"}
+                </span>
+              )}
+            </div>
+            {productTipo === "a_seriale" && (
+              <div><b>Seriale attuale:</b> <span className="font-mono-tight">{row.sn || "—"}</span></div>
+            )}
+            {productTipo === "a_quantita" && (
+              <div><b>Quantità attuale:</b> {row.quantity ?? "—"}</div>
+            )}
+            {productTipo === null && (
+              <>
+                <div><b>Seriale attuale:</b> <span className="font-mono-tight">{row.sn || "—"}</span></div>
+                <div><b>Quantità attuale:</b> {row.quantity ?? "—"}</div>
+              </>
+            )}
             {kind === "spedizione" && <div><b>Cliente attuale:</b> {row.cliente || "—"}</div>}
           </div>
+
+          {/* F15 (§1/§2) — Campi modificabili adattivi al Tipo Gestione */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs font-semibold">Nuovo seriale (opz)</Label>
-              <Input value={newSn} onChange={(e) => setNewSn(e.target.value)} placeholder={row.sn || ""} className="h-10 mt-1 font-mono-tight" data-testid="retro-new-sn" />
-            </div>
-            <div>
-              <Label className="text-xs font-semibold">Nuova quantità (opz)</Label>
-              <Input type="number" step="any" value={newQty} onChange={(e) => setNewQty(e.target.value)} placeholder={String(row.quantity ?? "")} className="h-10 mt-1 font-mono-tight" data-testid="retro-new-qty" />
-            </div>
+            {productTipo === "a_seriale" && (
+              <div>
+                <Label className="text-xs font-semibold">Nuovo seriale (opz)</Label>
+                <Input value={newSn} onChange={(e) => setNewSn(e.target.value)} placeholder={row.sn || ""} className="h-10 mt-1 font-mono-tight" data-testid="retro-new-sn" />
+              </div>
+            )}
+            {productTipo === "a_quantita" && (
+              <div>
+                <Label className="text-xs font-semibold">Nuova quantità (opz)</Label>
+                <Input type="number" step="any" value={newQty} onChange={(e) => setNewQty(e.target.value)} placeholder={String(row.quantity ?? "")} className="h-10 mt-1 font-mono-tight" data-testid="retro-new-qty" />
+              </div>
+            )}
+            {productTipo === null && (
+              <>
+                <div>
+                  <Label className="text-xs font-semibold">Nuovo seriale (opz)</Label>
+                  <Input value={newSn} onChange={(e) => setNewSn(e.target.value)} placeholder={row.sn || ""} className="h-10 mt-1 font-mono-tight" data-testid="retro-new-sn" />
+                </div>
+                <div>
+                  <Label className="text-xs font-semibold">Nuova quantità (opz)</Label>
+                  <Input type="number" step="any" value={newQty} onChange={(e) => setNewQty(e.target.value)} placeholder={String(row.quantity ?? "")} className="h-10 mt-1 font-mono-tight" data-testid="retro-new-qty" />
+                </div>
+              </>
+            )}
             {kind === "spedizione" && (
               <>
                 <div>
                   <Label className="text-xs font-semibold">Nuova struttura (opz)</Label>
                   <Input value={newStructure} onChange={(e) => setNewStructure(e.target.value)} placeholder={row.cliente || ""} className="h-10 mt-1" data-testid="retro-new-structure" />
                 </div>
-                <div className="sm:col-span-2">
-                  <Label className="text-xs font-semibold">QR Code (aggiungi/modifica — opzionale)</Label>
-                  {/* F14 (BLOCCO 1) — input + fotocamera SEMPRE visibili, layout unificato con Spedizioni. */}
-                  <div className="mt-1 flex items-center gap-2">
-                    <Input
-                      value={newQr}
-                      onChange={(e) => setNewQr(e.target.value)}
-                      onBlur={(e) => verifyQr(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); verifyQr(newQr); } }}
-                      placeholder="Digita, scansiona o usa la fotocamera"
-                      className="h-11 font-mono-tight flex-1"
-                      autoComplete="off"
-                      data-testid="retro-new-qr"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setQrScannerOpen(true)}
-                      className="h-11 w-11 shrink-0 border-amber-300 text-amber-700 hover:bg-amber-50"
-                      data-testid="retro-qr-scan-btn"
-                      title="Apri fotocamera"
-                      aria-label="Apri fotocamera per QR Code"
-                    >
-                      <Camera size={18} weight="bold" />
-                    </Button>
+                {productTipo !== "a_quantita" && (
+                  <div className="sm:col-span-2">
+                    <Label className="text-xs font-semibold">QR Code (aggiungi/modifica — opzionale)</Label>
+                    <div className="mt-1 flex items-center gap-2">
+                      <Input
+                        value={newQr}
+                        onChange={(e) => setNewQr(e.target.value)}
+                        onBlur={(e) => verifyQr(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); verifyQr(newQr); } }}
+                        placeholder="Digita, scansiona o usa la fotocamera"
+                        className="h-11 font-mono-tight flex-1"
+                        autoComplete="off"
+                        data-testid="retro-new-qr"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setQrScannerOpen(true)}
+                        className="h-11 w-11 shrink-0 border-amber-300 text-amber-700 hover:bg-amber-50"
+                        data-testid="retro-qr-scan-btn"
+                        title="Apri fotocamera"
+                        aria-label="Apri fotocamera per QR Code"
+                      >
+                        <Camera size={18} weight="bold" />
+                      </Button>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Scanner palmare/USB/Bluetooth, fotocamera 📷 e digitazione manuale — stessa validazione.
+                    </p>
+                    {qrChecking && <p className="text-xs text-slate-400 mt-1">Verifica…</p>}
                   </div>
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Scanner palmare/USB/Bluetooth, fotocamera 📷 (smartphone/tablet/PC) e digitazione manuale — stessa validazione.
-                  </p>
-                  {qrChecking && <p className="text-xs text-slate-400 mt-1">Verifica…</p>}
-                </div>
+                )}
               </>
             )}
           </div>
         </div>
-        {/* F14 (ott. popup 20/02) — Ordine §18: Dati → Campi modificabili → Aggiungi Wallbox dimenticata → Motivazione → Footer.
-            L'AddForgottenItem sta PRIMA della Motivazione e del footer. Nulla sotto Annulla|Conferma. */}
-        <AddForgottenItem row={row} kind={kind} onDone={onDone} />
-        {/* F15 — Aggiungi Accessorio dimenticato (voce separata, funzione WB invariata) */}
-        <AddForgottenAccessory row={row} kind={kind} onDone={onDone} />
+        {/* F15 (§1) — Aggiungi Wallbox dimenticata: SOLO per prodotti A Seriale */}
+        {productTipo === "a_seriale" && (
+          <AddForgottenItem row={row} kind={kind} onDone={onDone} />
+        )}
+        {/* F15 (§2) — Aggiungi Accessorio dimenticato: SOLO per prodotti A Quantità */}
+        {productTipo === "a_quantita" && (
+          <AddForgottenAccessory row={row} kind={kind} productMeta={productMeta} onDone={onDone} />
+        )}
         <div>
           <Label className="text-xs font-semibold text-red-700">Motivazione (obbligatoria) *</Label>
           <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} placeholder="" className="mt-1" data-testid="retro-reason" />
@@ -539,80 +595,38 @@ function AddForgottenItem({ row, kind, onDone }) {
   );
 }
 
-// F15 — Sub-form per aggiungere un ACCESSORIO dimenticato all'operazione esistente.
-// Rispetta il tipo_gestione del prodotto: 'a_seriale' → SN + QR opz, 'a_quantita' → solo quantità.
-// Nessun impatto sul componente AddForgottenItem (WB dimenticata) che resta invariato.
-function AddForgottenAccessory({ row, kind, onDone }) {
+// F15 (§2) — Aggiungi Accessorio dimenticato — versione semplificata:
+//   • Solo per prodotti A Quantità (mostrato solo quando productTipo === "a_quantita")
+//   • Nessun product picker: aggiorna lo STESSO record (stesso prodotto della riga)
+//   • Nessun SN, nessun QR — chiede solo Quantità da aggiungere + Motivazione
+//   • Riuso puro dell'endpoint PATCH retro/{shipment|arrivo}/{id} (edit esistente):
+//       new_quantity = row.quantity + delta   → non crea nuove righe Notion.
+function AddForgottenAccessory({ row, kind, productMeta, onDone }) {
   const [open, setOpen] = useState(false);
-  const [inventory, setInventory] = useState([]);
-  const [loadingInv, setLoadingInv] = useState(false);
-  const [q, setQ] = useState("");
-  const [selected, setSelected] = useState(null); // {page_id, name, tipo_gestione}
   const [reason, setReason] = useState("");
-  const [addSn, setAddSn] = useState("");
-  const [addQr, setAddQr] = useState("");
-  const [qty, setQty] = useState("1");
-  const [scanFor, setScanFor] = useState(null); // "sn" | "qr" | null
+  const [addQty, setAddQty] = useState("1");
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    if (!open || inventory.length > 0) return;
-    setLoadingInv(true);
-    axios.get(`${API}/inventory`).then(({ data }) => {
-      const items = (data?.items || []).filter((it) => it.active !== false);
-      setInventory(items);
-      // F15 fix — prefill prodotto già presente nella riga (item_ids[0] su Notion Uscite/Entrate).
-      // Utente può comunque cliccare "Cambia" per selezionarne un altro.
-      const prefillId = (row?.item_ids && row.item_ids[0]) || null;
-      if (prefillId) {
-        const found = items.find((x) => x.page_id === prefillId);
-        if (found) {
-          setSelected({ page_id: found.page_id, name: found.name, tipo_gestione: found.tipo_gestione, code: found.code });
-        }
-      }
-    }).catch((e) => toast.error("Errore caricamento inventario", { description: formatError(e) }))
-      .finally(() => setLoadingInv(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, inventory.length]);
-
-  const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return inventory.slice(0, 40);
-    return inventory.filter((it) =>
-      (it.name || "").toLowerCase().includes(s) ||
-      (it.code || "").toLowerCase().includes(s) ||
-      (it.category || "").toLowerCase().includes(s)
-    ).slice(0, 40);
-  }, [inventory, q]);
-
   const reset = () => {
-    setOpen(false); setSelected(null); setReason("");
-    setAddSn(""); setAddQr(""); setQty("1"); setQ("");
+    setOpen(false); setReason(""); setAddQty("1");
   };
 
   const submit = async () => {
-    if (!selected) { toast.error("Seleziona un prodotto"); return; }
     if (!reason.trim()) { toast.error("Motivazione obbligatoria"); return; }
-    const tg = selected.tipo_gestione;
-    if (tg === "a_seriale" && !addSn.trim()) { toast.error("Seriale obbligatorio"); return; }
-    if (tg === "a_quantita" && (!qty || Number(qty) <= 0)) { toast.error("Quantità obbligatoria"); return; }
+    const delta = Number(addQty);
+    if (!delta || delta <= 0) { toast.error("Quantità non valida"); return; }
     setBusy(true);
     try {
-      const body = {
-        reason: reason.trim(),
-        product_page_id: selected.page_id,
-        quantity: tg === "a_quantita" ? Number(qty) : 1,
-      };
-      if (tg === "a_seriale") {
-        body.serial = addSn.trim();
-        if (kind === "spedizione" && addQr.trim()) body.qr_code = addQr.trim();
-      }
-      const path = kind === "spedizione"
-        ? `retro/shipment/${row.id}/add-accessory`
-        : `retro/arrivo/${row.id}/add-accessory`;
-      const { data } = await axios.post(`${API}/${path}`, body);
+      const currentQty = Number(row?.quantity || 0);
+      const newTotal = currentQty + delta;
+      const path = kind === "spedizione" ? `retro/shipment/${row.id}` : `retro/arrivo/${row.id}`;
+      // Riuso endpoint edit esistente: aggiorna la stessa riga Notion, non ne crea nuove.
+      const { data } = await axios.patch(`${API}/${path}`, {
+        reason: `[+${delta}] ${reason.trim()}`,
+        new_quantity: newTotal,
+      });
       toast.success("Accessorio dimenticato aggiunto", {
-        description: `${data.product} · ${tg === "a_seriale" ? `SN ${data.serial}` : `Qty ${data.quantity}`}`,
+        description: `${productMeta?.name || row.item_name || "Prodotto"} · Quantità: ${currentQty} → ${newTotal}${data?.email_sent ? " · Email inviata" : ""}`,
       });
       reset();
       onDone();
@@ -634,145 +648,66 @@ function AddForgottenAccessory({ row, kind, onDone }) {
           ➕ Aggiungi Accessorio dimenticato
         </Button>
         <p className="text-[11px] text-slate-400 mt-2 text-center">
-          Aggiunge un accessorio (A Seriale o A Quantità) allo stesso record ({kind}). Nessuna nuova operazione.
+          Somma alla quantità del record esistente ({kind}). Nessuna nuova riga.
         </p>
       </div>
     );
   }
 
-  const tg = selected?.tipo_gestione;
+  const currentQty = Number(row?.quantity || 0);
+  const preview = currentQty + (Number(addQty) || 0);
 
   return (
-    <>
-      <div className="mt-2 border-t border-slate-200 pt-3 space-y-3 bg-sky-50/50 -mx-6 px-6 pb-4 rounded-b-md">
-        <div className="text-xs uppercase tracking-wider font-bold text-sky-800">➕ Aggiungi Accessorio dimenticato</div>
-
-        {/* STEP 1 — Selezione prodotto */}
-        {!selected ? (
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold">Cerca prodotto / accessorio</Label>
-            <Input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Nome, codice o categoria"
-              className="h-10"
-              autoComplete="off"
-              data-testid="retro-acc-search"
-            />
-            <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-md bg-white">
-              {loadingInv ? (
-                <div className="p-3 text-sm text-slate-400">Caricamento…</div>
-              ) : filtered.length === 0 ? (
-                <div className="p-3 text-sm text-slate-400">Nessun prodotto trovato.</div>
-              ) : (
-                filtered.map((it) => (
-                  <button
-                    key={it.page_id}
-                    type="button"
-                    onClick={() => setSelected({ page_id: it.page_id, name: it.name, tipo_gestione: it.tipo_gestione, code: it.code })}
-                    className="w-full text-left px-3 py-2 hover:bg-sky-50 border-b border-slate-100 last:border-b-0 flex items-center justify-between gap-2"
-                    data-testid={`retro-acc-item-${it.page_id}`}
-                  >
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-slate-900 truncate">{it.name || "—"}</div>
-                      <div className="text-[11px] text-slate-500 font-mono-tight truncate">{it.code || "—"} · {it.category || "—"}</div>
-                    </div>
-                    <span className={`text-[10px] px-2 h-6 inline-flex items-center rounded-full font-semibold shrink-0 ${
-                      it.tipo_gestione === "a_seriale" ? "bg-emerald-100 text-emerald-800" :
-                      it.tipo_gestione === "a_quantita" ? "bg-sky-100 text-sky-800" : "bg-red-100 text-red-800"
-                    }`}>
-                      {it.tipo_gestione === "a_seriale" ? "A Seriale" : it.tipo_gestione === "a_quantita" ? "A Quantità" : "N/C"}
-                    </span>
-                  </button>
-                ))
-              )}
-            </div>
+    <div className="mt-2 border-t border-slate-200 pt-3 space-y-3 bg-sky-50/50 -mx-6 px-6 pb-4 rounded-b-md">
+      <div className="text-xs uppercase tracking-wider font-bold text-sky-800">➕ Aggiungi Accessorio dimenticato</div>
+      <div className="flex items-center justify-between gap-2 border border-slate-200 rounded-md bg-white px-3 py-2">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-slate-900 truncate">{productMeta?.name || row.item_name || "Prodotto corrente"}</div>
+          <div className="text-[11px] text-slate-500 font-mono-tight truncate">
+            {productMeta?.code || "—"} · A Quantità · Attuale {currentQty}
           </div>
-        ) : (
-          <>
-            <div className="flex items-center justify-between gap-2 border border-slate-200 rounded-md bg-white px-3 py-2">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900 truncate">{selected.name}</div>
-                <div className="text-[11px] text-slate-500 font-mono-tight truncate">
-                  {selected.code || "—"} · {tg === "a_seriale" ? "A Seriale" : tg === "a_quantita" ? "A Quantità" : "N/C"}
-                </div>
-              </div>
-              <Button type="button" variant="outline" size="sm" onClick={() => setSelected(null)} data-testid="retro-acc-change">
-                Cambia
-              </Button>
-            </div>
-
-            {tg === "a_seriale" && (
-              <>
-                <div>
-                  <Label className="text-xs font-semibold">Seriale *</Label>
-                  <div className="flex gap-2 mt-1">
-                    <Input value={addSn} onChange={(e) => setAddSn(e.target.value)} className="h-10 font-mono-tight flex-1" placeholder="Digita o scansiona" autoComplete="off" data-testid="retro-acc-sn" />
-                    <Button type="button" variant="outline" onClick={() => setScanFor("sn")} className="h-10 w-10 shrink-0" data-testid="retro-acc-sn-scan" title="Apri fotocamera" aria-label="Scansiona seriale">
-                      <Camera size={14} weight="bold" />
-                    </Button>
-                  </div>
-                </div>
-                {kind === "spedizione" && (
-                  <div>
-                    <Label className="text-xs font-semibold">QR Code (opzionale)</Label>
-                    <div className="flex gap-2 mt-1">
-                      <Input value={addQr} onChange={(e) => setAddQr(e.target.value)} placeholder="Digita, scansiona o usa la fotocamera" className="h-10 font-mono-tight flex-1" autoComplete="off" data-testid="retro-acc-qr" />
-                      <Button type="button" variant="outline" onClick={() => setScanFor("qr")} className="h-10 w-10 shrink-0 border-amber-300 text-amber-700 hover:bg-amber-50" data-testid="retro-acc-qr-scan" title="Apri fotocamera" aria-label="Scansiona QR">
-                        <Camera size={14} weight="bold" />
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            {tg === "a_quantita" && (
-              <div>
-                <Label className="text-xs font-semibold">Quantità *</Label>
-                <Input type="number" min="0.01" step="any" value={qty} onChange={(e) => setQty(e.target.value)} className="h-10 mt-1 font-mono-tight" data-testid="retro-acc-qty" />
-              </div>
-            )}
-
-            <div>
-              <Label className="text-xs font-semibold text-red-700">Motivazione *</Label>
-              <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} className="mt-1" data-testid="retro-acc-reason" />
-            </div>
-          </>
-        )}
-
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={reset} disabled={busy}>Annulla</Button>
-          <Button
-            type="button"
-            onClick={submit}
-            disabled={busy || !selected || !reason.trim() || (tg === "a_seriale" && !addSn.trim()) || (tg === "a_quantita" && (!qty || Number(qty) <= 0))}
-            className="bg-sky-600 hover:bg-sky-700 text-white min-w-[140px]"
-            data-testid="retro-acc-confirm"
-          >
-            {busy ? (
-              <span className="flex items-center gap-2">
-                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                  <circle cx="12" cy="12" r="10" strokeWidth="4" className="opacity-25" />
-                  <path d="M4 12a8 8 0 018-8v0" strokeWidth="4" className="opacity-75" />
-                </svg>
-                Aggiungo…
-              </span>
-            ) : "Aggiungi accessorio"}
-          </Button>
         </div>
       </div>
-      <BarcodeScanner
-        open={scanFor !== null}
-        onClose={() => setScanFor(null)}
-        label={scanFor === "qr" ? "Scansiona QR Code" : "Scansiona seriale"}
-        onDetected={(val) => {
-          const v = (val || "").trim();
-          if (scanFor === "sn") setAddSn(v);
-          else if (scanFor === "qr") setAddQr(v);
-          setScanFor(null);
-        }}
-      />
-    </>
+      <div>
+        <Label className="text-xs font-semibold">Quantità da aggiungere *</Label>
+        <Input
+          type="number"
+          min="0.01"
+          step="any"
+          value={addQty}
+          onChange={(e) => setAddQty(e.target.value)}
+          className="h-10 mt-1 font-mono-tight"
+          data-testid="retro-acc-qty"
+          autoFocus
+        />
+        <p className="text-[11px] text-slate-500 mt-1">
+          Anteprima: <b>{currentQty}</b> + <b>{Number(addQty) || 0}</b> = <b className="text-sky-700">{preview}</b>
+        </p>
+      </div>
+      <div>
+        <Label className="text-xs font-semibold text-red-700">Motivazione *</Label>
+        <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} className="mt-1" data-testid="retro-acc-reason" />
+      </div>
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="outline" onClick={reset} disabled={busy}>Annulla</Button>
+        <Button
+          type="button"
+          onClick={submit}
+          disabled={busy || !reason.trim() || !addQty || Number(addQty) <= 0}
+          className="bg-sky-600 hover:bg-sky-700 text-white min-w-[140px]"
+          data-testid="retro-acc-confirm"
+        >
+          {busy ? (
+            <span className="flex items-center gap-2">
+              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <circle cx="12" cy="12" r="10" strokeWidth="4" className="opacity-25" />
+                <path d="M4 12a8 8 0 018-8v0" strokeWidth="4" className="opacity-75" />
+              </svg>
+              Aggiungo…
+            </span>
+          ) : "Aggiungi quantità"}
+        </Button>
+      </div>
+    </div>
   );
 }
