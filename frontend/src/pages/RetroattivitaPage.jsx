@@ -424,17 +424,11 @@ function EditDialog({ row, kind, onClose, onDone }) {
             )}
           </div>
         </div>
-        {/* F15 fix — Pulsanti Retroattività:
-              • A Seriale → SOLO "Aggiungi Wallbox dimenticata"
-              • A Quantità → SOLO "Aggiungi Accessorio dimenticato"
-              • Sconosciuto (tipo non rilevabile) → mostro ENTRAMBI in fallback per non
-                perdere la funzione esistente. NON rimuovere questa logica. */}
-        {(productTipo === "a_seriale" || productTipo === null) && (
-          <AddForgottenItem row={row} kind={kind} onDone={onDone} />
-        )}
-        {(productTipo === "a_quantita" || productTipo === null) && (
-          <AddForgottenAccessory row={row} kind={kind} productMeta={productMeta} onDone={onDone} />
-        )}
+        {/* F15 fix — Entrambi i pulsanti SEMPRE visibili in ogni riga.
+              L'utente decide se aggiungere una WB (A Seriale) o un Accessorio (A Quantità),
+              indipendentemente dal tipo del prodotto della riga corrente. */}
+        <AddForgottenItem row={row} kind={kind} onDone={onDone} />
+        <AddForgottenAccessory row={row} kind={kind} productMeta={productMeta} onDone={onDone} />
         <div>
           <Label className="text-xs font-semibold text-red-700">Motivazione (obbligatoria) *</Label>
           <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} placeholder="" className="mt-1" data-testid="retro-reason" />
