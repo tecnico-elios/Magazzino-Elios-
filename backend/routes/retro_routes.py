@@ -435,16 +435,73 @@ def build_router(db, deps, send_email_fn=None) -> APIRouter:
 
     @router.post("/cancel/{tipo}/{page_id}")
     async def cancel_op(tipo: str, page_id: str, body: CancelBody, current=Depends(deps.get_current_user)):
-        """Annullamento: archivia la pagina Notion (soft-delete) + audit. Storico preservato."""
+        """Annullamento: RIPRISTINA effetti su magazzino + archivia pagina Notion (soft-delete) + audit.
+        Riuso funzioni esistenti (update/remove_inventory_serials, remove_shipment_from_order, archive_page)."""
         _require_retro(current)
         if not (body.reason or "").strip():
             raise HTTPException(400, "Motivazione obbligatoria")
         if tipo not in ("spedizione", "arrivo"):
             raise HTTPException(400, "tipo non valido")
+
+        # 1) Carica il record esistente per estrarre gli effetti da annullare
+        try:
+            rows = await (notion_service.list_exits() if tipo == "spedizione" else notion_service.list_receipts_all())
+        except Exception as e:
+            raise HTTPException(502, f"Errore lettura record: {e}")
+        row = next((r for r in rows if r.get("id") == page_id), None)
+        if not row:
+            raise HTTPException(404, "Record non trovato")
+
+        sn_list = notion_service._parse_serials(row.get("sn") or "")
+        product_page_id = (row.get("item_ids") or [None])[0]
+        cliente = row.get("cliente") or ""
+        qty = row.get("quantity")
+
+        # 2) Ripristino magazzino (riuso funzioni esistenti)
+        try:
+            if tipo == "spedizione":
+                # Rimetti i SN nell'Inventario col.16 (non-op se già presenti)
+                if product_page_id and sn_list:
+                    await notion_service.update_inventory_serials(product_page_id, sn_list)
+                # Rimuovi SN+QR dall'ordine Eliostech (se collegato)
+                order_page_id = None
+                qr_codes: List[str] = []
+                if cliente and sn_list:
+                    try:
+                        # Recupera QR associati per rimozione dall'ordine
+                        for sn in sn_list:
+                            qr_doc = await db.qr_associations.find_one({"serial_lower": sn.lower(), "active": True})
+                            if qr_doc and qr_doc.get("qr_code"):
+                                qr_codes.append(qr_doc["qr_code"])
+                        order_info = await notion_service.find_order_by_structure(cliente)
+                        if order_info.get("status") == "found":
+                            order_page_id = order_info.get("id")
+                            await notion_service.remove_shipment_from_order(order_page_id, sn_list, qr_codes)
+                    except Exception as e:
+                        logger.warning(f"remove_shipment_from_order fallito (non blocca cancel): {e}")
+                # Disattiva QR associations
+                if sn_list:
+                    for sn in sn_list:
+                        await db.qr_associations.update_many(
+                            {"serial_lower": sn.lower(), "active": True},
+                            {"$set": {"active": False, "deactivated_at": datetime.now(timezone.utc).isoformat(), "deactivated_by": current.get("username"), "deactivated_reason": "retro.cancel"}},
+                        )
+            else:  # arrivo
+                # Rimuovi SN dalla col.16 Inventario (annulla l'ingresso)
+                if product_page_id and sn_list:
+                    await notion_service.remove_inventory_serials(product_page_id, sn_list)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(502, f"Ripristino inventario fallito: {e}")
+
+        # 3) Archivia la pagina Notion (storico preservato, non elimina dati)
         try:
             await notion_service.archive_page(page_id)
         except Exception as e:
             raise HTTPException(502, f"Archiviazione fallita: {e}")
+
+        # 4) Audit completo (riuso collection esistente)
         await db.audit_logs.insert_one({
             "at": datetime.now(timezone.utc).isoformat(),
             "actor_id": str(current.get("_id")),
@@ -453,11 +510,29 @@ def build_router(db, deps, send_email_fn=None) -> APIRouter:
             "target": page_id,
             "meta": {
                 "reason": body.reason,
+                "date": row.get("date"),
+                "cliente": cliente,
+                "fornitore": row.get("fornitore"),
+                "product_name": row.get("item_name") or (row.get("item_names") or [None])[0],
+                "product_page_id": product_page_id,
+                "quantity": qty,
+                "serials": sn_list,
+                "sn_title": row.get("sn"),
                 "date_registrazione": datetime.now(timezone.utc).isoformat(),
             },
         })
+
         notion_service.invalidate_inventory_cache()
-        return {"ok": True}
+
+        email_sent = False
+        if send_email_fn:
+            email_sent = await _send_retro_email_if_enabled(
+                db, send_email_fn, tipo,
+                {"sn": row.get("sn"), "quantity": qty, "cliente": cliente},
+                {"cancelled": True, "sn": row.get("sn"), "quantity": qty},
+                body.reason, current.get("username") or "",
+            )
+        return {"ok": True, "cancelled": True, "restored_serials": sn_list, "email_sent": email_sent}
 
     @router.post("/shipment/{tracker_page_id}/add-item")
     async def add_forgotten_shipment(tracker_page_id: str, body: AddItemBody, current=Depends(deps.get_current_user)):

@@ -10,7 +10,7 @@ import { Badge } from "../components/ui/badge";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "../components/ui/dialog";
-import { ArrowUUpLeft, MagnifyingGlass, Warning, PencilSimple, Prohibit, Camera } from "@phosphor-icons/react";
+import { ArrowUUpLeft, MagnifyingGlass, Warning, PencilSimple, Prohibit, Camera, Trash } from "@phosphor-icons/react";
 import BarcodeScanner from "../components/BarcodeScanner";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -37,6 +37,7 @@ export default function RetroattivitaPage() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(null); // {row, kind}
+  const [cancelling, setCancelling] = useState(null); // {row, kind}
   const [authorized, setAuthorized] = useState(null);
 
   useEffect(() => {
@@ -174,9 +175,14 @@ export default function RetroattivitaPage() {
                     <td className="py-2 pr-3">{r.quantity ?? "—"}</td>
                     <td className="py-2 pr-3">{tipo === "spedizione" ? (r.cliente || "—") : (r.fornitore || "—")}</td>
                     <td className="py-2 pr-3 text-right">
-                      <Button size="sm" variant="outline" onClick={() => setEditing({ row: r, kind: tipo })} data-testid={`retro-edit-${r.id}`}>
-                        <PencilSimple size={14} weight="bold" className="mr-1" /> Modifica
-                      </Button>
+                      <div className="inline-flex gap-1">
+                        <Button size="sm" variant="outline" onClick={() => setEditing({ row: r, kind: tipo })} data-testid={`retro-edit-${r.id}`}>
+                          <PencilSimple size={14} weight="bold" className="mr-1" /> Modifica
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setCancelling({ row: r, kind: tipo })} className="border-red-300 text-red-700 hover:bg-red-50" data-testid={`retro-cancel-${r.id}`}>
+                          <Trash size={14} weight="bold" className="mr-1" /> Annulla {tipo === "spedizione" ? "spedizione" : "arrivo"}
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -192,6 +198,14 @@ export default function RetroattivitaPage() {
           kind={editing.kind}
           onClose={() => setEditing(null)}
           onDone={() => { setEditing(null); search(); }}
+        />
+      )}
+      {cancelling && (
+        <CancelDialog
+          row={cancelling.row}
+          kind={cancelling.kind}
+          onClose={() => setCancelling(null)}
+          onDone={() => { setCancelling(null); search(); }}
         />
       )}
     </div>
@@ -295,10 +309,8 @@ function EditDialog({ row, kind, onClose, onDone }) {
   };
 
   const cancelOp = async () => {
-    if (!reason.trim()) {
-      toast.error("Motivazione obbligatoria per l'annullamento");
-      return;
-    }
+    // F15 — spostato in CancelDialog dedicato dalla tabella. Manteniuto per retro-compat interna.
+    if (!reason.trim()) { toast.error("Motivazione obbligatoria per l'annullamento"); return; }
     if (!window.confirm("Confermi l'ANNULLAMENTO di questa operazione? La pagina Notion verrà archiviata.")) return;
     setBusy(true);
     try {
@@ -311,6 +323,8 @@ function EditDialog({ row, kind, onClose, onDone }) {
       setBusy(false);
     }
   };
+  // eslint-disable-next-line no-unused-vars
+  const _unused_cancelOp = cancelOp;
 
   return (
     <Dialog open={true} onOpenChange={(v) => !v && onClose()}>
@@ -338,29 +352,32 @@ function EditDialog({ row, kind, onClose, onDone }) {
               <div><b>Seriale attuale:</b> <span className="font-mono-tight">{row.sn || "—"}</span></div>
             )}
             {productTipo === "a_quantita" && (
-              <div><b>Quantità attuale:</b> {row.quantity ?? "—"}</div>
+              <div><b>Quantità attuale:</b> <span className="font-mono-tight">{row.quantity ?? "—"}</span></div>
             )}
             {productTipo === null && (
               <>
                 <div><b>Seriale attuale:</b> <span className="font-mono-tight">{row.sn || "—"}</span></div>
-                <div><b>Quantità attuale:</b> {row.quantity ?? "—"}</div>
+                <div><b>Quantità attuale:</b> <span className="font-mono-tight">{row.quantity ?? "—"}</span></div>
               </>
             )}
-            {kind === "spedizione" && <div><b>Cliente attuale:</b> {row.cliente || "—"}</div>}
+            {kind === "spedizione" && <div><b>Struttura attuale:</b> {row.cliente || "—"}</div>}
           </div>
 
           {/* F15 (§1/§2) — Campi modificabili adattivi al Tipo Gestione */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {productTipo === "a_seriale" && (
-              <div>
-                <Label className="text-xs font-semibold">Nuovo seriale (opz)</Label>
-                <Input value={newSn} onChange={(e) => setNewSn(e.target.value)} placeholder={row.sn || ""} className="h-10 mt-1 font-mono-tight" data-testid="retro-new-sn" />
+              <div className="sm:col-span-2">
+                <Label className="text-xs font-semibold">Nuovo seriale <span className="text-slate-400 font-normal">(lascia vuoto per non modificare)</span></Label>
+                <Input value={newSn} onChange={(e) => setNewSn(e.target.value)} placeholder={row.sn || ""} className="h-11 mt-1 font-mono-tight" data-testid="retro-new-sn" autoComplete="off" />
               </div>
             )}
             {productTipo === "a_quantita" && (
-              <div>
-                <Label className="text-xs font-semibold">Nuova quantità (opz)</Label>
-                <Input type="number" step="any" value={newQty} onChange={(e) => setNewQty(e.target.value)} placeholder={String(row.quantity ?? "")} className="h-10 mt-1 font-mono-tight" data-testid="retro-new-qty" />
+              <div className="sm:col-span-2">
+                <Label className="text-xs font-semibold">Nuova quantità <span className="text-slate-400 font-normal">(totale corretta — lascia vuoto per non modificare)</span></Label>
+                <Input type="number" step="any" value={newQty} onChange={(e) => setNewQty(e.target.value)} placeholder={String(row.quantity ?? "")} className="h-11 mt-1 font-mono-tight" data-testid="retro-new-qty" />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Attuale <b>{row.quantity ?? "—"}</b> → Nuova <b className="text-amber-700">{newQty !== "" ? newQty : (row.quantity ?? "—")}</b>. Per aggiungere invece una quantità dimenticata, usa il pulsante <i>Aggiungi Accessorio dimenticato</i> qui sotto.
+                </p>
               </div>
             )}
             {productTipo === null && (
@@ -377,13 +394,13 @@ function EditDialog({ row, kind, onClose, onDone }) {
             )}
             {kind === "spedizione" && (
               <>
-                <div>
-                  <Label className="text-xs font-semibold">Nuova struttura (opz)</Label>
+                <div className="sm:col-span-2">
+                  <Label className="text-xs font-semibold">Nuova struttura <span className="text-slate-400 font-normal">(lascia vuoto per non modificare)</span></Label>
                   <Input value={newStructure} onChange={(e) => setNewStructure(e.target.value)} placeholder={row.cliente || ""} className="h-10 mt-1" data-testid="retro-new-structure" />
                 </div>
                 {productTipo !== "a_quantita" && (
                   <div className="sm:col-span-2">
-                    <Label className="text-xs font-semibold">QR Code (aggiungi/modifica — opzionale)</Label>
+                    <Label className="text-xs font-semibold">QR Code <span className="text-slate-400 font-normal">(aggiungi/modifica — opzionale)</span></Label>
                     <div className="mt-1 flex items-center gap-2">
                       <Input
                         value={newQr}
@@ -434,9 +451,6 @@ function EditDialog({ row, kind, onClose, onDone }) {
         </div>
         <DialogFooter className="flex-col sm:flex-row gap-2">
           <Button variant="outline" onClick={onClose} disabled={busy}>Chiudi</Button>
-          <Button variant="destructive" onClick={cancelOp} disabled={busy} data-testid="retro-cancel-op">
-            <Prohibit size={14} weight="bold" className="mr-1" /> Annulla operazione
-          </Button>
           <Button onClick={submit} disabled={busy} className="bg-amber-600 hover:bg-amber-700 text-white min-w-[180px]" data-testid="retro-confirm">
             {busy ? (
               <span className="flex items-center justify-center gap-2">
@@ -470,6 +484,82 @@ function EditDialog({ row, kind, onClose, onDone }) {
 }
 
 // F14 §2-14 + F15 pick — Aggiungi Wallbox dimenticata CON product picker:
+
+// F15 §7-11 — Dialog dedicato per Annulla spedizione/arrivo con preview + motivazione obbligatoria.
+function CancelDialog({ row, kind, onClose, onDone }) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (!reason.trim()) { toast.error("Motivazione obbligatoria"); return; }
+    setBusy(true);
+    try {
+      const { data } = await axios.post(`${API}/retro/cancel/${kind}/${row.id}`, { reason: reason.trim() });
+      toast.success(kind === "spedizione" ? "Spedizione annullata" : "Arrivo annullato", {
+        description: data?.restored_serials?.length ? `Seriali ripristinati: ${data.restored_serials.length}` : "Effetti magazzino ripristinati.",
+      });
+      onDone();
+    } catch (e) {
+      toast.error("Annullamento fallito", { description: formatError(e) });
+    } finally { setBusy(false); }
+  };
+
+  const label = kind === "spedizione" ? "spedizione" : "arrivo";
+  const partyLabel = kind === "spedizione" ? "Cliente/Struttura" : "Fornitore";
+  const partyValue = kind === "spedizione" ? row.cliente : row.fornitore;
+
+  return (
+    <Dialog open={true} onOpenChange={(v) => !v && !busy && onClose()}>
+      <DialogContent className="max-w-lg" data-testid="retro-cancel-dialog">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-red-700">
+            <Trash size={20} weight="bold" /> Annullare questa {label}?
+          </DialogTitle>
+          <DialogDescription>
+            L'annullamento rimuoverà gli effetti di questa {label} e ripristinerà la disponibilità dei prodotti/seriali coinvolti. L'operazione verrà registrata nell'audit.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="rounded-md border border-red-200 bg-red-50/70 p-3 text-xs space-y-1">
+            <div><b>Data:</b> <span className="font-mono-tight">{row.date || "—"}</span></div>
+            <div><b>{partyLabel}:</b> {partyValue || "—"}</div>
+            <div><b>Prodotto/i:</b> {row.item_name || (row.item_names || []).join(", ") || "—"}</div>
+            <div><b>Quantità:</b> <span className="font-mono-tight">{row.quantity ?? "—"}</span></div>
+            <div><b>Seriali:</b> <span className="font-mono-tight">{row.sn || "—"}</span></div>
+          </div>
+          <div>
+            <Label className="text-xs font-semibold text-red-700">Motivazione (obbligatoria) *</Label>
+            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} placeholder="" className="mt-1" data-testid="retro-cancel-reason" autoFocus />
+          </div>
+        </div>
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+          <Button variant="outline" onClick={onClose} disabled={busy} data-testid="retro-cancel-back">
+            <ArrowUUpLeft size={14} weight="bold" className="mr-1" /> Torna indietro
+          </Button>
+          <Button
+            onClick={submit}
+            disabled={busy || !reason.trim()}
+            className="bg-red-600 hover:bg-red-700 text-white min-w-[200px]"
+            data-testid="retro-cancel-confirm"
+          >
+            {busy ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <circle cx="12" cy="12" r="10" strokeWidth="4" className="opacity-25" />
+                  <path d="M4 12a8 8 0 018-8v0" strokeWidth="4" className="opacity-75" />
+                </svg>
+                Annullo…
+              </span>
+            ) : (
+              <><Trash size={14} weight="bold" className="mr-1" /> Conferma annullamento</>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 //   • Utente sceglie il prodotto A Seriale (default = prodotto della riga)
 //   • Se pick = stesso prodotto della riga → append SN allo stesso record (endpoint /add-item esistente)
 //   • Se pick = prodotto diverso → nuova riga tracker/receipt nella stessa operazione (endpoint /add-accessory esistente)

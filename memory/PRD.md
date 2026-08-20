@@ -96,6 +96,14 @@
 - **Zero nuove API**: gli endpoint F15 `add-accessory` restano nel codice backend ma non vengono più chiamati (dead code, mantenuti per compat retroattiva).
 
 
+## F15 (Retroattività — modifica UX + Annulla spedizione) ✅ (20/02/2026)
+- **`RetroattivitaPage.jsx`**: label modifica chiare — "Seriale attuale" + "Nuovo seriale (lascia vuoto per non modificare)" per A Seriale, "Nuova quantità (totale corretta)" con anteprima `attuale → nuova` per A Quantità, "Struttura attuale/Nuova struttura" per spedizione. Nota UX: distinzione chiara tra modifica e "Aggiungi Accessorio dimenticato".
+- **Tabella risultati**: nuovo pulsante `🗑 Annulla spedizione/arrivo` accanto a Modifica.
+- **`CancelDialog`** nuovo componente con preview (data, cliente/fornitore, prodotto, qty, seriali) + motivazione obbligatoria + "Torna indietro" / "Conferma annullamento".
+- **Backend `cancel_op` potenziato**: ora **ripristina magazzino** prima di archiviare — riuso di `update_inventory_serials`/`remove_inventory_serials` (per Inventario col.16), `remove_shipment_from_order` (per Eliostech Ordini) e disattiva le QR associations collegate. Storico preservato (archive Notion). Audit arricchito con: prodotto, quantità, seriali, cliente, data.
+
+
+
   - Motivazione obbligatoria, permessi Retroattività identici (Admin/Responsabile con `modifica_retroattiva`)
   - Email retroattività riusata (rispetta il toggle globale + chip `retroattivita` per destinatario)
 
