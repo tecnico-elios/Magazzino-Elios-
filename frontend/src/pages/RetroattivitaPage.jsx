@@ -417,12 +417,15 @@ function EditDialog({ row, kind, onClose, onDone }) {
             )}
           </div>
         </div>
-        {/* F15 (§1) — Aggiungi Wallbox dimenticata: SOLO per prodotti A Seriale */}
-        {productTipo === "a_seriale" && (
+        {/* F15 fix — Pulsanti Retroattività:
+              • A Seriale → SOLO "Aggiungi Wallbox dimenticata"
+              • A Quantità → SOLO "Aggiungi Accessorio dimenticato"
+              • Sconosciuto (tipo non rilevabile) → mostro ENTRAMBI in fallback per non
+                perdere la funzione esistente. NON rimuovere questa logica. */}
+        {(productTipo === "a_seriale" || productTipo === null) && (
           <AddForgottenItem row={row} kind={kind} onDone={onDone} />
         )}
-        {/* F15 (§2) — Aggiungi Accessorio dimenticato: SOLO per prodotti A Quantità */}
-        {productTipo === "a_quantita" && (
+        {(productTipo === "a_quantita" || productTipo === null) && (
           <AddForgottenAccessory row={row} kind={kind} productMeta={productMeta} onDone={onDone} />
         )}
         <div>
