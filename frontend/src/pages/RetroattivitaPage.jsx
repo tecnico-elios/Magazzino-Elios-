@@ -469,32 +469,93 @@ function EditDialog({ row, kind, onClose, onDone }) {
   );
 }
 
-// F14 §2-14 — Sub-form per aggiungere una Wallbox dimenticata all'operazione esistente
+// F14 §2-14 + F15 pick — Aggiungi Wallbox dimenticata CON product picker:
+//   • Utente sceglie il prodotto A Seriale (default = prodotto della riga)
+//   • Se pick = stesso prodotto della riga → append SN allo stesso record (endpoint /add-item esistente)
+//   • Se pick = prodotto diverso → nuova riga tracker/receipt nella stessa operazione (endpoint /add-accessory esistente)
 function AddForgottenItem({ row, kind, onDone }) {
   const [open, setOpen] = useState(false);
+  const [inventory, setInventory] = useState([]);
+  const [loadingInv, setLoadingInv] = useState(false);
+  const [q, setQ] = useState("");
+  const [selected, setSelected] = useState(null); // {page_id, name, tipo_gestione, code}
   const [reason, setReason] = useState("");
   const [addSn, setAddSn] = useState("");
   const [addQr, setAddQr] = useState("");
   const [scanFor, setScanFor] = useState(null); // "sn" | "qr" | null
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    if (!open || inventory.length > 0) return;
+    setLoadingInv(true);
+    axios.get(`${API}/inventory`).then(({ data }) => {
+      const items = (data?.items || []).filter((it) => it.active !== false);
+      setInventory(items);
+      // Prefill prodotto già presente nella riga (default = same product) se A Seriale
+      const prefillId = (row?.item_ids && row.item_ids[0]) || null;
+      if (prefillId) {
+        const found = items.find((x) => x.page_id === prefillId);
+        if (found && found.tipo_gestione === "a_seriale") {
+          setSelected({ page_id: found.page_id, name: found.name, tipo_gestione: found.tipo_gestione, code: found.code });
+        }
+      }
+    }).catch((e) => toast.error("Errore caricamento inventario", { description: formatError(e) }))
+      .finally(() => setLoadingInv(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, inventory.length]);
+
+  const filtered = useMemo(() => {
+    // Solo A Seriale (le WB e i prodotti serializzati)
+    const base = inventory.filter((it) => it.tipo_gestione === "a_seriale");
+    const s = q.trim().toLowerCase();
+    if (!s) return base.slice(0, 40);
+    return base.filter((it) =>
+      (it.name || "").toLowerCase().includes(s) ||
+      (it.code || "").toLowerCase().includes(s) ||
+      (it.category || "").toLowerCase().includes(s)
+    ).slice(0, 40);
+  }, [inventory, q]);
+
+  const reset = () => {
+    setOpen(false); setSelected(null); setReason("");
+    setAddSn(""); setAddQr(""); setQ("");
+  };
+
   const submit = async () => {
-    if (!reason.trim() || !addSn.trim()) {
-      toast.error("Seriale e motivazione obbligatori");
-      return;
-    }
+    if (!selected) { toast.error("Seleziona un prodotto"); return; }
+    if (!reason.trim() || !addSn.trim()) { toast.error("Seriale e motivazione obbligatori"); return; }
     setBusy(true);
     try {
-      const body = { reason: reason.trim(), new_sn: addSn.trim() };
-      if (kind === "spedizione" && addQr.trim()) body.new_qr_code = addQr.trim();
-      const path = kind === "spedizione"
-        ? `retro/shipment/${row.id}/add-item`
-        : `retro/arrivo/${row.id}/add-item`;
-      const { data } = await axios.post(`${API}/${path}`, body);
-      toast.success("Wallbox dimenticata aggiunta", {
-        description: `Nuova quantità: ${data.new_qty} · Seriali: ${(data.sn_list || []).length}`,
-      });
-      setOpen(false); setReason(""); setAddSn(""); setAddQr("");
+      const sameAsRow = (row?.item_ids || []).includes(selected.page_id);
+      if (sameAsRow) {
+        // Stesso prodotto della riga → append SN allo stesso record
+        const body = { reason: reason.trim(), new_sn: addSn.trim() };
+        if (kind === "spedizione" && addQr.trim()) body.new_qr_code = addQr.trim();
+        const path = kind === "spedizione"
+          ? `retro/shipment/${row.id}/add-item`
+          : `retro/arrivo/${row.id}/add-item`;
+        const { data } = await axios.post(`${API}/${path}`, body);
+        toast.success("Wallbox dimenticata aggiunta (stesso record)", {
+          description: `Nuova quantità: ${data.new_qty} · Seriali: ${(data.sn_list || []).length}`,
+        });
+      } else {
+        // Prodotto diverso → nuova riga nella stessa operazione (endpoint /add-accessory)
+        const body = {
+          reason: reason.trim(),
+          product_page_id: selected.page_id,
+          quantity: 1,
+          serial: addSn.trim(),
+        };
+        if (kind === "spedizione" && addQr.trim()) body.qr_code = addQr.trim();
+        const path = kind === "spedizione"
+          ? `retro/shipment/${row.id}/add-accessory`
+          : `retro/arrivo/${row.id}/add-accessory`;
+        const { data } = await axios.post(`${API}/${path}`, body);
+        toast.success("Wallbox dimenticata aggiunta (stessa operazione)", {
+          description: `${data.product || selected.name} · SN ${data.serial}`,
+        });
+      }
+      reset();
       onDone();
     } catch (e) {
       toast.error("Aggiunta fallita", { description: formatError(e) });
@@ -504,8 +565,6 @@ function AddForgottenItem({ row, kind, onDone }) {
   if (!open) {
     return (
       <div className="mt-4 border-t border-slate-200 pt-3">
-        {/* F14 (BLOCCO 2) — Pulsante SEMPRE visibile su tutti i dispositivi (mobile/tablet/palmare/desktop).
-            w-full su mobile, larghezza auto e centrato su desktop. Nessun display:none / hidden. */}
         <Button
           type="button"
           variant="outline"
@@ -516,61 +575,130 @@ function AddForgottenItem({ row, kind, onDone }) {
           ➕ Aggiungi Wallbox dimenticata
         </Button>
         <p className="text-[11px] text-slate-400 mt-2 text-center">
-          Aggiunge un seriale{kind === "spedizione" ? " + QR opzionale" : ""} allo stesso record ({kind}). Nessuna nuova riga.
+          Prodotto A Seriale + seriale{kind === "spedizione" ? " + QR opzionale" : ""}. Nessuna modifica alla struttura Notion.
         </p>
       </div>
     );
   }
 
+  const sameAsRow = selected && (row?.item_ids || []).includes(selected.page_id);
+
   return (
     <>
       <div className="mt-4 border-t border-slate-200 pt-3 space-y-3 bg-amber-50/40 -mx-6 px-6 pb-4 rounded-b-md">
         <div className="text-xs uppercase tracking-wider font-bold text-amber-800">➕ Aggiungi Wallbox dimenticata</div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="sm:col-span-2">
-            <Label className="text-xs font-semibold">Nuovo seriale *</Label>
-            <div className="flex gap-2 mt-1">
-              <Input value={addSn} onChange={(e) => setAddSn(e.target.value)} className="h-10 font-mono-tight flex-1" data-testid="retro-add-sn" />
-              <Button type="button" variant="outline" size="sm" onClick={() => setScanFor("sn")} data-testid="retro-add-sn-scan">
-                <Camera size={14} weight="bold" />
-              </Button>
+
+        {/* STEP 1 — Selezione prodotto A Seriale */}
+        {!selected ? (
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold">Cerca prodotto (A Seriale)</Label>
+            <Input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Nome, codice o categoria"
+              className="h-10"
+              autoComplete="off"
+              data-testid="retro-fwb-search"
+              autoFocus
+            />
+            <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-md bg-white">
+              {loadingInv ? (
+                <div className="p-3 text-sm text-slate-400">Caricamento…</div>
+              ) : filtered.length === 0 ? (
+                <div className="p-3 text-sm text-slate-400">Nessun prodotto A Seriale trovato.</div>
+              ) : (
+                filtered.map((it) => (
+                  <button
+                    key={it.page_id}
+                    type="button"
+                    onClick={() => setSelected({ page_id: it.page_id, name: it.name, tipo_gestione: it.tipo_gestione, code: it.code })}
+                    className="w-full text-left px-3 py-2 hover:bg-amber-50 border-b border-slate-100 last:border-b-0 flex items-center justify-between gap-2"
+                    data-testid={`retro-fwb-item-${it.page_id}`}
+                  >
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-slate-900 truncate">{it.name || "—"}</div>
+                      <div className="text-[11px] text-slate-500 font-mono-tight truncate">{it.code || "—"} · {it.category || "—"}</div>
+                    </div>
+                    <span className="text-[10px] px-2 h-6 inline-flex items-center rounded-full font-semibold shrink-0 bg-emerald-100 text-emerald-800">
+                      A Seriale
+                    </span>
+                  </button>
+                ))
+              )}
             </div>
           </div>
-          {kind === "spedizione" && (
-            <div className="sm:col-span-2">
-              <Label className="text-xs font-semibold">QR Code (opz)</Label>
-              {/* F14 (BLOCCO 1) — input + fotocamera SEMPRE visibili */}
+        ) : (
+          <>
+            <div className="flex items-center justify-between gap-2 border border-slate-200 rounded-md bg-white px-3 py-2">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-slate-900 truncate">{selected.name}</div>
+                <div className="text-[11px] text-slate-500 font-mono-tight truncate">
+                  {selected.code || "—"} · A Seriale {sameAsRow && <span className="ml-1 text-emerald-700">· stesso record</span>}
+                </div>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => setSelected(null)} data-testid="retro-fwb-change">
+                Cambia
+              </Button>
+            </div>
+
+            <div>
+              <Label className="text-xs font-semibold">Nuovo seriale *</Label>
               <div className="flex gap-2 mt-1">
-                <Input
-                  value={addQr}
-                  onChange={(e) => setAddQr(e.target.value)}
-                  placeholder="Digita, scansiona o usa la fotocamera"
-                  className="h-10 font-mono-tight flex-1"
-                  autoComplete="off"
-                  data-testid="retro-add-qr"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setScanFor("qr")}
-                  className="h-10 w-10 shrink-0 border-amber-300 text-amber-700 hover:bg-amber-50"
-                  data-testid="retro-add-qr-scan"
-                  title="Apri fotocamera"
-                  aria-label="Apri fotocamera per QR"
-                >
+                <Input value={addSn} onChange={(e) => setAddSn(e.target.value)} className="h-10 font-mono-tight flex-1" placeholder="Digita o scansiona" autoComplete="off" data-testid="retro-add-sn" />
+                <Button type="button" variant="outline" onClick={() => setScanFor("sn")} className="h-10 w-10 shrink-0" data-testid="retro-add-sn-scan" title="Apri fotocamera" aria-label="Scansiona seriale">
                   <Camera size={14} weight="bold" />
                 </Button>
               </div>
             </div>
-          )}
-          <div className="sm:col-span-2">
-            <Label className="text-xs font-semibold text-red-700">Motivazione *</Label>
-            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} className="mt-1" data-testid="retro-add-reason" />
-          </div>
-        </div>
+            {kind === "spedizione" && (
+              <div>
+                <Label className="text-xs font-semibold">QR Code (opz)</Label>
+                <div className="flex gap-2 mt-1">
+                  <Input
+                    value={addQr}
+                    onChange={(e) => setAddQr(e.target.value)}
+                    placeholder="Digita, scansiona o usa la fotocamera"
+                    className="h-10 font-mono-tight flex-1"
+                    autoComplete="off"
+                    data-testid="retro-add-qr"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setScanFor("qr")}
+                    className="h-10 w-10 shrink-0 border-amber-300 text-amber-700 hover:bg-amber-50"
+                    data-testid="retro-add-qr-scan"
+                    title="Apri fotocamera"
+                    aria-label="Scansiona QR"
+                  >
+                    <Camera size={14} weight="bold" />
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <div>
+              <Label className="text-xs font-semibold text-red-700">Motivazione *</Label>
+              <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} className="mt-1" data-testid="retro-add-reason" />
+            </div>
+
+            <p className="text-[11px] text-slate-500">
+              {sameAsRow
+                ? "Il seriale verrà accodato allo stesso record esistente."
+                : `Verrà creata una nuova riga per ${selected.name} nella stessa operazione.`}
+            </p>
+          </>
+        )}
+
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={busy}>Annulla</Button>
-          <Button type="button" onClick={submit} disabled={busy || !addSn.trim() || !reason.trim()} className="bg-amber-600 hover:bg-amber-700 text-white min-w-[140px]" data-testid="retro-add-confirm">
+          <Button type="button" variant="outline" onClick={reset} disabled={busy}>Annulla</Button>
+          <Button
+            type="button"
+            onClick={submit}
+            disabled={busy || !selected || !reason.trim() || !addSn.trim()}
+            className="bg-amber-600 hover:bg-amber-700 text-white min-w-[140px]"
+            data-testid="retro-add-confirm"
+          >
             {busy ? (
               <span className="flex items-center gap-2">
                 <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -579,7 +707,7 @@ function AddForgottenItem({ row, kind, onDone }) {
                 </svg>
                 Aggiungo…
               </span>
-            ) : "Aggiungi"}
+            ) : "Aggiungi wallbox"}
           </Button>
         </div>
       </div>
