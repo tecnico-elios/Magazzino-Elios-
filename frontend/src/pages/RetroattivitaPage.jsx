@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { useAuth } from "../lib/AuthContext";
@@ -598,39 +598,89 @@ function AddForgottenItem({ row, kind, onDone }) {
   );
 }
 
-// F15 (§2) — Aggiungi Accessorio dimenticato — versione semplificata:
-//   • Solo per prodotti A Quantità (mostrato solo quando productTipo === "a_quantita")
-//   • Nessun product picker: aggiorna lo STESSO record (stesso prodotto della riga)
-//   • Nessun SN, nessun QR — chiede solo Quantità da aggiungere + Motivazione
-//   • Riuso puro dell'endpoint PATCH retro/{shipment|arrivo}/{id} (edit esistente):
-//       new_quantity = row.quantity + delta   → non crea nuove righe Notion.
+// F15 (§2) — Aggiungi Accessorio dimenticato — CON product picker:
+//   • Utente può scegliere un prodotto qualsiasi (default = prodotto della riga)
+//   • Se pick = stesso prodotto A Quantità della riga → somma quantità sullo stesso record
+//   • Se pick = prodotto diverso → crea nuova riga tracker/receipt nello STESSO ordine/operazione
+//     (stesso cliente/data/taken_by), riusando il backend /add-accessory esistente.
 function AddForgottenAccessory({ row, kind, productMeta, onDone }) {
   const [open, setOpen] = useState(false);
+  const [inventory, setInventory] = useState([]);
+  const [loadingInv, setLoadingInv] = useState(false);
+  const [q, setQ] = useState("");
+  const [selected, setSelected] = useState(null); // {page_id, name, tipo_gestione}
   const [reason, setReason] = useState("");
   const [addQty, setAddQty] = useState("1");
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    if (!open || inventory.length > 0) return;
+    setLoadingInv(true);
+    axios.get(`${API}/inventory`).then(({ data }) => {
+      const items = (data?.items || []).filter((it) => it.active !== false);
+      setInventory(items);
+      // Prefill prodotto già presente nella riga (default = same product)
+      const prefillId = (row?.item_ids && row.item_ids[0]) || null;
+      if (prefillId) {
+        const found = items.find((x) => x.page_id === prefillId);
+        if (found) setSelected({ page_id: found.page_id, name: found.name, tipo_gestione: found.tipo_gestione, code: found.code });
+      }
+    }).catch((e) => toast.error("Errore caricamento inventario", { description: formatError(e) }))
+      .finally(() => setLoadingInv(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, inventory.length]);
+
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    // Mostro solo A Quantità nel picker accessorio (i seriali WB usano l'altro pulsante)
+    const base = inventory.filter((it) => it.tipo_gestione === "a_quantita");
+    if (!s) return base.slice(0, 40);
+    return base.filter((it) =>
+      (it.name || "").toLowerCase().includes(s) ||
+      (it.code || "").toLowerCase().includes(s) ||
+      (it.category || "").toLowerCase().includes(s)
+    ).slice(0, 40);
+  }, [inventory, q]);
+
   const reset = () => {
-    setOpen(false); setReason(""); setAddQty("1");
+    setOpen(false); setSelected(null); setReason("");
+    setAddQty("1"); setQ("");
   };
 
   const submit = async () => {
+    if (!selected) { toast.error("Seleziona un prodotto"); return; }
     if (!reason.trim()) { toast.error("Motivazione obbligatoria"); return; }
     const delta = Number(addQty);
     if (!delta || delta <= 0) { toast.error("Quantità non valida"); return; }
     setBusy(true);
     try {
-      const currentQty = Number(row?.quantity || 0);
-      const newTotal = currentQty + delta;
-      const path = kind === "spedizione" ? `retro/shipment/${row.id}` : `retro/arrivo/${row.id}`;
-      // Riuso endpoint edit esistente: aggiorna la stessa riga Notion, non ne crea nuove.
-      const { data } = await axios.patch(`${API}/${path}`, {
-        reason: `[+${delta}] ${reason.trim()}`,
-        new_quantity: newTotal,
-      });
-      toast.success("Accessorio dimenticato aggiunto", {
-        description: `${productMeta?.name || row.item_name || "Prodotto"} · Quantità: ${currentQty} → ${newTotal}${data?.email_sent ? " · Email inviata" : ""}`,
-      });
+      const sameAsRow = (row?.item_ids || []).includes(selected.page_id);
+      if (sameAsRow) {
+        // Stesso prodotto della riga → SOMMA sullo STESSO record (nessuna nuova riga Notion)
+        const currentQty = Number(row?.quantity || 0);
+        const newTotal = currentQty + delta;
+        const path = kind === "spedizione" ? `retro/shipment/${row.id}` : `retro/arrivo/${row.id}`;
+        await axios.patch(`${API}/${path}`, {
+          reason: `[+${delta}] ${reason.trim()}`,
+          new_quantity: newTotal,
+        });
+        toast.success("Accessorio dimenticato aggiunto (stesso record)", {
+          description: `${selected.name} · ${currentQty} → ${newTotal}`,
+        });
+      } else {
+        // Prodotto diverso → nuova riga tracker/receipt nella stessa operazione
+        const path = kind === "spedizione"
+          ? `retro/shipment/${row.id}/add-accessory`
+          : `retro/arrivo/${row.id}/add-accessory`;
+        const { data } = await axios.post(`${API}/${path}`, {
+          reason: reason.trim(),
+          product_page_id: selected.page_id,
+          quantity: delta,
+        });
+        toast.success("Accessorio dimenticato aggiunto", {
+          description: `${data.product || selected.name} · Qty ${delta}`,
+        });
+      }
       reset();
       onDone();
     } catch (e) {
@@ -651,52 +701,105 @@ function AddForgottenAccessory({ row, kind, productMeta, onDone }) {
           ➕ Aggiungi Accessorio dimenticato
         </Button>
         <p className="text-[11px] text-slate-400 mt-2 text-center">
-          Somma alla quantità del record esistente ({kind}). Nessuna nuova riga.
+          Prodotto + quantità. Nessuna modifica alla struttura Notion.
         </p>
       </div>
     );
   }
 
   const currentQty = Number(row?.quantity || 0);
-  const preview = currentQty + (Number(addQty) || 0);
+  const sameAsRow = selected && (row?.item_ids || []).includes(selected.page_id);
+  const preview = sameAsRow ? currentQty + (Number(addQty) || 0) : (Number(addQty) || 0);
 
   return (
     <div className="mt-2 border-t border-slate-200 pt-3 space-y-3 bg-sky-50/50 -mx-6 px-6 pb-4 rounded-b-md">
       <div className="text-xs uppercase tracking-wider font-bold text-sky-800">➕ Aggiungi Accessorio dimenticato</div>
-      <div className="flex items-center justify-between gap-2 border border-slate-200 rounded-md bg-white px-3 py-2">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-slate-900 truncate">{productMeta?.name || row.item_name || "Prodotto corrente"}</div>
-          <div className="text-[11px] text-slate-500 font-mono-tight truncate">
-            {productMeta?.code || "—"} · A Quantità · Attuale {currentQty}
+
+      {/* STEP 1 — Selezione prodotto */}
+      {!selected ? (
+        <div className="space-y-2">
+          <Label className="text-xs font-semibold">Cerca prodotto</Label>
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Nome, codice o categoria"
+            className="h-10"
+            autoComplete="off"
+            data-testid="retro-acc-search"
+            autoFocus
+          />
+          <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-md bg-white">
+            {loadingInv ? (
+              <div className="p-3 text-sm text-slate-400">Caricamento…</div>
+            ) : filtered.length === 0 ? (
+              <div className="p-3 text-sm text-slate-400">Nessun prodotto A Quantità trovato.</div>
+            ) : (
+              filtered.map((it) => (
+                <button
+                  key={it.page_id}
+                  type="button"
+                  onClick={() => setSelected({ page_id: it.page_id, name: it.name, tipo_gestione: it.tipo_gestione, code: it.code })}
+                  className="w-full text-left px-3 py-2 hover:bg-sky-50 border-b border-slate-100 last:border-b-0 flex items-center justify-between gap-2"
+                  data-testid={`retro-acc-item-${it.page_id}`}
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-900 truncate">{it.name || "—"}</div>
+                    <div className="text-[11px] text-slate-500 font-mono-tight truncate">{it.code || "—"} · {it.category || "—"}</div>
+                  </div>
+                  <span className="text-[10px] px-2 h-6 inline-flex items-center rounded-full font-semibold shrink-0 bg-sky-100 text-sky-800">
+                    A Quantità
+                  </span>
+                </button>
+              ))
+            )}
           </div>
         </div>
-      </div>
-      <div>
-        <Label className="text-xs font-semibold">Quantità da aggiungere *</Label>
-        <Input
-          type="number"
-          min="0.01"
-          step="any"
-          value={addQty}
-          onChange={(e) => setAddQty(e.target.value)}
-          className="h-10 mt-1 font-mono-tight"
-          data-testid="retro-acc-qty"
-          autoFocus
-        />
-        <p className="text-[11px] text-slate-500 mt-1">
-          Anteprima: <b>{currentQty}</b> + <b>{Number(addQty) || 0}</b> = <b className="text-sky-700">{preview}</b>
-        </p>
-      </div>
-      <div>
-        <Label className="text-xs font-semibold text-red-700">Motivazione *</Label>
-        <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} className="mt-1" data-testid="retro-acc-reason" />
-      </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between gap-2 border border-slate-200 rounded-md bg-white px-3 py-2">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-slate-900 truncate">{selected.name}</div>
+              <div className="text-[11px] text-slate-500 font-mono-tight truncate">
+                {selected.code || "—"} · A Quantità {sameAsRow && <span className="ml-1 text-emerald-700">· stesso record</span>}
+              </div>
+            </div>
+            <Button type="button" variant="outline" size="sm" onClick={() => setSelected(null)} data-testid="retro-acc-change">
+              Cambia
+            </Button>
+          </div>
+
+          <div>
+            <Label className="text-xs font-semibold">Quantità da aggiungere *</Label>
+            <Input
+              type="number" min="0.01" step="any"
+              value={addQty}
+              onChange={(e) => setAddQty(e.target.value)}
+              className="h-10 mt-1 font-mono-tight"
+              data-testid="retro-acc-qty"
+              autoFocus
+            />
+            <p className="text-[11px] text-slate-500 mt-1">
+              {sameAsRow ? (
+                <>Anteprima: <b>{currentQty}</b> + <b>{Number(addQty) || 0}</b> = <b className="text-sky-700">{preview}</b> (stesso record)</>
+              ) : (
+                <>Verrà creata una nuova riga per <b>{selected.name}</b> · Qty <b className="text-sky-700">{preview}</b> (stessa operazione)</>
+              )}
+            </p>
+          </div>
+
+          <div>
+            <Label className="text-xs font-semibold text-red-700">Motivazione *</Label>
+            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} className="mt-1" data-testid="retro-acc-reason" />
+          </div>
+        </>
+      )}
+
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" onClick={reset} disabled={busy}>Annulla</Button>
         <Button
           type="button"
           onClick={submit}
-          disabled={busy || !reason.trim() || !addQty || Number(addQty) <= 0}
+          disabled={busy || !selected || !reason.trim() || !addQty || Number(addQty) <= 0}
           className="bg-sky-600 hover:bg-sky-700 text-white min-w-[140px]"
           data-testid="retro-acc-confirm"
         >
@@ -708,7 +811,7 @@ function AddForgottenAccessory({ row, kind, productMeta, onDone }) {
               </svg>
               Aggiungo…
             </span>
-          ) : "Aggiungi quantità"}
+          ) : "Aggiungi accessorio"}
         </Button>
       </div>
     </div>
