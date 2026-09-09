@@ -302,6 +302,54 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             raise HTTPException(404, "Record non trovato")
         return {"ok": True}
 
+    @router.get("/system-logs")
+    async def system_logs(
+        limit: int = Query(default=500, ge=10, le=5000),
+        level: Optional[str] = Query(default=None),
+        q: Optional[str] = Query(default=None),
+    ):
+        """F15 §19-22 — Registro Log: legge i log supervisor backend (err+out) e li rende
+        consultabili. Redazione automatica di password/token/api_key nei valori.
+        Riuso: nessuna nuova collection, legge direttamente i file di log del sistema."""
+        import re
+        paths = ["/var/log/supervisor/backend.err.log", "/var/log/supervisor/backend.out.log"]
+        lines = []
+        for p in paths:
+            try:
+                with open(p, "r", errors="ignore") as f:
+                    file_lines = f.readlines()[-limit:]
+                    for line in file_lines:
+                        lines.append({"file": p.split("/")[-1], "raw": line.rstrip()})
+            except Exception:
+                pass
+        # Redazione segreti
+        secret_re = re.compile(r'(password|passwd|pwd|token|api[_-]?key|secret|authorization|cookie|bearer)\s*[:=]\s*["\']?([^"\'\s,;]+)', re.IGNORECASE)
+        def redact(s: str) -> str:
+            return secret_re.sub(lambda m: f'{m.group(1)}=***REDACTED***', s)
+        # Estrai livello (INFO/WARNING/ERROR/CRITICAL/DEBUG)
+        lvl_re = re.compile(r'\b(DEBUG|INFO|WARNING|ERROR|CRITICAL)\b')
+        # Estrai timestamp ISO se presente
+        ts_re = re.compile(r'(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?)')
+        out = []
+        for item in lines:
+            raw = redact(item["raw"])
+            m_lvl = lvl_re.search(raw)
+            m_ts = ts_re.search(raw)
+            entry = {
+                "file": item["file"],
+                "timestamp": m_ts.group(1) if m_ts else None,
+                "level": m_lvl.group(1) if m_lvl else "INFO",
+                "message": raw,
+            }
+            if level and entry["level"] != level.upper():
+                continue
+            if q and q.lower() not in raw.lower():
+                continue
+            out.append(entry)
+        # ordina per timestamp decrescente se disponibile, altrimenti lascia ordine file
+        out.reverse()
+        return {"items": out[:limit], "total": len(out)}
+
     @router.get("/audit-logs")
     async def list_audit_logs(limit: int = Query(default=200, ge=1, le=1000)):
         cursor = db.audit_logs.find({}).sort("at", -1).limit(limit)

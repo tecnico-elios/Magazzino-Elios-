@@ -132,6 +132,99 @@ export function AuditLogTab() {
   );
 }
 
+// F15 §19-22 — Registro Log Sistema — visualizzatore log tecnici backend
+export function SystemLogsTab() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState("");
+  const [level, setLevel] = useState("");
+  const [expanded, setExpanded] = useState(null);
+  const load = async () => {
+    setLoading(true);
+    try {
+      const params = { limit: 1000 };
+      if (level) params.level = level;
+      if (q.trim()) params.q = q.trim();
+      const { data } = await axios.get(`${API}/admin/system-logs`, { params });
+      setItems(data.items || []);
+    } catch (e) { toast.error("Errore lettura log", { description: formatError(e) }); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  const levelBadge = (lvl) => {
+    const c = {
+      ERROR: "bg-red-100 text-red-800 border-red-200",
+      CRITICAL: "bg-red-200 text-red-900 border-red-300",
+      WARNING: "bg-amber-100 text-amber-800 border-amber-200",
+      INFO: "bg-sky-100 text-sky-800 border-sky-200",
+      DEBUG: "bg-slate-100 text-slate-600 border-slate-200",
+    }[lvl] || "bg-slate-100 text-slate-600 border-slate-200";
+    return <Badge className={`${c} text-[10px] font-mono-tight`}>{lvl}</Badge>;
+  };
+
+  return (
+    <div className="space-y-3" data-testid="system-logs-tab">
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          placeholder="Cerca testo, endpoint, ID…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") load(); }}
+          className="h-9 max-w-xs"
+          data-testid="syslog-q"
+        />
+        <select value={level} onChange={(e) => { setLevel(e.target.value); }} className="h-9 border border-slate-300 rounded-md px-2 text-sm" data-testid="syslog-level">
+          <option value="">Tutti i livelli</option>
+          <option>DEBUG</option>
+          <option>INFO</option>
+          <option>WARNING</option>
+          <option>ERROR</option>
+          <option>CRITICAL</option>
+        </select>
+        <Button size="sm" onClick={load} disabled={loading} data-testid="syslog-reload">
+          <ArrowClockwise size={14} className={loading ? "animate-spin" : ""} /> {loading ? "…" : "Aggiorna"}
+        </Button>
+        <div className="text-xs text-slate-500 ml-auto">{items.length} righe · password/token/api_key redatti</div>
+      </div>
+      <div className="bg-slate-950 text-slate-100 border border-slate-800 rounded-md overflow-x-auto max-h-[70vh] overflow-y-auto">
+        <table className="w-full text-xs font-mono-tight">
+          <thead className="sticky top-0 bg-slate-900 text-slate-400 uppercase text-[10px] tracking-wider">
+            <tr>
+              <th className="text-left px-3 py-2 w-20">Livello</th>
+              <th className="text-left px-3 py-2 w-40">Timestamp</th>
+              <th className="text-left px-3 py-2 w-32">File</th>
+              <th className="text-left px-3 py-2">Messaggio</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((r, i) => (
+              <>
+                <tr key={i} className="border-t border-slate-800 hover:bg-slate-900 cursor-pointer" onClick={() => setExpanded(expanded === i ? null : i)} data-testid={`syslog-row-${i}`}>
+                  <td className="px-3 py-1.5">{levelBadge(r.level)}</td>
+                  <td className="px-3 py-1.5 text-slate-400">{r.timestamp || "—"}</td>
+                  <td className="px-3 py-1.5 text-slate-500">{r.file}</td>
+                  <td className="px-3 py-1.5 text-slate-200 truncate max-w-[600px]">{r.message}</td>
+                </tr>
+                {expanded === i && (
+                  <tr className="bg-slate-900 border-t border-slate-800">
+                    <td colSpan={4} className="px-3 py-3">
+                      <pre className="whitespace-pre-wrap break-all text-slate-100 text-xs">{r.message}</pre>
+                    </td>
+                  </tr>
+                )}
+              </>
+            ))}
+            {items.length === 0 && !loading && (
+              <tr><td colSpan={4} className="px-3 py-8 text-center text-slate-500">Nessun log disponibile.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ---------- Impostazioni (F7 esteso) ----------
 function SettingSwitch({ label, hint, checked, onChange, testid }) {
   return (

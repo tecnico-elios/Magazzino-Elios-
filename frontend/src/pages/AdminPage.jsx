@@ -33,7 +33,7 @@ import {
   ListMagnifyingGlass,
   UsersFour,
 } from "@phosphor-icons/react";
-import { AuditLogTab, SettingsTab, SettingsGeneralTab, SettingsMagazzinoTab, SettingsScannerTab, SettingsSicurezzaTab, SettingsArriviTab, SettingsSpedizioniTab, ProductsAdminTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab, SessionsTab, InventorySourceTab, ManutenzioneTab, NotionSettingsTab, RetroattivitaEmailToggle } from "./AdminExtraTabs";
+import { AuditLogTab, SettingsTab, SettingsGeneralTab, SettingsMagazzinoTab, SettingsScannerTab, SettingsSicurezzaTab, SettingsArriviTab, SettingsSpedizioniTab, ProductsAdminTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab, SessionsTab, InventorySourceTab, ManutenzioneTab, NotionSettingsTab, RetroattivitaEmailToggle, SystemLogsTab } from "./AdminExtraTabs";
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // Auth is now handled by AuthContext + axios interceptor (Bearer token).
@@ -853,6 +853,7 @@ export default function AdminPage() {
       label: "Amministrazione",
       items: [
         { key: "audit", label: "Registro Attività", icon: ClockCounterClockwise, Comp: AuditLogTab },
+        { key: "system-logs", label: "Registro Log", icon: ListMagnifyingGlass, Comp: SystemLogsTab },
         { key: "maintenance", label: "Sistema / Manutenzione", icon: ArrowsClockwise, Comp: ManutenzioneTab },
       ],
     },

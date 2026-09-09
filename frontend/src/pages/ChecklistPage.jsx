@@ -67,6 +67,7 @@ export default function ChecklistPage() {
   const [pending, setPending] = useState(null); // {id, name}
   const [submitting, setSubmitting] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [showUnknownClient, setShowUnknownClient] = useState(false);
   const [confirmError, setConfirmError] = useState(null);
   // F8 UI iniziale — 2 card grandi in stile Dashboard finché l'operatore non sceglie un flusso.
   const [initialAction, setInitialAction] = useState(null);
@@ -300,6 +301,12 @@ export default function ChecklistPage() {
     }
     if (list.length === 0) {
       toast.error("Aggiungi almeno un prodotto");
+      return;
+    }
+    // F15 §16 — Cliente non registrato: se il nome non è agganciato a un ordine Notion
+    // (clienteOrderId null) e non è vuoto, chiedi conferma esplicita prima di procedere.
+    if (!clienteOrderId && cliente.trim()) {
+      setShowUnknownClient(true);
       return;
     }
     setConfirmError(null);
@@ -908,6 +915,31 @@ export default function ChecklistPage() {
               if (serial) setQrValue(serial);
             }}
           />
+        </Dialog>
+      )}
+      {/* F15 §16 — Dialog "Cliente non registrato" */}
+      {showUnknownClient && (
+        <Dialog open={true} onOpenChange={(v) => !v && setShowUnknownClient(false)}>
+          <DialogContent className="max-w-md" data-testid="unknown-client-dialog">
+            <DialogHeader>
+              <DialogTitle className="text-amber-700">Cliente non registrato</DialogTitle>
+              <DialogDescription>
+                Il cliente/struttura <b>{cliente}</b> non è presente nell'elenco dei clienti registrati su Notion. Continuare comunque?
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button variant="outline" onClick={() => setShowUnknownClient(false)} data-testid="unknown-client-cancel">
+                Annulla
+              </Button>
+              <Button
+                onClick={() => { setShowUnknownClient(false); setConfirmError(null); setShowConfirm(true); }}
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+                data-testid="unknown-client-continue"
+              >
+                Continua comunque
+              </Button>
+            </DialogFooter>
+          </DialogContent>
         </Dialog>
       )}
     </div>
