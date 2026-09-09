@@ -111,16 +111,16 @@ async def update_tipo_gestione(page_id: str, tipo: str) -> None:
         raise RuntimeError(f"Prodotto non trovato: {page_id}")
 
 
-async def update_inventory_serials(page_id: str, serials_to_add: List[str]) -> None:
+async def update_inventory_serials(page_id: str, serials_to_add: List[str]) -> Dict[str, Any]:
     """No-op — nel gestionale i seriali vivono nella collection product_serials,
     già scritti da create_receipt. Manteniamo la stessa firma di notion_service
     per interfaccia uniforme."""
-    return None
+    return {"added": [], "prop_found": True}
 
 
-async def remove_inventory_serials(page_id: str, serials_to_remove: List[str]) -> None:
+async def remove_inventory_serials(page_id: str, serials_to_remove: List[str]) -> Dict[str, Any]:
     """No-op — analoga a update_inventory_serials."""
-    return None
+    return {"removed": list(serials_to_remove or []), "missing": [], "prop_found": True}
 
 
 async def find_serial_in_inventory(sn: str) -> Optional[Dict[str, Any]]:

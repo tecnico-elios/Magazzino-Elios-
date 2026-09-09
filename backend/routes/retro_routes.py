@@ -128,6 +128,11 @@ class ShipmentPatchBody(BaseModel):
     new_structure: Optional[str] = None  # → riscrive "Preso per" e ri-sincronizza Ordini
     new_taken_by: Optional[str] = None
     new_qr_code: Optional[str] = None    # aggiungi/aggiorna QR sull'ordine
+    # F16 (26/02): cambio prodotto (relazione Item in uscita) — stesso record, nuovo prodotto
+    new_product_page_id: Optional[str] = None
+    # F16 (26/02): modifica multi-SN — se la riga contiene N seriali, permette
+    # di sostituirne UNO SOLO (target_sn = SN esistente, new_sn = sostituto).
+    target_sn: Optional[str] = None
 
 
 class ArrivoPatchBody(BaseModel):
@@ -262,20 +267,42 @@ def build_router(db, deps, send_email_fn=None) -> APIRouter:
             after["cliente"] = body.new_structure.strip()
 
         # 3) Aggiorna SOLO i campi passati sulla riga Uscite (§20 — modifica in-place)
+        # F16: gestione target_sn per multi-SN. Se target_sn è specificato e la riga
+        # contiene N seriali, sostituisci SOLO il target (join newline invariato).
+        sn_to_write: Optional[str] = None
+        if body.new_sn:
+            new_sn_clean = body.new_sn.strip()
+            current_sns = notion_service._parse_serials(before["sn"] or "")
+            if body.target_sn and body.target_sn.strip():
+                target_clean = body.target_sn.strip()
+                target_low = target_clean.lower()
+                found_idx = next((i for i, s in enumerate(current_sns) if s.strip().lower() == target_low), -1)
+                if found_idx == -1:
+                    raise HTTPException(400, f"Seriale target '{target_clean}' non trovato nella riga")
+                current_sns[found_idx] = new_sn_clean
+                sn_to_write = "\n".join(current_sns)
+            elif len(current_sns) > 1:
+                # Multi-SN senza target → ambiguo, blocca
+                raise HTTPException(400, "La riga contiene più seriali. Specifica quale sostituire (target_sn)")
+            else:
+                sn_to_write = new_sn_clean
+
         try:
             await notion_service.update_tracker_row(
                 tracker_page_id,
-                new_sn=(body.new_sn.strip() if body.new_sn else None),
+                new_sn=sn_to_write,
                 new_qty=body.new_quantity,
                 new_cliente=(body.new_structure.strip() if body.new_structure else None),
                 new_date=None,  # F14 §3: la data operazione non è modificabile via UI
                 new_taken_by=body.new_taken_by,
+                new_product_page_id=(body.new_product_page_id or None),
             )
         except Exception as e:
             raise HTTPException(502, f"Aggiornamento riga uscita fallito: {e}")
-        if body.new_sn: after["sn"] = body.new_sn.strip()
+        if body.new_sn: after["sn"] = sn_to_write or body.new_sn.strip()
         if body.new_quantity is not None: after["quantity"] = body.new_quantity
         if body.new_taken_by is not None: after["taken_by"] = body.new_taken_by
+        if body.new_product_page_id: after["product_page_id"] = body.new_product_page_id
 
         # 4) Se cambio struttura → rimuovi SN/QR dal vecchio ordine e append al nuovo
         old_qr: Optional[str] = None

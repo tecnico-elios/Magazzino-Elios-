@@ -339,6 +339,13 @@ export default function ChecklistPage() {
       };
       const { data } = await axios.post(`${API}/checklist/send`, payload);
       toast.success("Spedizione confermata", { description: data.message, duration: 6000 });
+      // P0 FIX (Feb 2026): warning esplicito se l'Inventario col.16 non è stato aggiornato
+      if (Array.isArray(data.inventory_warnings) && data.inventory_warnings.length > 0) {
+        toast.warning("⚠️ Attenzione Inventario", {
+          description: data.inventory_warnings.join(" · "),
+          duration: 15000,
+        });
+      }
       setList([]);
       setCliente("");
       setClienteOrderId(null);

@@ -808,13 +808,55 @@ async def submit_checklist(
         raise HTTPException(502, f"Impossibile aggiornare il magazzino. Riprova. ({e})")
 
     # F8 §18: rimuovi i seriali spediti dalla colonna 16 "SN /codice" dell'Inventario Notion
-    # (no-op quando fonte=gestionale). Best-effort: se fallisce non blocca la spedizione.
-    try:
-        for it in filled:
-            if it.serialized and it.serials:
-                await svc.remove_inventory_serials(it.page_id, [s.strip() for s in it.serials if s and s.strip()])
-    except Exception as e:
-        logging.warning(f"remove_inventory_serials fallito (non blocca la spedizione): {e}")
+    # (no-op quando fonte=gestionale). P0 FIX (Feb 2026): errori sono ora tracciati per anomalia
+    # + notificati al frontend nel campo `inventory_warnings` della response.
+    inventory_warnings: List[str] = []
+    for it in filled:
+        if not (it.serialized and it.serials):
+            continue
+        try:
+            result = await svc.remove_inventory_serials(
+                it.page_id, [s.strip() for s in it.serials if s and s.strip()]
+            )
+            # Se la funzione ritorna missing (seriali non trovati in col.16) → warning + anomaly
+            if isinstance(result, dict):
+                missing = result.get("missing") or []
+                if missing:
+                    msg = f"{it.name}: SN non presenti in Inventario col.16 ({', '.join(missing[:5])})"
+                    inventory_warnings.append(msg)
+                    await log_anomaly(
+                        kind="inventory_sn_missing_on_remove",
+                        description=msg,
+                        operator=payload.operator,
+                        product=it.name,
+                        serial_or_code=",".join(missing[:20]),
+                        source="spedizione",
+                    )
+                if not result.get("prop_found", True):
+                    msg = f"{it.name}: colonna 'SN /codice' non trovata su Notion"
+                    inventory_warnings.append(msg)
+                    await log_anomaly(
+                        kind="inventory_col16_missing",
+                        description=msg,
+                        operator=payload.operator, product=it.name,
+                        source="spedizione",
+                    )
+        except Exception as e:
+            # P0 FIX: errori Notion non passano più sotto silenzio.
+            # La spedizione è già registrata (Uscite + Ordini scritti), ma segnaliamo
+            # ESPLICITAMENTE che l'Inventario col.16 non è stato aggiornato → i SN
+            # potrebbero risultare ancora disponibili. Anomaly + response warning.
+            err_msg = f"{it.name}: aggiornamento Inventario col.16 FALLITO ({e})"
+            inventory_warnings.append(err_msg)
+            logging.error(err_msg)
+            await log_anomaly(
+                kind="inventory_remove_failed",
+                description=err_msg,
+                operator=payload.operator,
+                product=it.name,
+                serial_or_code=",".join(it.serials or [])[:400],
+                source="spedizione",
+            )
     svc.invalidate_inventory_cache()
 
     # F14 — Aggiorna "Eliostech Ordini": append SN WB + CODICI QR sull'ordine trovato.
@@ -917,6 +959,7 @@ async def submit_checklist(
         "movements": movements,
         "sent": sent,
         "errors": errors,
+        "inventory_warnings": inventory_warnings,  # P0 FIX: warning visibili all'operatore
         "checklist_id": record.id,
     }
 

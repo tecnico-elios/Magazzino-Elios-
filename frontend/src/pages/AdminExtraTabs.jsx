@@ -1919,3 +1919,82 @@ export function NotionSettingsTab() {
   );
 }
 
+
+
+// ---------- F17 — Export CSV storico Arrivi/Spedizioni ----------
+export function ExportMovimentiTab() {
+  const [tipo, setTipo] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const download = async () => {
+    setBusy(true);
+    try {
+      const params = { tipo };
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
+      const resp = await axios.get(`${API}/admin/export/movimenti`, {
+        params, responseType: "blob",
+      });
+      const url = URL.createObjectURL(new Blob([resp.data], { type: "text/csv;charset=utf-8" }));
+      const a = document.createElement("a");
+      a.href = url;
+      const dispo = resp.headers?.["content-disposition"] || "";
+      const m = /filename="([^"]+)"/.exec(dispo);
+      a.download = m ? m[1] : `movimenti_${tipo}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Export CSV pronto");
+    } catch (e) {
+      toast.error("Export fallito", { description: formatError(e) });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="space-y-4" data-testid="export-movimenti-tab">
+      <div>
+        <h3 className="text-lg font-bold text-slate-900">Export CSV — Movimenti</h3>
+        <p className="text-sm text-slate-500 mt-1">
+          Scarica lo storico Arrivi/Spedizioni in formato CSV (delimitatore <b>;</b>, encoding UTF-8 con BOM per Excel/Numbers).
+        </p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div>
+          <Label className="text-xs font-semibold text-slate-700">Tipo</Label>
+          <select
+            value={tipo}
+            onChange={(e) => setTipo(e.target.value)}
+            className="mt-1 h-10 w-full border border-slate-300 rounded-md px-2 text-sm bg-white"
+            data-testid="export-tipo"
+          >
+            <option value="all">Tutti</option>
+            <option value="arrivo">Solo Arrivi</option>
+            <option value="spedizione">Solo Spedizioni</option>
+          </select>
+        </div>
+        <div>
+          <Label className="text-xs font-semibold text-slate-700">Data da</Label>
+          <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="mt-1 h-10" data-testid="export-date-from" />
+        </div>
+        <div>
+          <Label className="text-xs font-semibold text-slate-700">Data a</Label>
+          <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="mt-1 h-10" data-testid="export-date-to" />
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <Button
+          onClick={download}
+          disabled={busy}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+          data-testid="export-csv-btn"
+        >
+          {busy ? "Preparo CSV…" : "⬇ Scarica CSV"}
+        </Button>
+        <div className="text-xs text-slate-500 self-center">
+          Sorgente LIVE Notion (o Gestionale, in base alla Fonte configurata).
+        </div>
+      </div>
+    </div>
+  );
+}

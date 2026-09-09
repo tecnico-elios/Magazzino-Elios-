@@ -221,38 +221,48 @@ async def update_inventory_serials(page_id: str, serials_to_add: List[str]) -> N
     invalidate_inventory_cache()
 
 
-async def remove_inventory_serials(page_id: str, serials_to_remove: List[str]) -> None:
+async def remove_inventory_serials(page_id: str, serials_to_remove: List[str]) -> Dict[str, Any]:
     """Rimuove seriali dalla colonna `SN /codice` dell'Inventario Notion.
     Chiamata da submit_shipment dopo CONFERMA SPEDIZIONE — F8 §18.
+
+    Returns: {"removed": [sn...], "missing": [sn...], "prop_found": bool}
+    Raises: httpx.HTTPStatusError se Notion risponde >= 400 (P0 fix — errore visibile).
     """
     if not NOTION_TOKEN or not page_id:
-        return
+        raise RuntimeError("Notion non configurato")
     rm_lower = {(s or "").strip().lower() for s in (serials_to_remove or []) if (s or "").strip()}
     if not rm_lower:
-        return
+        return {"removed": [], "missing": [], "prop_found": True}
     get_url = f"{NOTION_BASE}/pages/{page_id}"
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(get_url, headers=_headers())
         if r.status_code >= 400:
-            logger.warning(f"remove_inventory_serials GET failed: {r.status_code}")
-            return
+            logger.error(f"remove_inventory_serials GET failed: {r.status_code} {r.text[:300]}")
+            r.raise_for_status()
         page = r.json()
     props = page.get("properties", {})
     sn_prop = _get_prop(props, INVENTARIO_SN_PROP, "SN / CODICI", "SN /CODICI", "SN/codice", "SN")
     if not sn_prop:
-        return
+        logger.warning(f"remove_inventory_serials: colonna SN/codice non trovata su page {page_id}")
+        return {"removed": [], "missing": list(rm_lower), "prop_found": False}
     existing = _parse_serials(_plain_text(sn_prop))
+    existing_lower = {s.lower() for s in existing}
     kept = [s for s in existing if s.lower() not in rm_lower]
+    removed = [s for s in existing if s.lower() in rm_lower]
+    missing = [s for s in rm_lower if s not in existing_lower]
     if len(kept) == len(existing):
-        return
+        # Nessun seriale corrispondeva. Log esplicito ma NON è un errore Notion.
+        return {"removed": [], "missing": list(rm_lower), "prop_found": True}
     new_text = "\n".join(kept)
     body = {"properties": {INVENTARIO_SN_PROP: {"rich_text": [{"type": "text", "text": {"content": new_text[:1990]}}] if kept else []}}}
     patch_url = f"{NOTION_BASE}/pages/{page_id}"
     async with httpx.AsyncClient(timeout=20) as client:
         resp = await client.patch(patch_url, headers=_headers(), json=body)
         if resp.status_code >= 400:
-            logger.warning(f"remove_inventory_serials PATCH failed: {resp.status_code} {resp.text[:200]}")
+            logger.error(f"remove_inventory_serials PATCH failed: {resp.status_code} {resp.text[:300]}")
+            resp.raise_for_status()
     invalidate_inventory_cache()
+    return {"removed": removed, "missing": missing, "prop_found": True}
 
 
 
@@ -472,9 +482,14 @@ async def update_tracker_row(page_id: str, new_sn: Optional[str] = None,
                               new_qty: Optional[float] = None,
                               new_cliente: Optional[str] = None,
                               new_date: Optional[str] = None,
-                              new_taken_by: Optional[str] = None) -> None:
+                              new_taken_by: Optional[str] = None,
+                              new_product_page_id: Optional[str] = None) -> None:
     """F14 §20 — Retroattività: modifica riga esistente in Inventory Tracker (Uscite).
-    Aggiorna SOLO i campi non-None. Non crea nuove righe."""
+    Aggiorna SOLO i campi non-None. Non crea nuove righe.
+
+    F16 (2026-02): supporta anche `new_product_page_id` — ricollega la riga a un
+    prodotto Inventario diverso mantenendo lo stesso record (utile per correzioni
+    tipo 'Daze Duo' → 'Pulsar Pro' su stesso seriale)."""
     if not NOTION_TOKEN or not page_id:
         raise RuntimeError("Notion non configurato")
     props: Dict[str, Any] = {}
@@ -488,6 +503,8 @@ async def update_tracker_row(page_id: str, new_sn: Optional[str] = None,
         props["Data Uscita"] = {"date": {"start": new_date}}
     if new_taken_by is not None:
         props["Preso da"] = {"rich_text": [{"type": "text", "text": {"content": (new_taken_by or "")[:2000]}}]}
+    if new_product_page_id:
+        props["Item in uscita"] = {"relation": [{"id": new_product_page_id}]}
     if not props:
         return
     async with httpx.AsyncClient(timeout=20) as client:

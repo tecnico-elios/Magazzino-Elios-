@@ -948,4 +948,79 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         })
         return {"ok": True, "created": created, "updated": updated, "total": created + updated}
 
+    # ─────────────────────────────────────────────────────────────────
+    # F17 (26/02) — Export CSV storico Arrivi/Spedizioni
+    # ─────────────────────────────────────────────────────────────────
+    @router.get("/export/movimenti")
+    async def export_movimenti(
+        tipo: str = Query("all", pattern="^(all|arrivo|spedizione)$"),
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        current_user: Dict[str, Any] = Depends(deps.require_admin),
+    ):
+        """Esporta CSV dei movimenti Arrivi/Spedizioni.
+        Filtri: tipo (all|arrivo|spedizione), date_from, date_to (YYYY-MM-DD).
+        Sorgente LIVE Notion (o gestionale se attivo). Nessuna modifica dati."""
+        from fastapi.responses import Response as _Resp
+        import csv as _csv
+        import io as _io
+        from inventory_router import get_svc as _get_svc
+        svc = await _get_svc(db)
+        if not svc.is_configured():
+            raise HTTPException(503, "Fonte inventario non configurata")
+        rows: List[Dict[str, Any]] = []
+        try:
+            if tipo in ("all", "arrivo"):
+                entrate = await svc.list_receipts_all(date_from=date_from, date_to=date_to)
+                for r in entrate:
+                    rows.append({
+                        "tipo": "arrivo",
+                        "data": r.get("date") or "",
+                        "prodotto": r.get("item_name") or "",
+                        "quantita": r.get("quantity") if r.get("quantity") is not None else "",
+                        "unita": r.get("unit") or "",
+                        "seriale": r.get("sn") or "",
+                        "cliente": "",
+                        "operatore": "",
+                    })
+            if tipo in ("all", "spedizione"):
+                uscite = await svc.list_exits(date_from=date_from, date_to=date_to)
+                for u in uscite:
+                    rows.append({
+                        "tipo": "spedizione",
+                        "data": u.get("date") or "",
+                        "prodotto": u.get("item_name") or "",
+                        "quantita": u.get("quantity") if u.get("quantity") is not None else "",
+                        "unita": u.get("unit") or "",
+                        "seriale": u.get("sn") or "",
+                        "cliente": u.get("cliente") or "",
+                        "operatore": u.get("taken_by") or "",
+                    })
+        except Exception as e:
+            raise HTTPException(502, f"Errore lettura movimenti: {e}")
+        rows.sort(key=lambda x: (x.get("data") or ""), reverse=True)
+        buf = _io.StringIO()
+        w = _csv.writer(buf, delimiter=";", quoting=_csv.QUOTE_MINIMAL)
+        w.writerow(["Tipo", "Data", "Prodotto", "Quantità", "Unità", "Seriale/SN", "Cliente", "Operatore"])
+        for r in rows:
+            w.writerow([r["tipo"], r["data"], r["prodotto"], r["quantita"], r["unita"], r["seriale"], r["cliente"], r["operatore"]])
+        csv_bytes = ("\ufeff" + buf.getvalue()).encode("utf-8")
+        # Audit non-blocking
+        try:
+            await db.audit_logs.insert_one({
+                "at": datetime.now(timezone.utc).isoformat(),
+                "actor_id": str(current_user.get("_id")),
+                "actor_username": current_user.get("username"),
+                "action": "export.movimenti",
+                "meta": {"tipo": tipo, "date_from": date_from, "date_to": date_to, "count": len(rows)},
+            })
+        except Exception:
+            pass
+        fname = f"movimenti_{tipo}_{date_from or 'inizio'}_{date_to or 'oggi'}.csv"
+        return _Resp(
+            content=csv_bytes,
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+
     return router

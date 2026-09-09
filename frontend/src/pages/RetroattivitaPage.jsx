@@ -215,14 +215,26 @@ export default function RetroattivitaPage() {
 
 function EditDialog({ row, kind, onClose, onDone }) {
   const [reason, setReason] = useState("");
+  // F16 (26/02) — Multi-SN handling: parsa la stringa row.sn (può contenere N seriali
+  // separati da \n , . ; o spazi). Se >1, mostra selezione "Cosa vuoi modificare?".
+  const parsedSns = useMemo(() => {
+    const raw = row?.sn || "";
+    return raw.split(/[,.;\s\n]+/).map((s) => s.trim()).filter(Boolean);
+  }, [row?.sn]);
+  const isMultiSn = parsedSns.length > 1;
+  const [targetSn, setTargetSn] = useState(parsedSns.length === 1 ? parsedSns[0] : "");
   // F14 fix (20/02): precarica i valori esistenti del record. L'utente modifica SOLO ciò che serve.
-  const [newSn, setNewSn] = useState(row?.sn || "");
+  const [newSn, setNewSn] = useState(parsedSns.length === 1 ? parsedSns[0] : "");
   const [newQty, setNewQty] = useState(row?.quantity != null ? String(row.quantity) : "");
   const [newStructure, setNewStructure] = useState(row?.cliente || "");
   const [newQr, setNewQr] = useState("");
   const [qrScannerOpen, setQrScannerOpen] = useState(false);
   const [qrChecking, setQrChecking] = useState(false);
   const [busy, setBusy] = useState(false);
+  // F16 (26/02) — Cambio prodotto A Seriale (mantiene stesso record, cambia Item in uscita)
+  const [changeProduct, setChangeProduct] = useState(false);
+  const [productPickerOpen, setProductPickerOpen] = useState(false);
+  const [newProduct, setNewProduct] = useState(null); // {page_id, name, tipo_gestione}
   // F15 (§3) — rileva Tipo Gestione del prodotto dalla configurazione Inventario.
   // Usa item_ids[0] dalla riga Notion Uscite/Entrate. Riuso: nessuna nuova API.
   const [productTipo, setProductTipo] = useState(null); // null | "a_seriale" | "a_quantita"
@@ -248,14 +260,15 @@ function EditDialog({ row, kind, onClose, onDone }) {
   // F14 fix (20/02): recupera QR esistente per il seriale (se presente)
   useEffect(() => {
     if (kind !== "spedizione" || !row?.sn) return;
-    axios.get(`${API}/qr/by-serial`, { params: { sn: row.sn } })
+    const snForQr = targetSn || parsedSns[0] || row.sn;
+    axios.get(`${API}/qr/by-serial`, { params: { sn: snForQr } })
       .then(({ data }) => {
         if (data?.exists && data?.qr_code) {
           setNewQr(data.qr_code);
         }
       })
       .catch(() => {});
-  }, [kind, row?.sn]);
+  }, [kind, row?.sn, targetSn, parsedSns]);
 
   // Verifica QR live tramite /api/qr/check quando l'utente inserisce/scansiona
   const verifyQr = async (val) => {
@@ -285,21 +298,29 @@ function EditDialog({ row, kind, onClose, onDone }) {
       toast.error("Motivazione obbligatoria");
       return;
     }
+    if (isMultiSn && !targetSn && (newSn.trim() || newQr.trim() || changeProduct)) {
+      toast.error("Seleziona quale seriale modificare (la riga contiene più seriali)");
+      return;
+    }
     setBusy(true);
     try {
       const body = { reason: reason.trim() };
       // F14 fix (20/02): invia SOLO i campi effettivamente modificati.
       // Il backend aggiornerà unicamente quei campi (§7 modifica parziale).
-      const sn0 = row?.sn || "";
+      const sn0 = isMultiSn ? targetSn : (row?.sn || "");
       const qty0 = row?.quantity != null ? String(row.quantity) : "";
       const struct0 = row?.cliente || "";
       if (newSn.trim() && newSn.trim() !== sn0) body.new_sn = newSn.trim();
+      // F16: target_sn permette al backend di sostituire SOLO il SN scelto in multi-SN
+      if (isMultiSn && targetSn) body.target_sn = targetSn;
       if (newQty !== "" && !isNaN(parseFloat(newQty)) && String(newQty) !== qty0) {
         body.new_quantity = parseFloat(newQty);
       }
       if (kind === "spedizione") {
         if (newStructure.trim() && newStructure.trim() !== struct0) body.new_structure = newStructure.trim();
         if (newQr.trim()) body.new_qr_code = newQr.trim();
+        // F16: cambio prodotto (relazione Item in uscita)
+        if (changeProduct && newProduct?.page_id) body.new_product_page_id = newProduct.page_id;
       }
       const path = kind === "spedizione" ? `retro/shipment/${row.id}` : `retro/arrivo/${row.id}`;
       const { data } = await axios.patch(`${API}/${path}`, body);
@@ -354,7 +375,7 @@ function EditDialog({ row, kind, onClose, onDone }) {
                 </span>
               )}
             </div>
-            {productTipo === "a_seriale" && (
+            {productTipo === "a_seriale" && !isMultiSn && (
               <div><b>Seriale attuale:</b> <span className="font-mono-tight">{row.sn || "—"}</span></div>
             )}
             {productTipo === "a_quantita" && (
@@ -366,12 +387,96 @@ function EditDialog({ row, kind, onClose, onDone }) {
             {kind === "spedizione" && <div><b>Struttura attuale:</b> {row.cliente || "—"}</div>}
           </div>
 
+          {/* F16 (26/02) — SELETTORE MULTI-SN: se la riga contiene più seriali,
+                l'operatore sceglie ESATTAMENTE quale sostituire. */}
+          {productTipo === "a_seriale" && isMultiSn && (
+            <div className="rounded-md border-2 border-amber-400 bg-amber-50 p-3">
+              <div className="text-xs font-bold text-amber-900 mb-2">
+                COSA VUOI MODIFICARE? — Questa spedizione contiene {parsedSns.length} seriali. Seleziona quale correggere:
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-40 overflow-y-auto">
+                {parsedSns.map((sn) => (
+                  <label
+                    key={sn}
+                    className={`flex items-center gap-2 px-2 py-1.5 rounded border cursor-pointer text-sm ${
+                      targetSn === sn ? "border-amber-500 bg-amber-100 font-semibold" : "border-slate-200 bg-white hover:bg-amber-50"
+                    }`}
+                    data-testid={`retro-target-sn-${sn}`}
+                  >
+                    <input
+                      type="radio"
+                      name="retro-target-sn"
+                      value={sn}
+                      checked={targetSn === sn}
+                      onChange={() => { setTargetSn(sn); setNewSn(sn); }}
+                      className="accent-amber-600"
+                    />
+                    <span className="font-mono-tight text-slate-800">{sn}</span>
+                  </label>
+                ))}
+              </div>
+              {targetSn && (
+                <p className="text-[11px] text-amber-800 mt-2">
+                  ➤ Modificherai solo <b className="font-mono-tight">{targetSn}</b>. Gli altri {parsedSns.length - 1} seriali resteranno invariati.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* F16 (26/02) — CAMBIO PRODOTTO A SERIALE: mantiene lo stesso record,
+                cambia solo la relazione Item in uscita (utile per "spedito il prodotto sbagliato"). */}
+          {productTipo === "a_seriale" && kind === "spedizione" && (
+            <div className="rounded-md border border-indigo-300 bg-indigo-50/40 p-3">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={changeProduct}
+                  onChange={(e) => { setChangeProduct(e.target.checked); if (!e.target.checked) setNewProduct(null); }}
+                  className="accent-indigo-600"
+                  data-testid="retro-change-product-toggle"
+                />
+                <span className="text-xs font-semibold text-indigo-900">
+                  Correggi prodotto (mantieni stesso seriale, cambia solo il modello)
+                </span>
+              </label>
+              {changeProduct && (
+                <div className="mt-2 flex items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    {newProduct ? (
+                      <div className="text-xs bg-white border border-indigo-200 rounded px-2 py-1.5">
+                        <span className="text-slate-500">Nuovo prodotto: </span>
+                        <b className="text-indigo-800">{newProduct.name}</b>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-slate-500 italic">Nessun prodotto selezionato</div>
+                    )}
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setProductPickerOpen(true)}
+                    className="border-indigo-300 text-indigo-700 hover:bg-indigo-100"
+                    data-testid="retro-change-product-btn"
+                  >
+                    {newProduct ? "Cambia" : "Scegli prodotto"}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* F15 (§1/§2) — Campi modificabili adattivi al Tipo Gestione — mostrati SOLO quando il tipo è noto */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {productTipo === "a_seriale" && (
               <div className="sm:col-span-2">
-                <Label className="text-xs font-semibold">Nuovo seriale <span className="text-slate-400 font-normal">(lascia vuoto per non modificare)</span></Label>
-                <Input value={newSn} onChange={(e) => setNewSn(e.target.value)} placeholder={row.sn || ""} className="h-11 mt-1 font-mono-tight" data-testid="retro-new-sn" autoComplete="off" />
+                <Label className="text-xs font-semibold">
+                  {isMultiSn && targetSn ? `Nuovo seriale (sostituisce ${targetSn})` : "Nuovo seriale"} <span className="text-slate-400 font-normal">(lascia vuoto per non modificare)</span>
+                </Label>
+                <Input value={newSn} onChange={(e) => setNewSn(e.target.value)} placeholder={targetSn || row.sn || ""} className="h-11 mt-1 font-mono-tight" data-testid="retro-new-sn" autoComplete="off" disabled={isMultiSn && !targetSn} />
+                {isMultiSn && !targetSn && (
+                  <p className="text-[11px] text-amber-700 mt-1">⚠ Seleziona prima quale seriale correggere sopra.</p>
+                )}
               </div>
             )}
             {productTipo === "a_quantita" && (
@@ -465,6 +570,87 @@ function EditDialog({ row, kind, onClose, onDone }) {
           await verifyQr(serial);
         }}
       />
+      {/* F16 (26/02) — Product Picker per cambio prodotto A Seriale */}
+      {productPickerOpen && (
+        <ProductPickerDialog
+          onClose={() => setProductPickerOpen(false)}
+          onPick={(p) => { setNewProduct(p); setProductPickerOpen(false); }}
+          filterTipo="a_seriale"
+          currentPageId={productMeta.page_id}
+        />
+      )}
+    </Dialog>
+  );
+}
+
+// F16 (26/02) — Dialog picker prodotto (A Seriale) per cambio prodotto in Retroattività.
+function ProductPickerDialog({ onClose, onPick, filterTipo = "a_seriale", currentPageId = null }) {
+  const [q, setQ] = useState("");
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    setLoading(true);
+    axios.get(`${API}/inventory`).then(({ data }) => {
+      const raw = (data?.items || []).filter((it) => it.active !== false && it.tipo_gestione === filterTipo);
+      setItems(raw);
+    }).catch(() => setItems([])).finally(() => setLoading(false));
+  }, [filterTipo]);
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    const base = items.filter((it) => it.page_id !== currentPageId);
+    if (!s) return base.slice(0, 60);
+    return base.filter((it) =>
+      (it.name || "").toLowerCase().includes(s) ||
+      (it.code || "").toLowerCase().includes(s) ||
+      (it.category || "").toLowerCase().includes(s)
+    ).slice(0, 60);
+  }, [items, q, currentPageId]);
+  return (
+    <Dialog open={true} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-lg" data-testid="retro-product-picker">
+        <DialogHeader>
+          <DialogTitle className="text-indigo-800">Scegli il prodotto corretto</DialogTitle>
+          <DialogDescription>
+            Solo prodotti "A Seriale". Il seriale della riga verrà spostato sul nuovo prodotto (stesso record Notion).
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2">
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Cerca per nome, codice o categoria"
+            className="h-10"
+            autoFocus
+            data-testid="retro-product-picker-search"
+          />
+          <div className="max-h-72 overflow-y-auto border border-slate-200 rounded-md bg-white">
+            {loading ? (
+              <div className="p-3 text-sm text-slate-400">Caricamento…</div>
+            ) : filtered.length === 0 ? (
+              <div className="p-3 text-sm text-slate-400">Nessun prodotto trovato.</div>
+            ) : (
+              filtered.map((it) => (
+                <button
+                  key={it.page_id}
+                  type="button"
+                  onClick={() => onPick({ page_id: it.page_id, name: it.name, tipo_gestione: it.tipo_gestione, code: it.code })}
+                  className="w-full text-left px-3 py-2 hover:bg-indigo-50 border-b border-slate-100 last:border-b-0 flex items-center justify-between gap-2"
+                  data-testid={`retro-product-pick-${it.page_id}`}
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-900 truncate">{it.name || "—"}</div>
+                    <div className="text-[11px] text-slate-500 font-mono-tight truncate">{it.code || "—"} · {it.category || "—"}</div>
+                  </div>
+                  <span className="text-[10px] px-2 h-6 inline-flex items-center rounded-full font-semibold shrink-0 bg-emerald-100 text-emerald-800">A Seriale</span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Annulla</Button>
+        </DialogFooter>
+      </DialogContent>
     </Dialog>
   );
 }

@@ -33,7 +33,7 @@ import {
   ListMagnifyingGlass,
   UsersFour,
 } from "@phosphor-icons/react";
-import { AuditLogTab, SettingsTab, SettingsGeneralTab, SettingsMagazzinoTab, SettingsScannerTab, SettingsSicurezzaTab, SettingsArriviTab, SettingsSpedizioniTab, ProductsAdminTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab, SessionsTab, InventorySourceTab, ManutenzioneTab, NotionSettingsTab, RetroattivitaEmailToggle, SystemLogsTab } from "./AdminExtraTabs";
+import { AuditLogTab, SettingsTab, SettingsGeneralTab, SettingsMagazzinoTab, SettingsScannerTab, SettingsSicurezzaTab, SettingsArriviTab, SettingsSpedizioniTab, ProductsAdminTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab, SessionsTab, InventorySourceTab, ManutenzioneTab, NotionSettingsTab, RetroattivitaEmailToggle, SystemLogsTab, ExportMovimentiTab } from "./AdminExtraTabs";
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // Auth is now handled by AuthContext + axios interceptor (Bearer token).
@@ -861,6 +861,7 @@ export default function AdminPage() {
       label: "Strumenti",
       items: [
         { key: "history", label: "Storico", icon: ClockCounterClockwise, Comp: HistoryTab },
+        { key: "export-csv", label: "Export CSV", icon: ClockCounterClockwise, Comp: ExportMovimentiTab },
         { key: "global-search", label: "Ricerca globale", icon: MagnifyingGlass, Comp: GlobalSearchTab },
         { key: "serial-history", label: "Storico SN", icon: ListMagnifyingGlass, Comp: SerialHistoryTab },
         { key: "sessions", label: "Sessioni", icon: UsersFour, Comp: SessionsTab },

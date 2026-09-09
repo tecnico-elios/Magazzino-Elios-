@@ -1,5 +1,55 @@
 # PRD — Magazzino Elios Tech
 
+## F16-F17 (26/02/2026) — P0 Inventario Fix + Retroattività Chirurgica + Export CSV ✅
+
+### 🔴 P0 FIX — SN spediti restano in Inventario Notion (Feb 2026)
+- **Root cause**: `notion_service.remove_inventory_serials` faceva return silenzioso su errori HTTP (GET/PATCH `>= 400`), quindi eventuali fallimenti Notion NON venivano mai visti dall'operatore. Se la colonna 16 "SN /codice" non era aggiornata, i seriali restavano "disponibili" pur essendo stati spediti.
+- **Fix backend `notion_service.py::remove_inventory_serials`**:
+  * Ora `raise_for_status()` su errori HTTP (GET+PATCH) → nessuna failure silenziosa
+  * Ritorna `{removed, missing, prop_found}` per feedback strutturato
+  * Distingue tra "colonna non trovata" e "seriali già assenti"
+- **Fix backend `server.py::submit_checklist`**:
+  * Loop per-item con try/except invece di try globale → un errore per prodotto non blocca il resto
+  * Ogni fallimento → `log_anomaly` con kind `inventory_remove_failed` + descrizione dettagliata
+  * Response `POST /checklist/send` include ora `inventory_warnings: string[]` con tutti i problemi rilevati
+- **Fix frontend `ChecklistPage.jsx`**: se `data.inventory_warnings` è popolato → toast warning di 15s con dettagli (l'operatore vede il problema invece che scoprirlo dopo)
+- **Parity `inventory_local.py`**: `update/remove_inventory_serials` ora ritornano dict compatibile
+
+### 🟠 P1 — Retroattività: Selezione Chirurgica Multi-SN + Cambio Prodotto A Seriale
+- **Backend `retro_routes.py::ShipmentPatchBody`**: 2 nuovi campi opzionali
+  * `target_sn: str?` — se la riga contiene multipli SN (`SN1\nSN2\nSN3`), l'operatore specifica quale sostituire → `new_sn` sostituisce SOLO quel target, gli altri restano invariati
+  * `new_product_page_id: str?` — cambia la relazione `Item in uscita` senza toccare seriale/data (utile: "Ho spedito Daze Duo per errore, era Pulsar Pro. Stesso SN, cambio solo il modello")
+- Se multi-SN e `target_sn` mancante → **HTTPException 400** (blocco esplicito, no modifiche silenziose)
+- `notion_service.update_tracker_row` esteso con parametro `new_product_page_id`
+- **Frontend `RetroattivitaPage.jsx::EditDialog`**:
+  * Parsing automatico multi-SN dalla stringa `row.sn` (regex `[,.;\s\n]+`)
+  * UI radio group amber "COSA VUOI MODIFICARE?" quando >1 SN + campo Nuovo Seriale disabled finché non si sceglie il target
+  * Toggle indigo "Correggi prodotto" con `ProductPickerDialog` (nuovo componente) — filtra solo A Seriale, esclude il prodotto corrente
+  * Body PATCH invia SOLO campi cambiati (retro-compat § minimamente invasiva)
+
+### 🟡 P2 — Export CSV storico Arrivi/Spedizioni
+- **Backend nuovo endpoint** `GET /api/admin/export/movimenti?tipo={all|arrivo|spedizione}&date_from&date_to` (JWT admin)
+  * Legge LIVE da `svc.list_receipts_all()` + `svc.list_exits()` (Notion o Gestionale, in base alla Fonte configurata)
+  * CSV con delimitatore `;`, BOM UTF-8 (compatibile Excel/Numbers), colonne: Tipo, Data, Prodotto, Quantità, Unità, Seriale, Cliente, Operatore
+  * Audit log `export.movimenti` con filtri + count
+  * `Content-Disposition: attachment; filename="movimenti_{tipo}_{from}_{to}.csv"`
+- **Frontend nuovo tab** `ExportMovimentiTab` in `AdminExtraTabs.jsx` + voce sidebar Admin "Strumenti → Export CSV" — filtri Tipo/Data + download blob
+
+### File modificati
+- Backend: `notion_service.py` (remove_inventory_serials + update_tracker_row), `server.py` (loop per-item + warnings), `inventory_local.py` (parity dict), `routes/retro_routes.py` (ShipmentPatchBody + target_sn/product logic), `routes/admin_extra_routes.py` (export CSV endpoint)
+- Frontend: `pages/RetroattivitaPage.jsx` (multi-SN + ProductPickerDialog + cambio prodotto), `pages/ChecklistPage.jsx` (toast warnings), `pages/AdminExtraTabs.jsx` (ExportMovimentiTab), `pages/AdminPage.jsx` (voce sidebar)
+
+### Vincoli rispettati
+- ✅ Notion SSOT — struttura NON modificata (0 nuove colonne)
+- ✅ NO testing_agent_v3_fork (test via bash/curl/py-compile/yarn build)
+- ✅ Retroattività chirurgica — nessuna nuova riga Notion creata per modifica multi-SN
+- ✅ Audit obbligatorio per ogni operazione
+
+## Backlog residuo
+- PWA installabile (P2) — manifest + service worker per palmari Zebra
+- Backup/Import JSON impostazioni Admin (P3)
+- Fix bug "Errore conferma in Aggiungi Accessorio (A Quantità)" — NON riprodotto in questa sessione: se ricapita, catturare payload esatto + errore backend per RCA
+
 
 ## F14 (BLOCCHI 1-3) — QR multi-dispositivo, Retroattività responsive, Utenti responsive ✅ (20/02/2026)
 - **BLOCCO 1 — QR Code multi-dispositivo (Spedizioni + Retroattività)**:
