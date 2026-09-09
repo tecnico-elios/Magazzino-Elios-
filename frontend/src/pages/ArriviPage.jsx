@@ -397,7 +397,7 @@ export default function ArriviPage() {
         )}
 
         {/* F8 — Card operative sempre visibili sotto lo ScannerBar. Stile Dashboard, dimensioni leggermente ridotte. */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4" data-testid="arrivi-initial-cards">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4" data-testid="arrivi-initial-cards">
           <button
             type="button"
             onClick={() => { setInitialAction("serial"); setPicker({ filter: "serialized" }); }}

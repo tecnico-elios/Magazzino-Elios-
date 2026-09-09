@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 import auth as auth_mod
 import notion_service
+import event_logger
 
 logger = logging.getLogger(__name__)
 
@@ -272,7 +273,7 @@ async def get_app_settings(db) -> Dict[str, Any]:
         "feedback_seconds": int(doc.get("feedback_seconds", DEFAULT_SETTINGS["feedback_seconds"])),
     }
     # Nested — merge default con quanto salvato
-    for section in ("scanner", "dashboard", "magazzino", "ricerca", "movimenti", "sicurezza", "arrivi", "spedizioni", "general"):
+    for section in ("scanner", "dashboard", "magazzino", "ricerca", "movimenti", "sicurezza", "arrivi", "spedizioni", "retroattivita", "general"):
         result[section] = _merge_section(DEFAULT_SETTINGS[section], doc.get(section))
     # Coerenza: mantieni magazzino.low_stock_threshold allineato al flat top-level
     result["magazzino"]["low_stock_threshold"] = result["low_stock_threshold"]
@@ -285,21 +286,50 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
     # ---------- Audit Log ----------
     @router.post("/audit-logs/clear-all")
     async def clear_all_audit_logs(current=Depends(deps.require_admin)):
-        """F15 §18 — Cancella TUTTI i log del registro attività. Richiede admin."""
+        """F15 §18 — Cancella TUTTI i log del registro attività. Richiede admin.
+        F18: registra CANCELLAZIONE_MASSIVA in app_events (persiste anche dopo clear)."""
         res = await db.audit_logs.delete_many({})
+        await event_logger.log_event(
+            db, category="CANCELLAZIONE", event_type="CANCELLAZIONE_MASSIVA",
+            action="audit_logs.clear_all", level="WARNING", status="SUCCESS",
+            user=current.get("username"), user_role=current.get("role"),
+            endpoint="POST /api/admin/audit-logs/clear-all",
+            resource="audit_logs",
+            message=f"Cancellazione massiva Registro Attività: {res.deleted_count} record eliminati",
+            details={"deleted_count": res.deleted_count},
+        )
         return {"ok": True, "deleted": res.deleted_count}
 
     @router.delete("/audit-logs/{log_id}")
     async def delete_audit_log(log_id: str, current=Depends(deps.require_admin)):
-        """F15 §18 — Cancella un singolo record dal registro attività."""
+        """F15 §18 — Cancella un singolo record dal registro attività.
+        F18: registra CANCELLAZIONE_SINGOLA in app_events con snapshot del record."""
         from bson import ObjectId
         try:
             oid = ObjectId(log_id)
         except Exception:
             raise HTTPException(400, "ID non valido")
+        target = await db.audit_logs.find_one({"_id": oid})
+        target_snapshot = None
+        if target:
+            target_snapshot = {
+                "action": target.get("action"),
+                "actor_username": target.get("actor_username"),
+                "at": target.get("at").isoformat() if isinstance(target.get("at"), datetime) else target.get("at"),
+                "meta_keys": list((target.get("meta") or {}).keys()),
+            }
         res = await db.audit_logs.delete_one({"_id": oid})
         if res.deleted_count == 0:
             raise HTTPException(404, "Record non trovato")
+        await event_logger.log_event(
+            db, category="CANCELLAZIONE", event_type="CANCELLAZIONE_SINGOLA",
+            action="audit_logs.delete_one", level="INFO", status="SUCCESS",
+            user=current.get("username"), user_role=current.get("role"),
+            endpoint=f"DELETE /api/admin/audit-logs/{log_id}",
+            resource="audit_logs",
+            message=f"Record audit {log_id} cancellato",
+            details={"deleted_id": log_id, "snapshot": target_snapshot},
+        )
         return {"ok": True}
 
     @router.get("/system-logs")
@@ -307,48 +337,146 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         limit: int = Query(default=500, ge=10, le=5000),
         level: Optional[str] = Query(default=None),
         q: Optional[str] = Query(default=None),
+        source: Optional[str] = Query(default=None, pattern="^(app|http|all)?$"),
+        category: Optional[str] = Query(default=None),
+        event_type: Optional[str] = Query(default=None),
+        user: Optional[str] = Query(default=None),
+        product: Optional[str] = Query(default=None),
+        serial: Optional[str] = Query(default=None),
+        customer: Optional[str] = Query(default=None),
+        status: Optional[str] = Query(default=None),
+        operation_id: Optional[str] = Query(default=None),
+        date_from: Optional[str] = Query(default=None),
+        date_to: Optional[str] = Query(default=None),
     ):
-        """F15 §19-22 — Registro Log: legge i log supervisor backend (err+out) e li rende
-        consultabili. Redazione automatica di password/token/api_key nei valori.
-        Riuso: nessuna nuova collection, legge direttamente i file di log del sistema."""
-        import re
-        paths = ["/var/log/supervisor/backend.err.log", "/var/log/supervisor/backend.out.log"]
-        lines = []
-        for p in paths:
-            try:
-                with open(p, "r", errors="ignore") as f:
-                    file_lines = f.readlines()[-limit:]
-                    for line in file_lines:
-                        lines.append({"file": p.split("/")[-1], "raw": line.rstrip()})
-            except Exception:
-                pass
-        # Redazione segreti
-        secret_re = re.compile(r'(password|passwd|pwd|token|api[_-]?key|secret|authorization|cookie|bearer)\s*[:=]\s*["\']?([^"\'\s,;]+)', re.IGNORECASE)
-        def redact(s: str) -> str:
-            return secret_re.sub(lambda m: f'{m.group(1)}=***REDACTED***', s)
-        # Estrai livello (INFO/WARNING/ERROR/CRITICAL/DEBUG)
-        lvl_re = re.compile(r'\b(DEBUG|INFO|WARNING|ERROR|CRITICAL)\b')
-        # Estrai timestamp ISO se presente
-        ts_re = re.compile(r'(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?)')
-        out = []
-        for item in lines:
-            raw = redact(item["raw"])
-            m_lvl = lvl_re.search(raw)
-            m_ts = ts_re.search(raw)
-            entry = {
-                "file": item["file"],
-                "timestamp": m_ts.group(1) if m_ts else None,
-                "level": m_lvl.group(1) if m_lvl else "INFO",
-                "message": raw,
-            }
-            if level and entry["level"] != level.upper():
-                continue
-            if q and q.lower() not in raw.lower():
-                continue
-            out.append(entry)
-        # ordina per timestamp decrescente se disponibile, altrimenti lascia ordine file
-        out.reverse()
-        return {"items": out[:limit], "total": len(out)}
+        """F18 — Registro Log unificato: eventi applicativi (`app_events` in Mongo,
+        strutturati, permanenti) + log HTTP/supervisor (file di sistema, best-effort).
+
+        `source`:
+          - `app`  → solo eventi applicativi (default per filtri applicativi)
+          - `http` → solo log HTTP/supervisor
+          - `all` / omesso → entrambi uniti (default retro-compat)
+        """
+        import re as _re
+        results: List[Dict[str, Any]] = []
+        want_app = source in (None, "", "app", "all")
+        want_http = source in (None, "", "http", "all")
+        applicative_filters_used = any([category, event_type, user, product, serial, customer, status, operation_id, date_from, date_to])
+        if applicative_filters_used and source in (None, ""):
+            want_http = False  # se l'utente filtra su campi applicativi, mostra solo app
+
+        # 1) Eventi applicativi da Mongo
+        if want_app:
+            mongo_q: Dict[str, Any] = {}
+            if level: mongo_q["level"] = level.upper()
+            if category: mongo_q["category"] = category.upper()
+            if event_type: mongo_q["event_type"] = event_type.upper()
+            if user: mongo_q["user"] = {"$regex": _re.escape(user), "$options": "i"}
+            if product: mongo_q["product"] = {"$regex": _re.escape(product), "$options": "i"}
+            if serial: mongo_q["$or"] = [
+                {"serial": {"$regex": _re.escape(serial), "$options": "i"}},
+                {"serials": {"$regex": _re.escape(serial), "$options": "i"}},
+            ]
+            if customer: mongo_q["customer"] = {"$regex": _re.escape(customer), "$options": "i"}
+            if status: mongo_q["status"] = status.upper()
+            if operation_id: mongo_q["operation_id"] = operation_id
+            if q:
+                # ricerca testuale full-text semplice su message + action + product + serial
+                rx = {"$regex": _re.escape(q), "$options": "i"}
+                mongo_q.setdefault("$or", []).extend([
+                    {"message": rx}, {"action": rx}, {"product": rx},
+                    {"serial": rx}, {"customer": rx}, {"operation_id": rx},
+                ])
+            if date_from or date_to:
+                ts_range = {}
+                if date_from:
+                    try:
+                        ts_range["$gte"] = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
+                    except Exception:
+                        pass
+                if date_to:
+                    try:
+                        # end-of-day inclusive
+                        _d = datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc)
+                        ts_range["$lte"] = _d.replace(hour=23, minute=59, second=59)
+                    except Exception:
+                        pass
+                if ts_range:
+                    mongo_q["created_at"] = ts_range
+            cursor = db.app_events.find(mongo_q).sort("created_at", -1).limit(limit)
+            async for row in cursor:
+                row.pop("_id", None)
+                if isinstance(row.get("created_at"), datetime):
+                    row["created_at"] = row["created_at"].isoformat()
+                row["source"] = "app"
+                row["file"] = None
+                results.append(row)
+
+        # 2) Log HTTP/supervisor da file (invariato — retro-compat)
+        if want_http:
+            paths = ["/var/log/supervisor/backend.err.log", "/var/log/supervisor/backend.out.log"]
+            lines = []
+            for p in paths:
+                try:
+                    with open(p, "r", errors="ignore") as f:
+                        file_lines = f.readlines()[-limit:]
+                        for line in file_lines:
+                            lines.append({"file": p.split("/")[-1], "raw": line.rstrip()})
+                except Exception:
+                    pass
+            secret_re = _re.compile(r'(password|passwd|pwd|token|api[_-]?key|secret|authorization|cookie|bearer)\s*[:=]\s*["\']?([^"\'\s,;]+)', _re.IGNORECASE)
+            lvl_re = _re.compile(r'\b(DEBUG|INFO|WARNING|ERROR|CRITICAL)\b')
+            ts_re = _re.compile(r'(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?)')
+            http_out = []
+            for item in lines:
+                raw = secret_re.sub(lambda m: f'{m.group(1)}=***REDACTED***', item["raw"])
+                m_lvl = lvl_re.search(raw)
+                m_ts = ts_re.search(raw)
+                entry_level = m_lvl.group(1) if m_lvl else "INFO"
+                if level and entry_level != level.upper():
+                    continue
+                if q and q.lower() not in raw.lower():
+                    continue
+                http_out.append({
+                    "id": None,
+                    "source": "http",
+                    "file": item["file"],
+                    "timestamp": m_ts.group(1) if m_ts else None,
+                    "level": entry_level,
+                    "category": "SYSTEM",
+                    "event_type": "HTTP",
+                    "message": raw,
+                })
+            http_out.reverse()
+            results.extend(http_out)
+
+        # Merge + limit
+        # Ordina per timestamp (fallback: mantiene ordine)
+        def _key(x):
+            t = x.get("timestamp") or x.get("created_at") or ""
+            return str(t)
+        results.sort(key=_key, reverse=True)
+        return {"items": results[:limit], "total": len(results)}
+
+    @router.get("/system-logs/{event_id}")
+    async def system_log_detail(event_id: str):
+        """F18 — Dettaglio completo evento applicativo (solo source=app)."""
+        doc = await db.app_events.find_one({"id": event_id})
+        if not doc:
+            raise HTTPException(404, "Evento non trovato")
+        doc.pop("_id", None)
+        if isinstance(doc.get("created_at"), datetime):
+            doc["created_at"] = doc["created_at"].isoformat()
+        # Correlati (stessa operation_id)
+        related: List[Dict[str, Any]] = []
+        if doc.get("operation_id"):
+            cur = db.app_events.find({"operation_id": doc["operation_id"], "id": {"$ne": event_id}}).sort("created_at", 1).limit(50)
+            async for r in cur:
+                r.pop("_id", None)
+                if isinstance(r.get("created_at"), datetime):
+                    r["created_at"] = r["created_at"].isoformat()
+                related.append(r)
+        return {"item": doc, "related": related}
 
     @router.get("/audit-logs")
     async def list_audit_logs(limit: int = Query(default=200, ge=1, le=1000)):
@@ -771,6 +899,17 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             "action": "product.create",
             "meta": {"product_id": doc["id"], "code": doc["code"]},
         })
+        # F18 — Evento applicativo strutturato
+        await event_logger.log_event(
+            db, category="INVENTARIO", event_type="CREAZIONE_PRODOTTO",
+            action="product.create", level="INFO", status="SUCCESS",
+            user=current_user.get("username"), user_role=current_user.get("role"),
+            endpoint="POST /api/admin/products",
+            product=doc.get("name"), product_code=doc.get("code"),
+            quantity_after=doc.get("quantity"),
+            message=f"Creato prodotto {doc.get('name')} ({doc.get('code')})",
+            details={"product_id": doc["id"], "tipo_gestione": doc.get("tipo_gestione")},
+        )
         doc.pop("_id", None)
         return doc
 
@@ -784,6 +923,7 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             other = await db.products.find_one({"code": updates["code"], "id": {"$ne": product_id}})
             if other:
                 raise HTTPException(409, f"Codice '{updates['code']}' già in uso")
+        prev = await db.products.find_one({"id": product_id})
         r = await db.products.update_one({"id": product_id}, {"$set": updates})
         if r.matched_count == 0:
             raise HTTPException(404, "Prodotto non trovato")
@@ -794,16 +934,59 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             "action": "product.update",
             "meta": {"product_id": product_id, "changes": list(updates.keys())},
         })
+        # F18 — event structured: MODIFICA_PRODOTTO / MODIFICA_QUANTITA / MODIFICA_GESTIONE
+        try:
+            evt_type = "MODIFICA_PRODOTTO"
+            q_before = float((prev or {}).get("quantity") or 0)
+            q_after = q_before
+            q_change = None
+            if "quantity" in updates:
+                q_after = float(updates.get("quantity") or 0)
+                q_change = q_after - q_before
+                if q_after == 0 and q_before > 0:
+                    evt_type = "AZZERAMENTO_QUANTITA"
+                elif q_change > 0:
+                    evt_type = "AUMENTO_QUANTITA"
+                elif q_change < 0:
+                    evt_type = "DIMINUZIONE_QUANTITA"
+                else:
+                    evt_type = "MODIFICA_QUANTITA"
+            elif "tipo_gestione" in updates:
+                evt_type = "MODIFICA_TIPO_GESTIONE"
+            await event_logger.log_event(
+                db, category="INVENTARIO", event_type=evt_type,
+                action="product.update", level="INFO", status="SUCCESS",
+                user=current_user.get("username"), user_role=current_user.get("role"),
+                endpoint=f"PATCH /api/admin/products/{product_id}",
+                product=(prev or {}).get("name"), product_code=(prev or {}).get("code"),
+                quantity_before=q_before if "quantity" in updates else None,
+                quantity_change=q_change,
+                quantity_after=q_after if "quantity" in updates else None,
+                message=f"Modificato prodotto {(prev or {}).get('name')} — campi: {', '.join(updates.keys())}",
+                details={"product_id": product_id, "changes": list(updates.keys())},
+            )
+        except Exception as _e:
+            logger.warning(f"log_event product.update fallito: {_e}")
         doc = await db.products.find_one({"id": product_id})
         doc.pop("_id", None)
         return doc
 
     @router.delete("/products/{product_id}")
     async def delete_product(product_id: str, current_user=Depends(deps.require_admin)):
+        prev = await db.products.find_one({"id": product_id})
         r = await db.products.delete_one({"id": product_id})
         if r.deleted_count == 0:
             raise HTTPException(404, "Prodotto non trovato")
         await db.product_serials.delete_many({"product_id": product_id})
+        await event_logger.log_event(
+            db, category="INVENTARIO", event_type="ELIMINAZIONE_PRODOTTO",
+            action="product.delete", level="WARNING", status="SUCCESS",
+            user=current_user.get("username"), user_role=current_user.get("role"),
+            endpoint=f"DELETE /api/admin/products/{product_id}",
+            product=(prev or {}).get("name"), product_code=(prev or {}).get("code"),
+            message=f"Eliminato prodotto {(prev or {}).get('name')} ({(prev or {}).get('code')})",
+            details={"product_id": product_id},
+        )
         await db.audit_logs.insert_one({
             "at": datetime.now(timezone.utc),
             "actor_id": str(current_user["_id"]),

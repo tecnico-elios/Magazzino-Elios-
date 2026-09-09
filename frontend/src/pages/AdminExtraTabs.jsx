@@ -132,25 +132,68 @@ export function AuditLogTab() {
   );
 }
 
-// F15 §19-22 — Registro Log Sistema — visualizzatore log tecnici backend
+// F18 (26/02/2026) — Registro Log applicativo + HTTP con filtri strutturati e dettaglio.
 export function SystemLogsTab() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [level, setLevel] = useState("");
-  const [expanded, setExpanded] = useState(null);
+  const [source, setSource] = useState(""); // "" | app | http | all
+  const [category, setCategory] = useState("");
+  const [eventType, setEventType] = useState("");
+  const [userF, setUserF] = useState("");
+  const [productF, setProductF] = useState("");
+  const [serialF, setSerialF] = useState("");
+  const [customerF, setCustomerF] = useState("");
+  const [statusF, setStatusF] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [advanced, setAdvanced] = useState(false);
+  const [detail, setDetail] = useState(null); // {item, related[]}
+  const [detailLoading, setDetailLoading] = useState(false);
+
   const load = async () => {
     setLoading(true);
     try {
       const params = { limit: 1000 };
       if (level) params.level = level;
       if (q.trim()) params.q = q.trim();
+      if (source) params.source = source;
+      if (category) params.category = category;
+      if (eventType) params.event_type = eventType;
+      if (userF.trim()) params.user = userF.trim();
+      if (productF.trim()) params.product = productF.trim();
+      if (serialF.trim()) params.serial = serialF.trim();
+      if (customerF.trim()) params.customer = customerF.trim();
+      if (statusF) params.status = statusF;
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
       const { data } = await axios.get(`${API}/admin/system-logs`, { params });
       setItems(data.items || []);
     } catch (e) { toast.error("Errore lettura log", { description: formatError(e) }); }
     finally { setLoading(false); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  const openDetail = async (r) => {
+    // Row HTTP → apri inline
+    if (r.source !== "app" || !r.id) {
+      setDetail({ item: r, related: [], httpOnly: true });
+      return;
+    }
+    setDetailLoading(true);
+    try {
+      const { data } = await axios.get(`${API}/admin/system-logs/${r.id}`);
+      setDetail({ item: data.item, related: data.related || [] });
+    } catch (e) { toast.error("Dettaglio non disponibile", { description: formatError(e) }); }
+    finally { setDetailLoading(false); }
+  };
+
+  const clearFilters = () => {
+    setQ(""); setLevel(""); setSource(""); setCategory(""); setEventType("");
+    setUserF(""); setProductF(""); setSerialF(""); setCustomerF(""); setStatusF("");
+    setDateFrom(""); setDateTo("");
+  };
 
   const levelBadge = (lvl) => {
     const c = {
@@ -162,19 +205,51 @@ export function SystemLogsTab() {
     }[lvl] || "bg-slate-100 text-slate-600 border-slate-200";
     return <Badge className={`${c} text-[10px] font-mono-tight`}>{lvl}</Badge>;
   };
+  const statusBadge = (s) => {
+    if (!s) return null;
+    const c = {
+      SUCCESS: "bg-emerald-100 text-emerald-800 border-emerald-200",
+      FAILURE: "bg-red-100 text-red-800 border-red-200",
+      WARNING: "bg-amber-100 text-amber-800 border-amber-200",
+      PARTIAL: "bg-orange-100 text-orange-800 border-orange-200",
+    }[s] || "bg-slate-100 text-slate-600 border-slate-200";
+    return <Badge className={`${c} text-[10px] font-mono-tight`}>{s}</Badge>;
+  };
+  const catBadge = (c) => {
+    if (!c) return null;
+    const map = {
+      SPEDIZIONE: "bg-purple-100 text-purple-800",
+      ARRIVO: "bg-emerald-100 text-emerald-800",
+      INVENTARIO: "bg-indigo-100 text-indigo-800",
+      CANCELLAZIONE: "bg-rose-100 text-rose-800",
+      ANOMALIA: "bg-orange-100 text-orange-800",
+      AUTH: "bg-cyan-100 text-cyan-800",
+      NOTION: "bg-sky-100 text-sky-800",
+      RETRO: "bg-amber-100 text-amber-800",
+      SYSTEM: "bg-slate-200 text-slate-700",
+    };
+    return <Badge className={`${map[c] || "bg-slate-100 text-slate-700"} text-[10px] font-mono-tight`}>{c}</Badge>;
+  };
 
   return (
     <div className="space-y-3" data-testid="system-logs-tab">
+      {/* Barra filtri principale */}
       <div className="flex flex-wrap items-center gap-2">
         <Input
-          placeholder="Cerca testo, endpoint, ID…"
+          placeholder="Cerca testo, endpoint, ID, seriale, cliente…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") load(); }}
           className="h-9 max-w-xs"
           data-testid="syslog-q"
         />
-        <select value={level} onChange={(e) => { setLevel(e.target.value); }} className="h-9 border border-slate-300 rounded-md px-2 text-sm" data-testid="syslog-level">
+        <select value={source} onChange={(e) => setSource(e.target.value)} className="h-9 border border-slate-300 rounded-md px-2 text-sm bg-white" data-testid="syslog-source">
+          <option value="">Tutte le sorgenti</option>
+          <option value="app">Applicativo</option>
+          <option value="http">HTTP / Sistema</option>
+          <option value="all">Entrambe</option>
+        </select>
+        <select value={level} onChange={(e) => setLevel(e.target.value)} className="h-9 border border-slate-300 rounded-md px-2 text-sm bg-white" data-testid="syslog-level">
           <option value="">Tutti i livelli</option>
           <option>DEBUG</option>
           <option>INFO</option>
@@ -182,46 +257,204 @@ export function SystemLogsTab() {
           <option>ERROR</option>
           <option>CRITICAL</option>
         </select>
-        <Button size="sm" onClick={load} disabled={loading} data-testid="syslog-reload">
-          <ArrowClockwise size={14} className={loading ? "animate-spin" : ""} /> {loading ? "…" : "Aggiorna"}
+        <select value={category} onChange={(e) => setCategory(e.target.value)} className="h-9 border border-slate-300 rounded-md px-2 text-sm bg-white" data-testid="syslog-category">
+          <option value="">Tutte le categorie</option>
+          <option>INVENTARIO</option>
+          <option>ARRIVO</option>
+          <option>SPEDIZIONE</option>
+          <option>CANCELLAZIONE</option>
+          <option>ANOMALIA</option>
+          <option>AUTH</option>
+          <option>NOTION</option>
+          <option>RETRO</option>
+          <option>SYSTEM</option>
+        </select>
+        <Button size="sm" variant="outline" onClick={() => setAdvanced(!advanced)} data-testid="syslog-advanced-toggle">
+          {advanced ? "Filtri base" : "Filtri avanzati"}
         </Button>
-        <div className="text-xs text-slate-500 ml-auto">{items.length} righe · password/token/api_key redatti</div>
+        <Button size="sm" onClick={load} disabled={loading} data-testid="syslog-reload">
+          <ArrowClockwise size={14} className={loading ? "animate-spin" : ""} /> {loading ? "…" : "Applica"}
+        </Button>
+        <Button size="sm" variant="outline" onClick={clearFilters} data-testid="syslog-clear">Reset</Button>
+        <div className="text-xs text-slate-500 ml-auto">{items.length} righe · segreti redatti</div>
       </div>
+
+      {/* Filtri avanzati */}
+      {advanced && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 p-3 bg-slate-50 border border-slate-200 rounded-md" data-testid="syslog-advanced">
+          <Input placeholder="Utente" value={userF} onChange={(e) => setUserF(e.target.value)} className="h-9" data-testid="syslog-user" />
+          <Input placeholder="Prodotto" value={productF} onChange={(e) => setProductF(e.target.value)} className="h-9" data-testid="syslog-product" />
+          <Input placeholder="Seriale" value={serialF} onChange={(e) => setSerialF(e.target.value)} className="h-9 font-mono-tight" data-testid="syslog-serial" />
+          <Input placeholder="Cliente" value={customerF} onChange={(e) => setCustomerF(e.target.value)} className="h-9" data-testid="syslog-customer" />
+          <select value={statusF} onChange={(e) => setStatusF(e.target.value)} className="h-9 border border-slate-300 rounded-md px-2 text-sm bg-white" data-testid="syslog-status">
+            <option value="">Tutti gli stati</option>
+            <option>SUCCESS</option>
+            <option>FAILURE</option>
+            <option>WARNING</option>
+            <option>PARTIAL</option>
+          </select>
+          <Input placeholder="Event Type" value={eventType} onChange={(e) => setEventType(e.target.value.toUpperCase())} className="h-9 font-mono-tight uppercase" data-testid="syslog-event-type" />
+          <div className="col-span-2 flex items-center gap-2">
+            <Label className="text-[10px] uppercase text-slate-500 shrink-0">Dal</Label>
+            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-9" data-testid="syslog-date-from" />
+          </div>
+          <div className="col-span-2 flex items-center gap-2">
+            <Label className="text-[10px] uppercase text-slate-500 shrink-0">Al</Label>
+            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-9" data-testid="syslog-date-to" />
+          </div>
+        </div>
+      )}
+
+      {/* Tabella log */}
       <div className="bg-slate-950 text-slate-100 border border-slate-800 rounded-md overflow-x-auto max-h-[70vh] overflow-y-auto">
         <table className="w-full text-xs font-mono-tight">
           <thead className="sticky top-0 bg-slate-900 text-slate-400 uppercase text-[10px] tracking-wider">
             <tr>
-              <th className="text-left px-3 py-2 w-20">Livello</th>
+              <th className="text-left px-3 py-2 w-24">Livello</th>
               <th className="text-left px-3 py-2 w-40">Timestamp</th>
-              <th className="text-left px-3 py-2 w-32">File</th>
+              <th className="text-left px-3 py-2 w-28">Categoria</th>
+              <th className="text-left px-3 py-2 w-32">Evento</th>
+              <th className="text-left px-3 py-2 w-24">Utente</th>
               <th className="text-left px-3 py-2">Messaggio</th>
+              <th className="text-left px-3 py-2 w-24">Stato</th>
             </tr>
           </thead>
           <tbody>
             {items.map((r, i) => (
-              <>
-                <tr key={i} className="border-t border-slate-800 hover:bg-slate-900 cursor-pointer" onClick={() => setExpanded(expanded === i ? null : i)} data-testid={`syslog-row-${i}`}>
-                  <td className="px-3 py-1.5">{levelBadge(r.level)}</td>
-                  <td className="px-3 py-1.5 text-slate-400">{r.timestamp || "—"}</td>
-                  <td className="px-3 py-1.5 text-slate-500">{r.file}</td>
-                  <td className="px-3 py-1.5 text-slate-200 truncate max-w-[600px]">{r.message}</td>
-                </tr>
-                {expanded === i && (
-                  <tr className="bg-slate-900 border-t border-slate-800">
-                    <td colSpan={4} className="px-3 py-3">
-                      <pre className="whitespace-pre-wrap break-all text-slate-100 text-xs">{r.message}</pre>
-                    </td>
-                  </tr>
-                )}
-              </>
+              <tr
+                key={r.id || `http-${i}`}
+                className="border-t border-slate-800 hover:bg-slate-900 cursor-pointer"
+                onClick={() => openDetail(r)}
+                data-testid={`syslog-row-${i}`}
+              >
+                <td className="px-3 py-1.5">{levelBadge(r.level)}</td>
+                <td className="px-3 py-1.5 text-slate-400">{r.timestamp || r.created_at || "—"}</td>
+                <td className="px-3 py-1.5">{catBadge(r.category)}</td>
+                <td className="px-3 py-1.5 text-slate-300 truncate max-w-[180px]">{r.event_type || "—"}</td>
+                <td className="px-3 py-1.5 text-slate-300 truncate max-w-[120px]">{r.user || "—"}</td>
+                <td className="px-3 py-1.5 text-slate-200 truncate max-w-[500px]">
+                  {r.message || r.action || "—"}
+                  {r.product && <span className="ml-2 text-emerald-300">• {r.product}</span>}
+                  {r.serial && <span className="ml-2 text-amber-300">SN {r.serial}</span>}
+                </td>
+                <td className="px-3 py-1.5">{statusBadge(r.status)}</td>
+              </tr>
             ))}
             {items.length === 0 && !loading && (
-              <tr><td colSpan={4} className="px-3 py-8 text-center text-slate-500">Nessun log disponibile.</td></tr>
+              <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-500">Nessun log disponibile.</td></tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {/* Dettaglio evento */}
+      {detail && (
+        <SystemLogDetailDialog
+          detail={detail}
+          onClose={() => setDetail(null)}
+          loading={detailLoading}
+        />
+      )}
     </div>
+  );
+}
+
+function SystemLogDetailDialog({ detail, onClose, loading }) {
+  const r = detail?.item || {};
+  const isApp = r.source === "app";
+  const kv = (label, val) => (val === null || val === undefined || val === "") ? null : (
+    <div className="grid grid-cols-3 gap-2 py-1 border-b border-slate-100 last:border-0">
+      <div className="text-[11px] uppercase text-slate-500 font-semibold">{label}</div>
+      <div className="col-span-2 text-sm text-slate-900 break-all">{typeof val === "object" ? JSON.stringify(val) : String(val)}</div>
+    </div>
+  );
+  return (
+    <Dialog open={true} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-3xl" data-testid="syslog-detail">
+        <DialogHeader>
+          <DialogTitle>Dettaglio evento log</DialogTitle>
+          <DialogDescription>
+            {isApp ? "Evento applicativo strutturato" : "Log HTTP / sistema"} · segreti automaticamente redatti
+          </DialogDescription>
+        </DialogHeader>
+        {loading ? (
+          <div className="py-6 text-center text-slate-500">Caricamento…</div>
+        ) : (
+          <div className="space-y-3">
+            {/* Dati applicativi */}
+            <div className="et-card p-3">
+              <div className="text-[11px] uppercase tracking-wider font-bold text-slate-700 mb-2">Dati applicativi</div>
+              {kv("Timestamp", r.timestamp || r.created_at)}
+              {kv("Livello", r.level)}
+              {kv("Categoria", r.category)}
+              {kv("Event Type", r.event_type)}
+              {kv("Action", r.action)}
+              {kv("Utente", r.user)}
+              {kv("Ruolo", r.user_role)}
+              {kv("Prodotto", r.product)}
+              {kv("Codice prodotto", r.product_code)}
+              {kv("Seriale", r.serial)}
+              {kv("Seriali", r.serials)}
+              {kv("Quantità prima", r.quantity_before)}
+              {kv("Variazione", r.quantity_change)}
+              {kv("Quantità dopo", r.quantity_after)}
+              {kv("Cliente", r.customer)}
+              {kv("Preso da", r.taken_by)}
+              {kv("Stato", r.status)}
+              {kv("Operation ID", r.operation_id)}
+              {kv("Messaggio", r.message)}
+            </div>
+
+            {/* Dati tecnici */}
+            {(r.endpoint || r.stack_trace || r.file || r.details) && (
+              <div className="et-card p-3 bg-slate-50">
+                <div className="text-[11px] uppercase tracking-wider font-bold text-slate-700 mb-2">Dati tecnici</div>
+                {kv("Endpoint", r.endpoint)}
+                {kv("File log", r.file)}
+                {kv("Source", r.source)}
+                {r.details && (
+                  <div className="mt-2">
+                    <div className="text-[11px] uppercase text-slate-500 font-semibold mb-1">Details</div>
+                    <pre className="text-[11px] bg-slate-900 text-slate-100 p-2 rounded-md overflow-x-auto whitespace-pre-wrap break-all">
+                      {JSON.stringify(r.details, null, 2)}
+                    </pre>
+                  </div>
+                )}
+                {r.stack_trace && (
+                  <div className="mt-2">
+                    <div className="text-[11px] uppercase text-slate-500 font-semibold mb-1">Stack trace</div>
+                    <pre className="text-[11px] bg-slate-900 text-red-200 p-2 rounded-md overflow-x-auto whitespace-pre-wrap break-all">
+                      {r.stack_trace}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Eventi correlati (stessa operation_id) */}
+            {detail?.related?.length > 0 && (
+              <div className="et-card p-3">
+                <div className="text-[11px] uppercase tracking-wider font-bold text-slate-700 mb-2">
+                  Eventi correlati (Operation ID: {r.operation_id}) — {detail.related.length}
+                </div>
+                <div className="space-y-1 max-h-56 overflow-y-auto">
+                  {detail.related.map((rel) => (
+                    <div key={rel.id} className="text-xs bg-white border border-slate-200 rounded px-2 py-1.5 flex items-center gap-2">
+                      <span className="text-slate-500 font-mono-tight">{rel.timestamp?.slice(11, 19) || "—"}</span>
+                      <Badge className="text-[9px] bg-slate-100 text-slate-700 border-slate-200">{rel.event_type}</Badge>
+                      <span className="truncate flex-1">{rel.message}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Chiudi</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

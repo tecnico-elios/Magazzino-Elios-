@@ -20,6 +20,7 @@ import notion_service
 import inventory_local
 from inventory_router import get_svc as _get_inv_svc, get_source as _get_inv_source
 import auth as auth_mod
+import event_logger
 from routes import auth_routes, admin_users_routes, admin_extra_routes, qr_routes, retro_routes, orders_routes
 try:
     from zoneinfo import ZoneInfo
@@ -953,6 +954,49 @@ async def submit_checklist(
     )
     await db.checklists.insert_one(record.model_dump())
 
+    # F18 — Log applicativo strutturato SPEDIZIONE (per prodotto/seriale)
+    try:
+        op_id = event_logger.new_operation_id("SHIP")
+        for it in filled:
+            mv = next((m for m in movements if m["page_id"] == it.page_id), {})
+            before_q = mv.get("before")
+            after_q = mv.get("after")
+            change_q = -abs(float(it.quantity))
+            common = dict(
+                category="SPEDIZIONE", event_type="SPEDIZIONE",
+                action="submit_checklist", level="INFO", status="SUCCESS",
+                user=payload.operator, user_role=(current_user.get("role") or None),
+                product=it.name, product_code=None,
+                customer=payload.structure, taken_by=payload.taken_by,
+                operation_id=op_id, endpoint="POST /api/checklist/send",
+                quantity_before=before_q, quantity_change=change_q, quantity_after=after_q,
+            )
+            if it.serialized and it.serials:
+                for sn in it.serials:
+                    await event_logger.log_event(
+                        db, **common, serial=sn,
+                        message=f"Spedito seriale {sn} di {it.name} a {payload.structure}",
+                        details={"serial_removed_from_inventory": True, "checklist_id": record.id},
+                    )
+            else:
+                await event_logger.log_event(
+                    db, **common,
+                    message=f"Spedizione {it.quantity} {it.unit or 'pz'} di {it.name} a {payload.structure}",
+                    details={"checklist_id": record.id},
+                )
+        if inventory_warnings:
+            for w in inventory_warnings:
+                await event_logger.log_event(
+                    db, category="SPEDIZIONE", event_type="INVENTARIO_WARNING",
+                    action="submit_checklist.inventory_update",
+                    level="WARNING", status="WARNING",
+                    user=payload.operator, operation_id=op_id,
+                    endpoint="POST /api/checklist/send",
+                    message=w,
+                )
+    except Exception as _e:
+        logging.warning(f"log_event SPEDIZIONE fallito: {_e}")
+
     return {
         "status": "success",
         "message": f"Spedizione confermata. Magazzino Notion aggiornato ({len(movements)} articoli).",
@@ -1392,6 +1436,36 @@ async def submit_arrivo(
     )
     await db.arrivi.insert_one(record.model_dump())
 
+    # F18 — Log applicativo strutturato ARRIVO (per prodotto/seriale)
+    try:
+        op_id = event_logger.new_operation_id("RCV")
+        for it in filled:
+            before_q = float(fresh_arr.get(it.page_id, {}).get("quantity") or 0)
+            after_q = before_q + float(it.quantity)
+            common = dict(
+                category="ARRIVO", event_type="ARRIVO",
+                action="submit_arrivo", level="INFO", status="SUCCESS",
+                user=payload.operator, user_role=(current_user.get("role") or None),
+                product=it.name, customer=payload.fornitore,
+                operation_id=op_id, endpoint="POST /api/arrivi/send",
+                quantity_before=before_q, quantity_change=float(it.quantity), quantity_after=after_q,
+            )
+            if it.serialized and it.serials:
+                for sn in it.serials:
+                    await event_logger.log_event(
+                        db, **common, serial=sn,
+                        message=f"Ricevuto seriale {sn} di {it.name} da {payload.fornitore}",
+                        details={"serial_added_to_inventory": True, "arrivo_id": record.id},
+                    )
+            else:
+                await event_logger.log_event(
+                    db, **common,
+                    message=f"Ricevute {it.quantity} {it.unit or 'pz'} di {it.name} da {payload.fornitore}",
+                    details={"arrivo_id": record.id},
+                )
+    except Exception as _e:
+        logging.warning(f"log_event ARRIVO fallito: {_e}")
+
     return {
         "status": "success",
         "message": f"Arrivo registrato. Magazzino aggiornato ({len(filled)} prodotti, {int(sum(i.quantity for i in filled))} pz).",
@@ -1637,6 +1711,8 @@ async def _phase2_startup_indexes():
         # F14 — QR associations (persistente, univocità globale su qr_code)
         await db.qr_associations.create_index("qr_code_lower", unique=True)
         await db.qr_associations.create_index("serial_lower")
+        # F18 — Registro Log applicativo (eventi strutturati permanenti)
+        await event_logger.ensure_indexes(db)
     except Exception as e:
         logging.error(f"MongoDB index creation failed: {e}")
 

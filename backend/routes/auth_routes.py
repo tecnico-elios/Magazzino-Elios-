@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field, ConfigDict
 
 import auth as auth_mod
+import event_logger
 
 logger = logging.getLogger(__name__)
 
@@ -161,11 +162,31 @@ def build_router(db, deps: auth_mod.AuthDependencies, send_email_fn=None, fronte
         user = await db.users.find_one({"username": username})
         if not user:
             await _record_login_failure(db, username)
+            await event_logger.log_event(
+                db, category="AUTH", event_type="LOGIN_FALLITO",
+                action="auth.login", level="WARNING", status="FAILURE",
+                user=username, endpoint="POST /api/auth/login",
+                message=f"Login fallito: utente {username} non trovato",
+            )
             raise HTTPException(401, "Credenziali non valide")
         if not user.get("active", True):
+            await event_logger.log_event(
+                db, category="AUTH", event_type="LOGIN_FALLITO",
+                action="auth.login", level="WARNING", status="FAILURE",
+                user=username, user_role=user.get("role"),
+                endpoint="POST /api/auth/login",
+                message=f"Login fallito: utente {username} disattivato",
+            )
             raise HTTPException(403, "Utente disattivato — contattare l'amministratore")
         if not auth_mod.verify_password(body.password, user.get("password_hash", "")):
             await _record_login_failure(db, username)
+            await event_logger.log_event(
+                db, category="AUTH", event_type="LOGIN_FALLITO",
+                action="auth.login", level="WARNING", status="FAILURE",
+                user=username, user_role=user.get("role"),
+                endpoint="POST /api/auth/login",
+                message=f"Login fallito: password errata per {username}",
+            )
             raise HTTPException(401, "Credenziali non valide")
         await _record_login_success(db, username)
         await db.users.update_one(
@@ -182,6 +203,14 @@ def build_router(db, deps: auth_mod.AuthDependencies, send_email_fn=None, fronte
             remember=bool(body.remember_me),
             sid=sid,
         )
+        await event_logger.log_event(
+            db, category="AUTH", event_type="LOGIN_RIUSCITO",
+            action="auth.login", level="INFO", status="SUCCESS",
+            user=username, user_role=user.get("role"),
+            endpoint="POST /api/auth/login",
+            message=f"Login riuscito: {username}",
+            details={"remember_me": bool(body.remember_me)},
+        )
         return {
             "token": token,
             "user": auth_mod.public_user(user),
@@ -197,6 +226,13 @@ def build_router(db, deps: auth_mod.AuthDependencies, send_email_fn=None, fronte
         sid = current.get("_sid")
         if sid:
             await db.active_sessions.delete_one({"sid": sid})
+        await event_logger.log_event(
+            db, category="AUTH", event_type="LOGOUT",
+            action="auth.logout", level="INFO", status="SUCCESS",
+            user=current.get("username"), user_role=current.get("role"),
+            endpoint="POST /api/auth/logout",
+            message=f"Logout: {current.get('username')}",
+        )
         return {"ok": True}
 
     @router.get("/me")
