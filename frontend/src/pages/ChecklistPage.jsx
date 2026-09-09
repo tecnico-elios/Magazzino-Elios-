@@ -15,6 +15,7 @@ import { Textarea } from "../components/ui/textarea";
 import { Badge } from "../components/ui/badge";
 import { fetchServerToday } from "../lib/tz";
 import BarcodeScanner from "../components/BarcodeScanner";
+import { parseDazeQr } from "../lib/qr";
 import {
   ArrowSquareOut,
   Trash,
@@ -902,8 +903,9 @@ export default function ChecklistPage() {
             label={`Scansiona QR Code — SN ${qrQueue[0]?.serial || ""}`}
             onDetected={(val) => {
               setQrScanOpen(false);
-              const v = (val || "").trim();
-              if (v) setQrValue(v);
+              // F15 §10-15 — parser QR Daze: estrae serial da JSON {serial,puk}
+              const { serial } = parseDazeQr(val);
+              if (serial) setQrValue(serial);
             }}
           />
         </Dialog>

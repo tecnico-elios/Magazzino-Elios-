@@ -30,6 +30,7 @@ const fmtDateLegacy = (v) => fmtDate(v);
 export function AuditLogTab() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
   const load = async () => {
     setLoading(true);
     try {
@@ -40,13 +41,35 @@ export function AuditLogTab() {
   };
   useEffect(() => { load(); }, []);
 
+  const deleteOne = async (id) => {
+    if (!window.confirm("Eliminare questo record dal registro attività?")) return;
+    try {
+      await axios.delete(`${API}/admin/audit-logs/${id}`);
+      toast.success("Record eliminato");
+      load();
+    } catch (e) { toast.error("Eliminazione fallita", { description: formatError(e) }); }
+  };
+  const clearAll = async () => {
+    try {
+      const { data } = await axios.post(`${API}/admin/audit-logs/clear-all`);
+      toast.success(`Registro attività svuotato (${data.deleted} record)`);
+      setConfirmClearAll(false);
+      load();
+    } catch (e) { toast.error("Cancellazione fallita", { description: formatError(e) }); }
+  };
+
   return (
     <div className="space-y-3" data-testid="audit-log-tab">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="text-xs uppercase tracking-wider text-slate-500">{items.length} eventi</div>
-        <Button variant="outline" size="sm" onClick={load} disabled={loading} data-testid="reload-audit-btn">
-          <ArrowClockwise size={14} className={loading ? "animate-spin" : ""} />
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={load} disabled={loading} data-testid="reload-audit-btn">
+            <ArrowClockwise size={14} className={loading ? "animate-spin" : ""} />
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setConfirmClearAll(true)} disabled={loading || items.length === 0} className="border-red-300 text-red-700 hover:bg-red-50" data-testid="clear-all-audit-btn">
+            🗑 Cancella tutto
+          </Button>
+        </div>
       </div>
       <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
         <table className="w-full min-w-[720px] text-sm">
@@ -56,6 +79,7 @@ export function AuditLogTab() {
               <th className="text-left px-3 py-2">Attore</th>
               <th className="text-left px-3 py-2">Azione</th>
               <th className="text-left px-3 py-2">Dettaglio</th>
+              <th className="text-right px-3 py-2">Azioni</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -73,14 +97,37 @@ export function AuditLogTab() {
                     ? JSON.stringify(r.meta)
                     : <span className="text-slate-400">—</span>}
                 </td>
+                <td className="px-3 py-2 text-right">
+                  <Button variant="outline" size="sm" onClick={() => deleteOne(r._id)} className="h-7 border-red-300 text-red-700 hover:bg-red-50" data-testid={`delete-audit-${r._id}`} title="Elimina record">
+                    🗑
+                  </Button>
+                </td>
               </tr>
             ))}
             {items.length === 0 && !loading && (
-              <tr><td colSpan={4} className="px-3 py-6 text-center text-slate-400">Nessun evento.</td></tr>
+              <tr><td colSpan={5} className="px-3 py-6 text-center text-slate-400">Nessun evento.</td></tr>
             )}
           </tbody>
         </table>
       </div>
+      {confirmClearAll && (
+        <Dialog open={true} onOpenChange={(v) => !v && setConfirmClearAll(false)}>
+          <DialogContent className="max-w-md" data-testid="clear-all-audit-dialog">
+            <DialogHeader>
+              <DialogTitle className="text-red-700">Cancellare tutto il Registro attività?</DialogTitle>
+              <DialogDescription>
+                Verranno eliminati definitivamente <b>{items.length}</b> record. Questa azione non tocca Inventario, Spedizioni, Movimenti o Notion.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button variant="outline" onClick={() => setConfirmClearAll(false)} data-testid="clear-all-cancel">Annulla</Button>
+              <Button onClick={clearAll} className="bg-red-600 hover:bg-red-700 text-white" data-testid="clear-all-confirm">
+                🗑 Cancella tutto
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

@@ -11,6 +11,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "../components/ui/dialog";
 import { ArrowUUpLeft, MagnifyingGlass, Warning, PencilSimple, Prohibit, Camera, Trash } from "@phosphor-icons/react";
+import { parseDazeQr } from "../lib/qr";
 import BarcodeScanner from "../components/BarcodeScanner";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -457,10 +458,11 @@ function EditDialog({ row, kind, onClose, onDone }) {
         label="Scansiona QR Code"
         onDetected={async (val) => {
           setQrScannerOpen(false);
-          const v = (val || "").trim();
-          if (!v) return;
-          setNewQr(v);
-          await verifyQr(v);
+          // F15 §10-15 — QR Daze: se JSON {serial,puk} estrai serial (PUK ignorato in modifica QR)
+          const { serial } = parseDazeQr(val);
+          if (!serial) return;
+          setNewQr(serial);
+          await verifyQr(serial);
         }}
       />
     </Dialog>
@@ -790,7 +792,9 @@ function AddForgottenItem({ row, kind, onDone }) {
         onClose={() => setScanFor(null)}
         label={scanFor === "qr" ? "Scansiona QR Code" : "Scansiona seriale"}
         onDetected={(val) => {
-          const v = (val || "").trim();
+          // F15 §10-15 — parser QR Daze per seriali/QR retroattivi
+          const parsed = parseDazeQr(val);
+          const v = parsed.serial || "";
           if (scanFor === "sn") setAddSn(v);
           else if (scanFor === "qr") setAddQr(v);
           setScanFor(null);

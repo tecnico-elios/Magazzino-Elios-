@@ -5,6 +5,7 @@ import { Button } from "./ui/button";
 import { CheckCircle, Warning, X, Plus, Minus, Trash, Camera } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import BarcodeScanner from "./BarcodeScanner";
+import { parseDazeQr } from "../lib/qr";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -181,11 +182,15 @@ export default function SerialCollector({ pending, mode, existingSerials = [], o
   };
 
   const onCameraDetected = (idx, code) => {
-    const value = (code || "").toString().trim();
+    // F15 §10-15 — Parser QR Daze: se il QR contiene JSON {serial, puk} estrae solo il seriale.
+    // I QR con solo seriale funzionano normalmente (fallback).
+    const parsed = parseDazeQr(code);
+    const value = parsed.serial || "";
     setCameraFor(null);
     if (!value) return;
-    // Aggiorna il valore e valida immediatamente con la stessa pipeline (solo Spedizioni).
-    // In Arrivi il seriale viene solo scritto nel campo — la validazione live è disattivata.
+    if (parsed.puk) {
+      toast.success(`QR Daze: SN + PUK riconosciuti`, { description: `PUK: ${parsed.puk}` });
+    }
     setSerial(idx, value);
     if (mode !== "arrivi") validateOne(idx, value);
   };

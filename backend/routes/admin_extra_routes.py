@@ -283,6 +283,25 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
     router = APIRouter(prefix="/admin", tags=["admin-extra"], dependencies=[Depends(deps.require_admin)])
 
     # ---------- Audit Log ----------
+    @router.post("/audit-logs/clear-all")
+    async def clear_all_audit_logs(current=Depends(deps.require_admin)):
+        """F15 §18 — Cancella TUTTI i log del registro attività. Richiede admin."""
+        res = await db.audit_logs.delete_many({})
+        return {"ok": True, "deleted": res.deleted_count}
+
+    @router.delete("/audit-logs/{log_id}")
+    async def delete_audit_log(log_id: str, current=Depends(deps.require_admin)):
+        """F15 §18 — Cancella un singolo record dal registro attività."""
+        from bson import ObjectId
+        try:
+            oid = ObjectId(log_id)
+        except Exception:
+            raise HTTPException(400, "ID non valido")
+        res = await db.audit_logs.delete_one({"_id": oid})
+        if res.deleted_count == 0:
+            raise HTTPException(404, "Record non trovato")
+        return {"ok": True}
+
     @router.get("/audit-logs")
     async def list_audit_logs(limit: int = Query(default=200, ge=1, le=1000)):
         cursor = db.audit_logs.find({}).sort("at", -1).limit(limit)

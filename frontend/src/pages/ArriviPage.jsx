@@ -415,8 +415,8 @@ export default function ArriviPage() {
           </button>
           <button
             type="button"
-            onClick={() => { setInitialAction("quantity"); setPicker({ filter: "quantity" }); }}
-            data-testid="arrivi-card-quantita"
+            onClick={() => setShowQty(true)}
+            data-testid="arrivi-card-qty"
             className="group relative overflow-hidden rounded-xl p-5 sm:p-6 text-left text-white border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 hover:border-sky-400/50 transition-all shadow-[0_10px_40px_-15px_rgba(2,6,23,0.5)] hover:shadow-[0_20px_60px_-15px_rgba(56,189,248,0.30)]"
           >
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(56,189,248,0.18),transparent_55%)]" aria-hidden />
@@ -428,21 +428,7 @@ export default function ArriviPage() {
               <div className="text-slate-300/80 text-xs mt-1">Pezzi senza seriali</div>
             </div>
           </button>
-          <button
-            type="button"
-            onClick={() => { setRientroDialog({ open: true, value: "", cameraOpen: false }); }}
-            data-testid="arrivi-card-reintegra"
-            className="group relative overflow-hidden rounded-xl p-5 sm:p-6 text-left text-white border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 hover:border-amber-300/60 transition-all shadow-[0_10px_40px_-15px_rgba(2,6,23,0.5)] hover:shadow-[0_20px_60px_-15px_rgba(250,204,21,0.28)]"
-          >
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(250,204,21,0.18),transparent_55%)]" aria-hidden />
-            <div className="relative">
-              <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-amber-400/15 border border-amber-300/30 text-amber-300">
-                <MagnifyingGlass size={22} weight="bold" />
-              </div>
-              <div className="text-lg sm:text-xl font-display font-black mt-3 tracking-tight">REINTEGRA SERIALE</div>
-              <div className="text-slate-300/80 text-xs mt-1">Seriale già uscito da reintegrare</div>
-            </div>
-          </button>
+          {/* F15 §17 — Card "REINTEGRA SERIALE" RIMOSSA dalla UI su richiesta utente. */}
         </div>
         {/* Contesto: modello serializzato selezionato — SOLO banner, i picker piccoli sono
             stati rimossi (F8: le card grandi sostituiscono i pulsanti piccoli duplicati). */}
