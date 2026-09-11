@@ -12,7 +12,127 @@ from __future__ import annotations
 import re
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
+
+
+# ─── Normalizzazione query/prodotto (F21 — matching intelligente) ────────────
+def _normalize_text(s: str) -> str:
+    """Normalizza stringa per matching: lowercase, unifica unità di misura e potenze,
+    normalizza decimali, collassa spazi. NON altera i dati originali di Notion."""
+    if not s:
+        return ""
+    s = str(s).lower()
+    # Decimali: 7,4 → 7.4
+    s = s.replace(",", ".")
+    # Unità metriche: "5 metri" | "5 mt" | "5 mts" | "5 m" | "5m" → "5m"
+    s = re.sub(r"(\d+(?:\.\d+)?)\s*(?:metri|metres|meters|mts|mt|m)\b", r"\1m", s)
+    # Potenze: "22 kw" | "22kW" | "22 kilowatt" | "22kilowatts" → "22kw"
+    s = re.sub(r"(\d+(?:\.\d+)?)\s*(?:kilowatts|kilowatt|kws|kw)\b", r"\1kw", s)
+    # Rimuovi punteggiatura tranne "." nei decimali (già gestita sopra)
+    s = re.sub(r"[^\w\s.]", " ", s)
+    # Collassa spazi
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+_STOPWORDS = {"quante", "quanti", "quanto", "quanta", "abbiamo", "ho", "hai", "ci", "sono",
+              "il", "la", "lo", "i", "gli", "le", "un", "una", "uno", "di", "del", "della",
+              "dei", "delle", "in", "con", "per", "che", "sono", "ne", "cerca", "trova",
+              "mostra", "dimmi", "voglio", "mi", "servono", "disponibili", "disponibile"}
+
+
+def _tokens(s: str) -> List[str]:
+    """Tokenizza dopo la normalizzazione e rimuove stopword italiane."""
+    return [t for t in _normalize_text(s).split() if t and t not in _STOPWORDS]
+
+
+def _is_tech_feature(t: str) -> bool:
+    """True se il token è una caratteristica tecnica numerica: 22kw, 5m, 7.4kw."""
+    return bool(re.match(r"^\d+(?:\.\d+)?(?:kw|m)$", t))
+
+
+def _is_bare_number(t: str) -> bool:
+    """True se è solo un numero (senza unità): 22, 7.4."""
+    return bool(re.match(r"^\d+(?:\.\d+)?$", t))
+
+
+def _same_number_prefix(bare: str, tech: str) -> bool:
+    """True se `bare` (es. "22") è il prefisso numerico di `tech` (es. "22kw"), evitando 22 vs 220."""
+    if not tech.startswith(bare):
+        return False
+    rest = tech[len(bare):]
+    return not rest or not rest[0].isdigit()
+
+
+def _token_score(qt: str, product_tokens: List[str]) -> float:
+    """Score 0..1 di un singolo token query rispetto ai token del prodotto."""
+    if qt in product_tokens:
+        return 1.0
+    # Numero puro nella query → matcha caratteristica tecnica del prodotto con stesso numero
+    if _is_bare_number(qt):
+        for pt in product_tokens:
+            if _is_tech_feature(pt) and _same_number_prefix(qt, pt):
+                return 0.9
+    # Substring reciproca (parole troncate come "pulsar" vs "pulsar" già coperte)
+    for pt in product_tokens:
+        if len(qt) >= 3 and (qt in pt or (len(pt) >= 3 and pt in qt)):
+            return 0.5
+    return 0.0
+
+
+def _product_haystack_tokens(p: Dict[str, Any]) -> List[str]:
+    """Combina nome + codice + categoria, normalizza e tokenizza."""
+    parts = [p.get("name") or "", p.get("code") or "", p.get("category") or ""]
+    return _tokens(" ".join(parts))
+
+
+def _match_score(query: str, product: Dict[str, Any]) -> float:
+    """Calcola score 0..1 di quanto il prodotto matcha la query.
+    - Priorità: codice esatto → tutti i token → caratteristiche tecniche numeriche
+    - Penalità: caratteristica tecnica richiesta ma diversa nel prodotto → penalità forte.
+    """
+    q_tokens = _tokens(query)
+    if not q_tokens:
+        return 0.0
+    p_tokens = _product_haystack_tokens(product)
+    if not p_tokens:
+        return 0.0
+
+    # Match esatto sul codice (case-insensitive)
+    code_norm = _normalize_text(product.get("code") or "")
+    query_norm = _normalize_text(query)
+    if code_norm and query_norm == code_norm:
+        return 1.0
+
+    # Somma pesata degli score per token
+    total = 0.0
+    for qt in q_tokens:
+        total += _token_score(qt, p_tokens)
+    score = total / len(q_tokens)
+
+    # Penalità: se la query richiede caratteristiche tecniche (5m, 22kw) e il prodotto
+    # ha caratteristiche differenti, penalizza pesantemente per evitare falsi positivi.
+    q_tech = [t for t in q_tokens if _is_tech_feature(t)]
+    p_tech = {t for t in p_tokens if _is_tech_feature(t)}
+    if q_tech:
+        matched_tech = sum(1 for t in q_tech if t in p_tech)
+        # Se non TUTTE le tech feature richieste sono presenti nel prodotto → penalità
+        if matched_tech < len(q_tech):
+            score *= matched_tech / len(q_tech)
+
+    # Penalità aggiuntiva: bare number (es. "22", "7.4") che NON compaiono come prefisso di
+    # nessuna caratteristica tecnica del prodotto → penalità forte (evita "pro 22" che
+    # matcha erroneamente prodotti da 7.4kw solo perché "pro" combacia).
+    q_bare = [t for t in q_tokens if _is_bare_number(t)]
+    if q_bare and p_tech:
+        for bn in q_bare:
+            if not any(_same_number_prefix(bn, pt) for pt in p_tech):
+                score *= 0.4
+
+    return score
+
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +141,9 @@ logger = logging.getLogger(__name__)
 TOOLS_SCHEMA: List[Dict[str, Any]] = [
     {"type": "function", "function": {
         "name": "search_products",
-        "description": "Cerca prodotti nell'inventario per nome, codice o categoria. Ritorna lista con name, code, quantity, tipo_gestione (a_seriale|a_quantita), unit, category.",
+        "description": "Cerca prodotti nell'inventario con matching intelligente (tollera abbreviazioni, unità di misura sinonime tipo 5m/5mt/5 metri, potenze 22kw/22 kW, ordine parole diverso). Ritorna lista ordinata per confidenza (match_score) con name, code, quantity, tipo_gestione. Esempio query: 'pro 22 5 mt' → trova 'Pulsar Pro 22kw 5M'. Se ambiguo, ritorna più risultati.",
         "parameters": {"type": "object", "properties": {
-            "query": {"type": "string", "description": "Testo di ricerca (nome/codice/categoria). Vuoto = tutti."},
+            "query": {"type": "string", "description": "Testo di ricerca. Può contenere abbreviazioni: '5m', '5 mt', '5 metri' sono equivalenti; '22kw', '22 kW' sono equivalenti."},
             "low_stock_only": {"type": "boolean", "description": "Solo prodotti sotto soglia scorta"},
             "limit": {"type": "integer", "default": 20},
         }, "required": []}}},
@@ -133,27 +253,42 @@ async def dispatch_tool(db, svc, tool_name: str, args: Dict[str, Any], current_u
             data = await svc.list_inventory()
             items = data.get("items") if isinstance(data, dict) else data
             items = items or []
-            q = (args.get("query") or "").strip().lower()
+            q = (args.get("query") or "").strip()
             low = bool(args.get("low_stock_only"))
-            out = []
+            limit = int(args.get("limit") or 20)
+
+            # F21 (26/02/2026) — Matching intelligente: normalizzazione + token + tech features
+            candidates: List[Tuple[float, Dict[str, Any]]] = []
             for it in items:
-                name = it.get("name") or ""
-                code = it.get("code") or ""
-                cat = it.get("category") or ""
                 qty = it.get("quantity") or 0
                 thresh = it.get("low_stock_threshold") or 0
-                if q and q not in name.lower() and q not in code.lower() and q not in cat.lower():
-                    continue
                 if low and qty > (thresh or 0):
                     continue
+                if q:
+                    score = _match_score(q, it)
+                    if score < 0.5:  # threshold minima per evitare falsi positivi
+                        continue
+                    candidates.append((score, it))
+                else:
+                    candidates.append((0.0, it))
+
+            # Ordina per score decrescente, poi per nome
+            candidates.sort(key=lambda x: (-x[0], (x[1].get("name") or "").lower()))
+
+            out = []
+            for score, it in candidates[:limit]:
                 out.append({
                     "page_id": it.get("id") or it.get("page_id"),
-                    "name": name, "code": code, "category": cat,
-                    "quantity": qty, "unit": it.get("unit"),
+                    "name": it.get("name") or "",
+                    "code": it.get("code") or "",
+                    "category": it.get("category") or "",
+                    "quantity": it.get("quantity") or 0,
+                    "unit": it.get("unit"),
                     "tipo_gestione": it.get("tipo_gestione"),
-                    "low_stock_threshold": thresh,
+                    "low_stock_threshold": it.get("low_stock_threshold") or 0,
+                    "match_score": round(score, 3) if q else None,
                 })
-            return {"items": out[: int(args.get("limit") or 20)], "total_found": len(out)}
+            return {"items": out, "total_found": len(candidates), "query_normalized": _normalize_text(q) if q else None}
 
         if tool_name == "get_product":
             data = await svc.list_inventory()
