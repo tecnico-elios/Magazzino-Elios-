@@ -114,6 +114,6 @@ def get_ai_provider() -> AIProvider:
     api_key = (os.environ.get("AI_API_KEY") or "").strip()
     model = (os.environ.get("AI_MODEL") or "").strip()
     if provider_name == "groq":
-        return GroqProvider(api_key=api_key, model=model or "llama-3.3-70b-versatile")
+        return GroqProvider(api_key=api_key, model=model or "openai/gpt-oss-20b")
     # Estensione futura: openai/anthropic/gemini custom — ma NON via Universal Emergent Key
     raise AIProviderError("invalid_model", f"Provider AI '{provider_name}' non supportato")
