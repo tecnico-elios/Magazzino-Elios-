@@ -21,7 +21,7 @@ import inventory_local
 from inventory_router import get_svc as _get_inv_svc, get_source as _get_inv_source
 import auth as auth_mod
 import event_logger
-from routes import auth_routes, admin_users_routes, admin_extra_routes, qr_routes, retro_routes, orders_routes
+from routes import auth_routes, admin_users_routes, admin_extra_routes, qr_routes, retro_routes, orders_routes, ai_routes
 try:
     from zoneinfo import ZoneInfo
     ROME_TZ = ZoneInfo("Europe/Rome")
@@ -1693,6 +1693,7 @@ app.include_router(admin_extra_routes.build_router(db, auth_deps), prefix="/api"
 app.include_router(qr_routes.build_router(db, auth_deps), prefix="/api")
 app.include_router(orders_routes.build_router(db, auth_deps), prefix="/api")
 app.include_router(retro_routes.build_router(db, auth_deps, send_email_fn=send_email), prefix="/api")
+app.include_router(ai_routes.build_router(db, auth_deps), prefix="/api")
 
 
 @app.on_event("startup")

@@ -11,6 +11,7 @@ import {
   UsersThree,
   CaretDown,
   Lock,
+  Robot,
 } from "@phosphor-icons/react";
 import { useInventoryCtx } from "../lib/InventoryContext";
 import { useAuth } from "../lib/AuthContext";
@@ -25,6 +26,8 @@ const BASE_NAV = [
   //   Restano raggiungibili dalle card grandi in Dashboard e via URL diretti /arrivi /spedizioni.
   { to: "/movimenti", label: "Movimenti", icon: ArrowsClockwise, testid: "nav-movimenti" },
   { to: "/anomalie", label: "Anomalie", icon: Warning, testid: "nav-anomalie" },
+  // F20 (26/02) — Voce Assistente AI in navbar principale
+  { to: "/assistente-ai", label: "Assistente AI", icon: Robot, testid: "nav-ai" },
 ];
 
 const ADMIN_NAV = [

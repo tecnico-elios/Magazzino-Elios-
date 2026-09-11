@@ -1,0 +1,252 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import axios from "axios";
+import { toast } from "sonner";
+import { PaperPlaneRight, Robot, Warning, Sparkle, Clock, CheckCircle, XCircle } from "@phosphor-icons/react";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Badge } from "../components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
+
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+const SUGGESTIONS = [
+  "Quante Daze Duo abbiamo disponibili?",
+  "Quali prodotti sono sotto scorta?",
+  "Cerca il seriale ...",
+  "Analizza le ultime spedizioni",
+  "Ci sono anomalie nell'inventario?",
+  "Fammi un riepilogo del magazzino",
+];
+
+export default function AIAssistantPage() {
+  const [status, setStatus] = useState(null); // {enabled, mode, requests_remaining, ...}
+  const [loadingStatus, setLoadingStatus] = useState(true);
+  const [messages, setMessages] = useState([]); // {role: user|ai|system, content, pending?, toolCalls?}
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sessionId, setSessionId] = useState(null);
+  const [pendingOp, setPendingOp] = useState(null); // {preview_id, summary}
+  const scrollRef = useRef(null);
+
+  // Contesto sezione: se query param ?from=inventario o l'utente arriva da una pagina, invia il contesto.
+  const contextSection = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const params = new URLSearchParams(window.location.search);
+    return params.get("from") || null;
+  }, []);
+
+  const loadStatus = async () => {
+    setLoadingStatus(true);
+    try {
+      const { data } = await axios.get(`${API}/ai/status`);
+      setStatus(data);
+    } catch (e) {
+      setStatus({ enabled: false });
+    } finally { setLoadingStatus(false); }
+  };
+  useEffect(() => { loadStatus(); }, []);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, sending]);
+
+  const send = async (text) => {
+    const q = (text ?? input).trim();
+    if (!q || sending || !status?.enabled) return;
+    setMessages((m) => [...m, { role: "user", content: q }]);
+    setInput("");
+    setSending(true);
+    try {
+      const payload = { message: q };
+      if (sessionId) payload.session_id = sessionId;
+      if (contextSection) payload.context_section = contextSection;
+      const { data } = await axios.post(`${API}/ai/chat`, payload);
+      setSessionId(data.session_id);
+      setMessages((m) => [...m, { role: "ai", content: data.reply || "(nessuna risposta)", toolCalls: data.tool_calls || [], op_id: data.operation_id }]);
+      if (data.pending_operation) {
+        setPendingOp(data.pending_operation);
+      }
+      // Ricarica quota
+      setStatus((s) => (s ? { ...s, requests_remaining: data.requests_remaining } : s));
+    } catch (e) {
+      const msg = e?.response?.data?.detail || e?.message || "Errore sconosciuto";
+      setMessages((m) => [...m, { role: "error", content: msg }]);
+      toast.error("AI: errore", { description: msg });
+    } finally { setSending(false); }
+  };
+
+  const confirmPending = async () => {
+    if (!pendingOp) return;
+    try {
+      const { data } = await axios.post(`${API}/ai/execute/${pendingOp.preview_id}`);
+      toast.success("Operazione AI eseguita", { description: data?.backend_result?.message || "" });
+      setMessages((m) => [...m, { role: "system", content: `✓ Operazione ${pendingOp.summary?.operation_type} eseguita: ${pendingOp.summary?.product_name} × ${pendingOp.summary?.quantity} → ${pendingOp.summary?.cliente || pendingOp.summary?.fornitore || ""}` }]);
+      setPendingOp(null);
+    } catch (e) {
+      const msg = e?.response?.data?.detail || e?.message;
+      toast.error("Esecuzione AI fallita", { description: msg });
+      setMessages((m) => [...m, { role: "error", content: `Operazione FALLITA: ${msg}` }]);
+      setPendingOp(null);
+    }
+  };
+
+  const cancelPending = async () => {
+    if (!pendingOp) return;
+    try { await axios.post(`${API}/ai/pending/${pendingOp.preview_id}/cancel`); } catch {}
+    setMessages((m) => [...m, { role: "system", content: "Operazione annullata dall'utente. Nessuna modifica applicata." }]);
+    setPendingOp(null);
+  };
+
+  if (loadingStatus) {
+    return <div className="max-w-4xl mx-auto p-8 text-slate-500">Caricamento…</div>;
+  }
+
+  if (!status?.enabled) {
+    return (
+      <div className="max-w-3xl mx-auto p-6 sm:p-8" data-testid="ai-disabled">
+        <div className="et-card p-8 text-center">
+          <Robot size={56} weight="duotone" className="mx-auto text-slate-400" />
+          <h1 className="mt-4 text-2xl font-display font-black text-slate-800">Assistente AI disabilitato</h1>
+          <p className="mt-2 text-sm text-slate-600 max-w-md mx-auto">
+            L'Assistente AI è al momento disattivato. Un Admin può abilitarlo da
+            <b> Admin → Assistente AI</b> configurando il provider gratuito (Groq).
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const modeLabel = { consultation: "Solo Consultazione", operational: "Operativa", full_operational: "Operativa Completa" }[status.mode] || status.mode;
+
+  return (
+    <div className="max-w-4xl mx-auto p-3 sm:p-6 flex flex-col h-[calc(100vh-140px)]" data-testid="ai-page">
+      {/* Header */}
+      <div className="et-card p-4 mb-3 flex items-center gap-3">
+        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shrink-0">
+          <Robot size={22} weight="bold" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h1 className="font-display text-lg font-black text-slate-900 truncate">Assistente AI Magazzino Elios</h1>
+          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+            <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200 text-[10px]">{modeLabel}</Badge>
+            {contextSection && <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-[10px]">Contesto: {contextSection}</Badge>}
+            <span className="text-[11px] text-slate-500">
+              <Clock size={11} className="inline" /> {status.requests_remaining}/{status.daily_limit} richieste oggi
+            </span>
+            <span className="text-[11px] text-slate-400">Provider: {status.provider} · {status.model}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Chat area */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto bg-white border border-slate-200 rounded-md p-3 sm:p-4 space-y-3" data-testid="ai-chat-area">
+        {messages.length === 0 && (
+          <div className="text-center py-8">
+            <Sparkle size={32} weight="duotone" className="mx-auto text-indigo-400" />
+            <p className="mt-2 text-sm text-slate-600">Fai una domanda o scegli un suggerimento</p>
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-xl mx-auto">
+              {SUGGESTIONS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => send(s)}
+                  className="text-left px-3 py-2 rounded-md bg-slate-50 hover:bg-indigo-50 border border-slate-200 text-sm text-slate-700 transition-colors"
+                  data-testid={`ai-suggestion-${s.slice(0, 20)}`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {messages.map((m, i) => (
+          <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+            <div className={`max-w-[85%] px-3 py-2 rounded-lg text-sm ${
+              m.role === "user" ? "bg-indigo-600 text-white" :
+              m.role === "error" ? "bg-red-50 border border-red-200 text-red-800" :
+              m.role === "system" ? "bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs" :
+              "bg-slate-100 text-slate-900"
+            }`} data-testid={`ai-msg-${m.role}-${i}`}>
+              {m.role === "ai" && <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1">Assistente AI</div>}
+              <div className="whitespace-pre-wrap break-words">{m.content}</div>
+              {m.toolCalls?.length > 0 && (
+                <div className="mt-1.5 text-[10px] text-slate-400">
+                  Tool utilizzati: {m.toolCalls.map((t) => t.tool).join(", ")}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        {sending && (
+          <div className="flex justify-start">
+            <div className="bg-slate-100 px-3 py-2 rounded-lg text-sm text-slate-500 flex items-center gap-2" data-testid="ai-thinking">
+              <div className="flex gap-1">
+                <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+              </div>
+              Sto elaborando…
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Input */}
+      <div className="mt-3 flex gap-2">
+        <Input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !sending) { e.preventDefault(); send(); } }}
+          placeholder="Chiedi qualcosa al magazzino…"
+          className="h-11 flex-1"
+          disabled={sending}
+          data-testid="ai-input"
+        />
+        <Button
+          onClick={() => send()}
+          disabled={sending || !input.trim()}
+          className="h-11 bg-indigo-600 hover:bg-indigo-700 text-white px-5"
+          data-testid="ai-send-btn"
+        >
+          <PaperPlaneRight size={16} weight="bold" />
+        </Button>
+      </div>
+
+      {/* Popup di conferma operazione */}
+      {pendingOp && (
+        <Dialog open={true} onOpenChange={(v) => !v && cancelPending()}>
+          <DialogContent className="max-w-md" data-testid="ai-confirm-dialog">
+            <DialogHeader>
+              <DialogTitle className="text-amber-700 flex items-center gap-2">
+                <Warning size={20} weight="bold" /> Conferma operazione AI
+              </DialogTitle>
+              <DialogDescription>L'AI ha preparato questa operazione. Vuoi eseguirla realmente?</DialogDescription>
+            </DialogHeader>
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm space-y-1.5">
+              <div><b>Tipo:</b> {pendingOp.summary?.operation_type === "shipment" ? "Spedizione" : "Arrivo"}</div>
+              <div><b>Prodotto:</b> {pendingOp.summary?.product_name} <span className="text-slate-500">({pendingOp.summary?.product_code})</span></div>
+              <div><b>Quantità:</b> {pendingOp.summary?.quantity}</div>
+              {pendingOp.summary?.serials?.length > 0 && (
+                <div><b>Seriali:</b> <span className="font-mono-tight">{pendingOp.summary.serials.join(", ")}</span></div>
+              )}
+              {pendingOp.summary?.cliente && <div><b>Cliente:</b> {pendingOp.summary.cliente}</div>}
+              {pendingOp.summary?.fornitore && <div><b>Fornitore:</b> {pendingOp.summary.fornitore}</div>}
+              {pendingOp.summary?.taken_by && <div><b>Preso da:</b> {pendingOp.summary.taken_by}</div>}
+              <div className="text-xs text-slate-500 mt-2">
+                Preview ID: <span className="font-mono-tight">{pendingOp.preview_id}</span>
+              </div>
+            </div>
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button variant="outline" onClick={cancelPending} data-testid="ai-cancel-op">
+                <XCircle size={16} /> Annulla
+              </Button>
+              <Button onClick={confirmPending} className="bg-emerald-600 hover:bg-emerald-700 text-white" data-testid="ai-confirm-op">
+                <CheckCircle size={16} /> Conferma esecuzione
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+    </div>
+  );
+}

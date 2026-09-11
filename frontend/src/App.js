@@ -11,6 +11,7 @@ import ArriviPage from "@/pages/ArriviPage";
 import MovimentiPage from "@/pages/MovimentiPage";
 import AnomaliePage from "@/pages/AnomaliePage";
 import ChecklistPage from "@/pages/ChecklistPage";
+import AIAssistantPage from "@/pages/AIAssistantPage";
 import AdminPage from "@/pages/AdminPage";
 import AdminUsersPage from "@/pages/AdminUsersPage";
 import RetroattivitaPage from "@/pages/RetroattivitaPage";
@@ -62,6 +63,7 @@ function App() {
                 <Route path="/movimenti" element={<MovimentiPage />} />
                 <Route path="/anomalie" element={<AnomaliePage />} />
                 <Route path="/retroattivita" element={<RetroattivitaPage />} />
+                <Route path="/assistente-ai" element={<AIAssistantPage />} />
               </Route>
               <Route
                 path="/admin"

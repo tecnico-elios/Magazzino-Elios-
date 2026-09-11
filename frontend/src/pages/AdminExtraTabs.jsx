@@ -2232,3 +2232,105 @@ export function ExportMovimentiTab() {
     </div>
   );
 }
+
+// ---------- F20 — Assistente AI Settings ----------
+export function AISettingsTab() {
+  const [settings, setSettings] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const load = async () => {
+    try {
+      const { data } = await axios.get(`${API}/ai/settings`);
+      setSettings(data);
+    } catch (e) { toast.error("Errore caricamento AI settings", { description: formatError(e) }); }
+  };
+  useEffect(() => { load(); }, []);
+  const upd = (patch) => {
+    setSaving(true);
+    axios.put(`${API}/ai/settings`, patch)
+      .then(({ data }) => { setSettings(data); toast.success("Salvato"); })
+      .catch((e) => toast.error("Salvataggio fallito", { description: formatError(e) }))
+      .finally(() => setSaving(false));
+  };
+  if (!settings) return <div className="text-sm text-slate-500">Caricamento…</div>;
+  return (
+    <div className="space-y-4 max-w-3xl" data-testid="ai-settings-tab">
+      <div>
+        <h3 className="font-display text-lg font-bold text-slate-900 flex items-center gap-2">🤖 Assistente AI</h3>
+        <p className="text-sm text-slate-600 mt-1">
+          Configurazione dell'Assistente AI. Provider gratuito (Groq) — API key server-side. Nessun costo Universal Emergent LLM Key.
+        </p>
+      </div>
+
+      <div className="et-card-elevated p-4 space-y-4">
+        <SettingSwitch
+          label="Assistente AI abilitato"
+          hint="OFF di default. Attivalo per usare l'AI. Quando OFF, nessuna chiamata al provider viene effettuata."
+          checked={!!settings.enabled}
+          onChange={(v) => upd({ enabled: v })}
+          disabled={saving}
+          testid="ai-enabled-toggle"
+        />
+        <div className="border-t border-slate-100 pt-3">
+          <Label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">Modalità</Label>
+          <select
+            value={settings.mode || "consultation"}
+            onChange={(e) => upd({ mode: e.target.value, ...(e.target.value !== "full_operational" ? { auto_execute: false } : {}) })}
+            disabled={saving}
+            className="mt-1 h-10 w-full max-w-sm border border-slate-300 rounded-md px-2 text-sm bg-white"
+            data-testid="ai-mode-select"
+          >
+            <option value="consultation">Solo Consultazione (default) — solo lettura</option>
+            <option value="operational">Operativa — può preparare operazioni</option>
+            <option value="full_operational">⚠️ Operativa Completa</option>
+          </select>
+          <div className="text-xs text-slate-500 mt-1">
+            {settings.mode === "consultation" && "L'AI può solo consultare. Nessuna modifica ai dati."}
+            {settings.mode === "operational" && "L'AI può proporre operazioni (spedizioni, arrivi). Sempre con conferma utente."}
+            {settings.mode === "full_operational" && "⚠️ L'AI può eseguire tutte le operazioni. Alto rischio senza conferma."}
+          </div>
+        </div>
+        <SettingSwitch
+          label="Conferma prima delle modifiche"
+          hint="ON di default. Ogni operazione modificativa richiede conferma esplicita dell'utente prima di essere eseguita."
+          checked={!!settings.confirm_before_modify}
+          onChange={(v) => upd({ confirm_before_modify: v })}
+          disabled={saving}
+          testid="ai-confirm-toggle"
+        />
+        <SettingSwitch
+          label="⚠️ Esecuzione automatica senza conferma"
+          hint="ALTO RISCHIO. Solo disponibile in modalità Operativa Completa. L'AI esegue direttamente le operazioni."
+          checked={!!settings.auto_execute}
+          onChange={(v) => upd({ auto_execute: v })}
+          disabled={saving || settings.mode !== "full_operational"}
+          testid="ai-auto-execute-toggle"
+        />
+        <div className="border-t border-slate-100 pt-3">
+          <Label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">Limite richieste giornaliere</Label>
+          <div className="flex items-center gap-2 mt-1">
+            <Input
+              type="number" min={0} max={10000}
+              defaultValue={settings.daily_limit ?? 20}
+              onBlur={(e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v !== settings.daily_limit) upd({ daily_limit: v }); }}
+              className="h-10 max-w-[120px]"
+              data-testid="ai-daily-limit"
+            />
+            <span className="text-xs text-slate-500">richieste/giorno per utente. Al raggiungimento, l'AI si blocca fino al giorno successivo.</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="et-card p-3 bg-slate-50">
+        <div className="text-xs font-semibold text-slate-700 mb-1">Provider info (server-side, sola lettura):</div>
+        <div className="text-xs text-slate-600 font-mono-tight">
+          Provider: <b>{settings.provider}</b> · Modello: <b>{settings.model}</b>
+        </div>
+        <div className="text-[11px] text-slate-500 mt-2">
+          Per configurare la API key: modifica <code>AI_PROVIDER</code>, <code>AI_API_KEY</code>, <code>AI_MODEL</code> in <code>/app/backend/.env</code> e riavvia il backend. La API key non è MAI esposta al frontend.
+          <br />Per ottenere una chiave Groq gratuita: <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" className="text-indigo-600 underline">console.groq.com/keys</a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
