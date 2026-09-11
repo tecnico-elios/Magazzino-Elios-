@@ -235,6 +235,8 @@ function EditDialog({ row, kind, onClose, onDone }) {
   const [changeProduct, setChangeProduct] = useState(false);
   const [productPickerOpen, setProductPickerOpen] = useState(false);
   const [newProduct, setNewProduct] = useState(null); // {page_id, name, tipo_gestione}
+  // F19 (26/02/2026) — Popup di conferma prima dell'invio
+  const [confirmOpen, setConfirmOpen] = useState(false);
   // F15 (§3) — rileva Tipo Gestione del prodotto dalla configurazione Inventario.
   // Usa item_ids[0] dalla riga Notion Uscite/Entrate. Riuso: nessuna nuova API.
   const [productTipo, setProductTipo] = useState(null); // null | "a_seriale" | "a_quantita"

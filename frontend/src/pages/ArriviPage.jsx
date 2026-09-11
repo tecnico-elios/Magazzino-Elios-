@@ -415,7 +415,7 @@ export default function ArriviPage() {
           </button>
           <button
             type="button"
-            onClick={() => setShowQty(true)}
+            onClick={() => { setInitialAction("quantity"); setPicker({ filter: "quantity" }); }}
             data-testid="arrivi-card-qty"
             className="group relative overflow-hidden rounded-xl p-5 sm:p-6 text-left text-white border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 hover:border-sky-400/50 transition-all shadow-[0_10px_40px_-15px_rgba(2,6,23,0.5)] hover:shadow-[0_20px_60px_-15px_rgba(56,189,248,0.30)]"
           >
