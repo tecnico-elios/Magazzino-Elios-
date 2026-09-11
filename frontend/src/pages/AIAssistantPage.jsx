@@ -1,22 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { PaperPlaneRight, Robot, Warning, Sparkle, Clock, CheckCircle, XCircle } from "@phosphor-icons/react";
+import { PaperPlaneRight, Robot, Warning, CheckCircle, XCircle } from "@phosphor-icons/react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-
-const SUGGESTIONS = [
-  "Quante Daze Duo abbiamo disponibili?",
-  "Quali prodotti sono sotto scorta?",
-  "Cerca il seriale ...",
-  "Analizza le ultime spedizioni",
-  "Ci sono anomalie nell'inventario?",
-  "Fammi un riepilogo del magazzino",
-];
 
 export default function AIAssistantPage() {
   const [status, setStatus] = useState(null); // {enabled, mode, requests_remaining, ...}
@@ -29,11 +20,11 @@ export default function AIAssistantPage() {
   const scrollRef = useRef(null);
 
   // Contesto sezione: se query param ?from=inventario o l'utente arriva da una pagina, invia il contesto.
-  const contextSection = useMemo(() => {
+  const contextSection = (() => {
     if (typeof window === "undefined") return null;
     const params = new URLSearchParams(window.location.search);
     return params.get("from") || null;
-  }, []);
+  })();
 
   const loadStatus = async () => {
     setLoadingStatus(true);
@@ -120,7 +111,7 @@ export default function AIAssistantPage() {
 
   return (
     <div className="max-w-4xl mx-auto p-3 sm:p-6 flex flex-col h-[calc(100vh-140px)]" data-testid="ai-page">
-      {/* Header */}
+      {/* Header — essenziale: titolo, modalità, provider/modello */}
       <div className="et-card p-4 mb-3 flex items-center gap-3">
         <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shrink-0">
           <Robot size={22} weight="bold" />
@@ -130,9 +121,6 @@ export default function AIAssistantPage() {
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200 text-[10px]">{modeLabel}</Badge>
             {contextSection && <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-[10px]">Contesto: {contextSection}</Badge>}
-            <span className="text-[11px] text-slate-500">
-              <Clock size={11} className="inline" /> {status.requests_remaining}/{status.daily_limit} richieste oggi
-            </span>
             <span className="text-[11px] text-slate-400">Provider: {status.provider} · {status.model}</span>
           </div>
         </div>
@@ -140,25 +128,6 @@ export default function AIAssistantPage() {
 
       {/* Chat area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto bg-white border border-slate-200 rounded-md p-3 sm:p-4 space-y-3" data-testid="ai-chat-area">
-        {messages.length === 0 && (
-          <div className="text-center py-8">
-            <Sparkle size={32} weight="duotone" className="mx-auto text-indigo-400" />
-            <p className="mt-2 text-sm text-slate-600">Fai una domanda o scegli un suggerimento</p>
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-xl mx-auto">
-              {SUGGESTIONS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => send(s)}
-                  className="text-left px-3 py-2 rounded-md bg-slate-50 hover:bg-indigo-50 border border-slate-200 text-sm text-slate-700 transition-colors"
-                  data-testid={`ai-suggestion-${s.slice(0, 20)}`}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
             <div className={`max-w-[85%] px-3 py-2 rounded-lg text-sm ${
