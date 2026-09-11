@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict
 
 import auth as auth_mod
 import notion_service
+import event_logger
 from routes import admin_extra_routes as _adm
 
 logger = logging.getLogger(__name__)
@@ -234,7 +235,7 @@ def build_router(db, deps, send_email_fn=None) -> APIRouter:
     async def patch_shipment(tracker_page_id: str, body: ShipmentPatchBody, current=Depends(deps.get_current_user)):
         _require_retro(current)
         if not (body.reason or "").strip():
-            raise HTTPException(400, "Motivazione obbligatoria")
+            body.reason = "(nessuna motivazione)"
 
         # 1) Leggi lo stato PRIMA (per audit before/after) dalle Uscite Notion
         try:
@@ -393,16 +394,24 @@ def build_router(db, deps, send_email_fn=None) -> APIRouter:
             },
         })
         notion_service.invalidate_inventory_cache()
+        # F19 — Log applicativo modifica retroattiva spedizione
+        await event_logger.log_event(
+            db, category="RETRO", event_type="MODIFICA_SPEDIZIONE",
+            action="retro.shipment.update", level="INFO", status="SUCCESS",
+            user=current.get("username"), user_role=current.get("role"),
+            endpoint=f"PATCH /api/retro/shipment/{tracker_page_id}",
+            serial=(after.get("sn") or before.get("sn")),
+            customer=after.get("cliente") or before.get("cliente"),
+            quantity_before=before.get("quantity"), quantity_after=after.get("quantity"),
+            operation_id=event_logger.new_operation_id("RETRO"),
+            message=f"Modifica retroattiva spedizione: {before} → {after}",
+            details={"reason": body.reason, "before": before, "after": after, "tracker_page_id": tracker_page_id},
+        )
         email_sent = False
-        if send_email_fn:
-            email_sent = await _send_retro_email_if_enabled(db, send_email_fn, "spedizione", before, after, body.reason, current.get("username") or "")
-        return {"ok": True, "before": before, "after": after, "email_sent": email_sent}
-
-    @router.patch("/arrivo/{receipt_page_id}")
     async def patch_arrivo(receipt_page_id: str, body: ArrivoPatchBody, current=Depends(deps.get_current_user)):
         _require_retro(current)
         if not (body.reason or "").strip():
-            raise HTTPException(400, "Motivazione obbligatoria")
+            body.reason = "(nessuna motivazione)"
 
         try:
             recs = await notion_service.list_receipts_all()
@@ -466,7 +475,7 @@ def build_router(db, deps, send_email_fn=None) -> APIRouter:
         Riuso funzioni esistenti (update/remove_inventory_serials, remove_shipment_from_order, archive_page)."""
         _require_retro(current)
         if not (body.reason or "").strip():
-            raise HTTPException(400, "Motivazione obbligatoria")
+            body.reason = "(nessuna motivazione)"
         if tipo not in ("spedizione", "arrivo"):
             raise HTTPException(400, "tipo non valido")
 
@@ -567,7 +576,7 @@ def build_router(db, deps, send_email_fn=None) -> APIRouter:
         Aggiorna in-place: SN title (concatenato), Quantità. Aggiorna Eliostech Ordini (SN WB + CODICI QR)."""
         _require_retro(current)
         if not (body.reason or "").strip():
-            raise HTTPException(400, "Motivazione obbligatoria")
+            body.reason = "(nessuna motivazione)"
         new_sn = (body.new_sn or "").strip()
         if not new_sn:
             raise HTTPException(400, "Nuovo seriale mancante")
@@ -673,7 +682,7 @@ def build_router(db, deps, send_email_fn=None) -> APIRouter:
         Aggiorna in-place il receipt Notion (Item title + Quantità) + colonna 16 Inventario."""
         _require_retro(current)
         if not (body.reason or "").strip():
-            raise HTTPException(400, "Motivazione obbligatoria")
+            body.reason = "(nessuna motivazione)"
         new_sn = (body.new_sn or "").strip()
         if not new_sn:
             raise HTTPException(400, "Nuovo seriale mancante")
@@ -754,7 +763,7 @@ def build_router(db, deps, send_email_fn=None) -> APIRouter:
         Riuso di `create_pick` (stesso identico flusso del submit_checklist). Nessuna nuova spedizione."""
         _require_retro(current)
         if not (body.reason or "").strip():
-            raise HTTPException(400, "Motivazione obbligatoria")
+            body.reason = "(nessuna motivazione)"
 
         # 1) Trova la spedizione originale per ereditare il contesto
         try:
@@ -872,6 +881,20 @@ def build_router(db, deps, send_email_fn=None) -> APIRouter:
                 "date_registrazione": datetime.now(timezone.utc).isoformat(),
             },
         })
+        # F19 — Log applicativo strutturato (obbligo utente)
+        op_id = event_logger.new_operation_id("RETRO")
+        await event_logger.log_event(
+            db, category="RETRO", event_type="AGGIUNTA_PRODOTTO_DIMENTICATO",
+            action="retro.shipment.add-accessory", level="INFO", status="SUCCESS",
+            user=current.get("username"), user_role=current.get("role"),
+            endpoint=f"POST /api/retro/shipment/{tracker_page_id}/add-accessory",
+            product=product_name, product_code=product.get("code"),
+            serial=serial or None,
+            quantity_change=qty_final if tg == "a_quantita" else 1.0,
+            customer=structure, operation_id=op_id,
+            message=f"Aggiunto prodotto dimenticato: {product_name} × {qty_final} in spedizione a {structure}",
+            details={"reason": body.reason, "tipo_gestione": tg, "new_tracker_page_id": new_pid, "tracker_page_id": tracker_page_id, "qr_code": qr or None},
+        )
         notion_service.invalidate_inventory_cache()
 
         email_sent = False
@@ -899,7 +922,7 @@ def build_router(db, deps, send_email_fn=None) -> APIRouter:
         Crea una NUOVA riga receipt con stesso contesto (data). Nessun nuovo arrivo."""
         _require_retro(current)
         if not (body.reason or "").strip():
-            raise HTTPException(400, "Motivazione obbligatoria")
+            body.reason = "(nessuna motivazione)"
 
         try:
             recs = await notion_service.list_receipts_all()
@@ -967,6 +990,19 @@ def build_router(db, deps, send_email_fn=None) -> APIRouter:
                 "date_registrazione": datetime.now(timezone.utc).isoformat(),
             },
         })
+        # F19 — Log applicativo
+        await event_logger.log_event(
+            db, category="RETRO", event_type="AGGIUNTA_PRODOTTO_DIMENTICATO",
+            action="retro.arrivo.add-accessory", level="INFO", status="SUCCESS",
+            user=current.get("username"), user_role=current.get("role"),
+            endpoint=f"POST /api/retro/arrivo/{receipt_page_id}/add-accessory",
+            product=product_name, product_code=product.get("code"),
+            serial=serial or None,
+            quantity_change=qty_final if tg == "a_quantita" else 1.0,
+            operation_id=event_logger.new_operation_id("RETRO"),
+            message=f"Aggiunto prodotto dimenticato: {product_name} × {qty_final} in arrivo",
+            details={"reason": body.reason, "tipo_gestione": tg, "receipt_page_id": receipt_page_id, "new_receipt_page_id": new_pid},
+        )
         notion_service.invalidate_inventory_cache()
 
         email_sent = False

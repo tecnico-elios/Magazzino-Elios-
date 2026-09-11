@@ -158,7 +158,8 @@ export function SystemLogsTab() {
       const params = { limit: 1000 };
       if (level) params.level = level;
       if (q.trim()) params.q = q.trim();
-      if (source) params.source = source;
+      // F19 — Default: mostra eventi applicativi. L'utente può cambiare in "http" o "all".
+      params.source = source || "app";
       if (category) params.category = category;
       if (eventType) params.event_type = eventType;
       if (userF.trim()) params.user = userF.trim();

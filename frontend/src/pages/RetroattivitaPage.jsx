@@ -247,12 +247,12 @@ function EditDialog({ row, kind, onClose, onDone }) {
       const items = data?.items || [];
       // 1° tentativo: match esatto per page_id (SSOT). 2° tentativo: match per nome (SOLO per
       // recuperare l'entry Inventario — il tipo_gestione viene sempre LETTO da Notion, mai dedotto).
-      const p = (pid && items.find((x) => x.page_id === pid))
+      const p = (pid && items.find((x) => (x.page_id || x.id) === pid))
         || (rowName && items.find((x) => (x.name || "").trim().toLowerCase() === rowName))
         || null;
       if (p) {
         setProductTipo(p.tipo_gestione || null);
-        setProductMeta({ name: p.name, code: p.code, page_id: p.page_id });
+        setProductMeta({ name: p.name, code: p.code, page_id: p.page_id || p.id });
       }
     }).catch(() => {});
   }, [row?.item_ids, row?.item_name, row?.item_names]);
@@ -294,17 +294,14 @@ function EditDialog({ row, kind, onClose, onDone }) {
   };
 
   const submit = async () => {
-    if (!reason.trim()) {
-      toast.error("Motivazione obbligatoria");
-      return;
-    }
+    // F19 (26/02/2026) — Motivazione facoltativa. Il popup di conferma è mostrato dal caller.
     if (isMultiSn && !targetSn && (newSn.trim() || newQr.trim() || changeProduct)) {
       toast.error("Seleziona quale seriale modificare (la riga contiene più seriali)");
       return;
     }
     setBusy(true);
     try {
-      const body = { reason: reason.trim() };
+      const body = { reason: reason.trim() || "(nessuna motivazione)" };
       // F14 fix (20/02): invia SOLO i campi effettivamente modificati.
       // Il backend aggiornerà unicamente quei campi (§7 modifica parziale).
       const sn0 = isMultiSn ? targetSn : (row?.sn || "");
@@ -536,12 +533,12 @@ function EditDialog({ row, kind, onClose, onDone }) {
         <AddForgottenItem row={row} kind={kind} onDone={onDone} />
         <AddForgottenAccessory row={row} kind={kind} productMeta={productMeta} onDone={onDone} />
         <div>
-          <Label className="text-xs font-semibold text-red-700">Motivazione (obbligatoria) *</Label>
+          <Label className="text-xs font-semibold text-slate-600">Motivazione <span className="text-slate-400 font-normal">(facoltativa)</span></Label>
           <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} placeholder="" className="mt-1" data-testid="retro-reason" />
         </div>
         <DialogFooter className="flex-col sm:flex-row gap-2">
           <Button variant="outline" onClick={onClose} disabled={busy}>Chiudi</Button>
-          <Button onClick={submit} disabled={busy} className="bg-amber-600 hover:bg-amber-700 text-white min-w-[180px]" data-testid="retro-confirm">
+          <Button onClick={() => setConfirmOpen(true)} disabled={busy} className="bg-amber-600 hover:bg-amber-700 text-white min-w-[180px]" data-testid="retro-confirm">
             {busy ? (
               <span className="flex items-center justify-center gap-2">
                 <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -556,6 +553,45 @@ function EditDialog({ row, kind, onClose, onDone }) {
           </Button>
         </DialogFooter>
       </DialogContent>
+      {/* F19 (26/02/2026) — Popup di conferma con riepilogo prima della modifica reale */}
+      {confirmOpen && (
+        <Dialog open={true} onOpenChange={(v) => !v && setConfirmOpen(false)}>
+          <DialogContent className="max-w-md" data-testid="retro-confirm-dialog">
+            <DialogHeader>
+              <DialogTitle className="text-amber-700">Sei sicuro di voler confermare questa modifica?</DialogTitle>
+              <DialogDescription>Riepilogo dell'operazione prima dell'invio.</DialogDescription>
+            </DialogHeader>
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs space-y-1.5">
+              <div><b>Operazione:</b> Modifica {kind === "spedizione" ? "spedizione" : "arrivo"}</div>
+              <div><b>Data:</b> {row.date || "—"}</div>
+              <div><b>Cliente:</b> {row.cliente || row.fornitore || "—"}</div>
+              <div><b>Prodotto:</b> {productMeta.name || row.item_name || "—"}
+                {changeProduct && newProduct && (<> → <b className="text-indigo-700">{newProduct.name}</b></>)}
+              </div>
+              {productTipo === "a_seriale" && (isMultiSn ? targetSn : row.sn) && (
+                <div><b>Seriale attuale:</b> <span className="font-mono-tight">{isMultiSn ? targetSn : row.sn}</span>
+                  {newSn.trim() && newSn.trim() !== (isMultiSn ? targetSn : row.sn) && (<> → <b className="font-mono-tight text-amber-700">{newSn.trim()}</b></>)}
+                </div>
+              )}
+              {productTipo === "a_quantita" && (
+                <div><b>Quantità:</b> <span className="font-mono-tight">{row.quantity ?? "—"}</span>
+                  {newQty !== "" && String(newQty) !== String(row.quantity ?? "") && (<> → <b className="font-mono-tight text-amber-700">{newQty}</b></>)}
+                </div>
+              )}
+              {newQr.trim() && <div><b>QR:</b> <span className="font-mono-tight">{newQr}</span></div>}
+              <div><b>Operatore:</b> {row.taken_by || "—"}</div>
+              <div><b>Ora:</b> {new Date().toLocaleString("it-IT")}</div>
+              {reason.trim() && <div><b>Motivazione:</b> {reason.trim()}</div>}
+            </div>
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={busy} data-testid="retro-confirm-cancel">Annulla</Button>
+              <Button onClick={() => { setConfirmOpen(false); submit(); }} disabled={busy} className="bg-amber-600 hover:bg-amber-700 text-white" data-testid="retro-confirm-yes">
+                Conferma modifica
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
       {/* F14 — Fotocamera per scansione QR (riusa componente esistente) */}
       <BarcodeScanner
         open={qrScannerOpen}
@@ -591,7 +627,7 @@ function ProductPickerDialog({ onClose, onPick, filterTipo = "a_seriale", curren
   useEffect(() => {
     setLoading(true);
     axios.get(`${API}/inventory`).then(({ data }) => {
-      const raw = (data?.items || []).filter((it) => it.active !== false && it.tipo_gestione === filterTipo);
+      const raw = (data?.items || []).filter((it) => it.active !== false && it.tipo_gestione === filterTipo).map((it) => ({ ...it, page_id: it.page_id || it.id }));
       setItems(raw);
     }).catch(() => setItems([])).finally(() => setLoading(false));
   }, [filterTipo]);
@@ -751,7 +787,7 @@ function AddForgottenItem({ row, kind, onDone }) {
     if (!open || inventory.length > 0) return;
     setLoadingInv(true);
     axios.get(`${API}/inventory`).then(({ data }) => {
-      const items = (data?.items || []).filter((it) => it.active !== false);
+      const items = (data?.items || []).filter((it) => it.active !== false).map((it) => ({ ...it, page_id: it.page_id || it.id }));
       setInventory(items);
       // Prefill prodotto già presente nella riga (default = same product) se A Seriale
       const prefillId = (row?.item_ids && row.item_ids[0]) || null;
@@ -1009,7 +1045,7 @@ function AddForgottenAccessory({ row, kind, productMeta, onDone }) {
     if (!open || inventory.length > 0) return;
     setLoadingInv(true);
     axios.get(`${API}/inventory`).then(({ data }) => {
-      const items = (data?.items || []).filter((it) => it.active !== false);
+      const items = (data?.items || []).filter((it) => it.active !== false).map((it) => ({ ...it, page_id: it.page_id || it.id }));
       setInventory(items);
       // Prefill prodotto già presente nella riga (default = same product)
       const prefillId = (row?.item_ids && row.item_ids[0]) || null;
