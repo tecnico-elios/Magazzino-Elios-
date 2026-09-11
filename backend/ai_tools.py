@@ -202,6 +202,13 @@ TOOLS_SCHEMA: List[Dict[str, Any]] = [
         "description": "Riepilogo KPI magazzino: totale prodotti, valore inventario, sotto scorta, esauriti, ultime attività.",
         "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {
+        "name": "get_product_serials",
+        "description": "Recupera l'elenco COMPLETO dei seriali di un prodotto A Seriale. Riconosce query in linguaggio naturale con stesso matching di search_products (es. 'Pro 22 5M' = 'Pulsar Pro 22kw 5M'). Se la query è ambigua e matcha più prodotti, ritorna i seriali raggruppati per prodotto. Usa `include_shipped=true` per includere anche i seriali già spediti.",
+        "parameters": {"type": "object", "properties": {
+            "product_name_or_code": {"type": "string", "description": "Nome/codice/descrizione del prodotto (matching intelligente)."},
+            "include_shipped": {"type": "boolean", "default": False, "description": "Se true, include anche i seriali già spediti con riferimento a data e cliente."},
+        }, "required": ["product_name_or_code"]}}},
+    {"type": "function", "function": {
         "name": "prepare_shipment",
         "description": "PREPARA una spedizione (SENZA eseguirla). Ritorna preview con validazione. La spedizione parte solo dopo conferma esplicita utente via execute_pending_operation.",
         "parameters": {"type": "object", "properties": {
@@ -417,6 +424,81 @@ async def dispatch_tool(db, svc, tool_name: str, args: Dict[str, Any], current_u
                 "low_stock": [{"name": i.get("name"), "quantity": i.get("quantity"), "threshold": i.get("low_stock_threshold")} for i in low[:15]],
                 "empty": [{"name": i.get("name")} for i in empty[:15]],
                 "total_low_stock": len(low), "total_empty": len(empty),
+            }
+
+        if tool_name == "get_product_serials":
+            # F22 (26/02/2026) — Elenco seriali completo per prodotto (solo A Seriale).
+            # Usa lo stesso matching di search_products per riconoscere abbreviazioni.
+            q = (args.get("product_name_or_code") or "").strip()
+            if not q:
+                return {"error": "missing_query", "hint": "Specifica quale prodotto"}
+            include_shipped = bool(args.get("include_shipped"))
+            data = await svc.list_inventory()
+            items = (data.get("items") if isinstance(data, dict) else data) or []
+            # Solo prodotti A Seriale (i seriali non hanno senso per A Quantità)
+            serial_items = [it for it in items if it.get("tipo_gestione") == "a_seriale"]
+            scored = sorted(
+                [(_match_score(q, it), it) for it in serial_items],
+                key=lambda x: -x[0],
+            )
+            matches = [(s, it) for s, it in scored if s >= 0.5]
+            if not matches:
+                return {"error": "not_found", "hint": f"Nessun prodotto A Seriale trovato per '{q}'"}
+
+            # Se il top match ha score >> secondo → univoco. Altrimenti mostra i pari-merito.
+            top_score = matches[0][0]
+            selected = [(s, it) for s, it in matches if (top_score - s) < 0.05]
+
+            # Recupera i seriali spediti se richiesto (in un colpo solo per efficienza)
+            shipped_by_product: Dict[str, List[Dict[str, Any]]] = {}
+            if include_shipped:
+                try:
+                    exits = await svc.list_exits()
+                    for e in exits or []:
+                        sn = str(e.get("sn") or "").strip()
+                        if not sn or sn == "—":
+                            continue
+                        # Può contenere N seriali (separati da \n, virgola, spazi)
+                        pieces = [p.strip() for p in re.split(r"[,;\n\s]+", sn) if p.strip()]
+                        item_ids = e.get("item_ids") or []
+                        item_name = (e.get("item_name") or "").lower()
+                        for pid in item_ids or [None]:
+                            key = pid or item_name
+                            shipped_by_product.setdefault(key, []).extend([
+                                {"serial": p, "date": e.get("date"), "cliente": e.get("cliente"), "shipment_id": e.get("id")}
+                                for p in pieces
+                            ])
+                except Exception as ex:
+                    logger.warning(f"list_exits nel get_product_serials fallito: {ex}")
+
+            products_out: List[Dict[str, Any]] = []
+            for score, it in selected:
+                available = [str(s).strip() for s in (it.get("serials") or []) if str(s).strip()]
+                pid = it.get("id") or it.get("page_id")
+                shipped = []
+                if include_shipped:
+                    shipped = shipped_by_product.get(pid) or shipped_by_product.get((it.get("name") or "").lower()) or []
+                inventory_qty = it.get("quantity") or 0
+                coherent = (len(available) == inventory_qty)
+                products_out.append({
+                    "page_id": pid,
+                    "name": it.get("name"),
+                    "code": it.get("code"),
+                    "quantity_inventory": inventory_qty,
+                    "serials_available_count": len(available),
+                    "serials_available": available,
+                    "shipped_count": len(shipped) if include_shipped else None,
+                    "shipped": (shipped if include_shipped else None),
+                    "quantity_vs_serials_coherent": coherent,
+                    "possible_anomaly": (None if coherent else f"Quantità inventario ({inventory_qty}) ≠ numero seriali disponibili ({len(available)}) — POSSIBILE ANOMALIA"),
+                    "match_score": round(score, 3),
+                })
+
+            return {
+                "ambiguous": len(selected) > 1,
+                "products": products_out,
+                "total_available_serials": sum(p["serials_available_count"] for p in products_out),
+                "query_normalized": _normalize_text(q),
             }
 
         # ── Operazioni preparatorie (nessuna esecuzione — solo preview) ──
