@@ -58,6 +58,7 @@ class PickBody(BaseModel):
     riga_index: int
     quantity: Optional[float] = None
     serial: Optional[str] = None
+    remove: Optional[bool] = False  # F28 — se true su A Seriale rimuove il seriale specificato
 
 
 def _now():
@@ -418,44 +419,55 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
                 raise HTTPException(400, "serial richiesto per prodotti A Seriale")
             sn = body.serial.strip()
             existing = riga.get("seriali_prelevati") or []
-            if any(s.lower() == sn.lower() for s in existing):
-                raise HTTPException(409, "Seriale già prelevato per questa riga")
-            # Verifica cross-righe (non prelevare due volte nella stessa commessa)
-            for j, other in enumerate(righe):
-                if j == idx: continue
-                for s in (other.get("seriali_prelevati") or []):
-                    if s.lower() == sn.lower():
-                        raise HTTPException(409, f"Seriale già prelevato per '{other.get('product_name')}'")
-            # Validazione contro inventario Notion
-            try:
-                from inventory_router import get_svc as _get_svc
-                svc = await _get_svc(db)
-                data = await svc.list_inventory()
-                items = (data.get("items") if isinstance(data, dict) else data) or []
-                product = next((it for it in items if (it.get("id") or it.get("page_id")) == riga.get("product_page_id")), None)
-                if not product:
-                    raise HTTPException(400, "Prodotto non trovato in inventario")
-                available_sns = {str(s).strip().lower() for s in (product.get("serials") or [])}
-                if sn.lower() not in available_sns:
-                    # Verifica se è di un altro prodotto o già spedito
-                    other_prod = None
-                    for it in items:
-                        if any(str(s).strip().lower() == sn.lower() for s in (it.get("serials") or [])):
-                            other_prod = it.get("name"); break
-                    if other_prod:
-                        raise HTTPException(400, f"Il seriale appartiene a '{other_prod}', non a '{riga.get('product_name')}'")
-                    raise HTTPException(400, f"Seriale non disponibile in inventario (già spedito o inesistente)")
-                if qty_prev + 1 > qty_req:
-                    raise HTTPException(400, f"Superata quantità richiesta ({qty_req})")
-                riga["seriali_prelevati"] = existing + [sn]
-                riga["qty_prelevata"] = qty_prev + 1
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.error(f"Validazione seriale fallita: {e}")
-                raise HTTPException(502, "Errore validazione inventario")
-            log_msg = f"Prelievo seriale {sn} × {riga.get('product_name')} (commessa #{doc.get('number')})"
-            evt = "PRELIEVO_SERIALE"
+            # F28 — Rimozione seriale (decremento controllato)
+            if body.remove:
+                match_idx = next((i for i, s in enumerate(existing) if s.lower() == sn.lower()), None)
+                if match_idx is None:
+                    raise HTTPException(404, f"Seriale '{sn}' non presente tra i prelievi di questa riga")
+                new_serials = existing[:match_idx] + existing[match_idx+1:]
+                riga["seriali_prelevati"] = new_serials
+                riga["qty_prelevata"] = max(0.0, qty_prev - 1)
+                log_msg = f"Rimozione seriale {sn} × {riga.get('product_name')} (commessa #{doc.get('number')})"
+                evt = "PRELIEVO_SERIALE_RIMOSSO"
+            else:
+                if any(s.lower() == sn.lower() for s in existing):
+                    raise HTTPException(409, "Seriale già prelevato per questa riga")
+                # Verifica cross-righe (non prelevare due volte nella stessa commessa)
+                for j, other in enumerate(righe):
+                    if j == idx: continue
+                    for s in (other.get("seriali_prelevati") or []):
+                        if s.lower() == sn.lower():
+                            raise HTTPException(409, f"Seriale già prelevato per '{other.get('product_name')}'")
+                # Validazione contro inventario Notion
+                try:
+                    from inventory_router import get_svc as _get_svc
+                    svc = await _get_svc(db)
+                    data = await svc.list_inventory()
+                    items = (data.get("items") if isinstance(data, dict) else data) or []
+                    product = next((it for it in items if (it.get("id") or it.get("page_id")) == riga.get("product_page_id")), None)
+                    if not product:
+                        raise HTTPException(400, "Prodotto non trovato in inventario")
+                    available_sns = {str(s).strip().lower() for s in (product.get("serials") or [])}
+                    if sn.lower() not in available_sns:
+                        # Verifica se è di un altro prodotto o già spedito
+                        other_prod = None
+                        for it in items:
+                            if any(str(s).strip().lower() == sn.lower() for s in (it.get("serials") or [])):
+                                other_prod = it.get("name"); break
+                        if other_prod:
+                            raise HTTPException(400, f"Il seriale appartiene a '{other_prod}', non a '{riga.get('product_name')}'")
+                        raise HTTPException(400, f"Seriale non disponibile in inventario (già spedito o inesistente)")
+                    if qty_prev + 1 > qty_req:
+                        raise HTTPException(400, f"Superata quantità richiesta ({qty_req})")
+                    riga["seriali_prelevati"] = existing + [sn]
+                    riga["qty_prelevata"] = qty_prev + 1
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    logger.error(f"Validazione seriale fallita: {e}")
+                    raise HTTPException(502, "Errore validazione inventario")
+                log_msg = f"Prelievo seriale {sn} × {riga.get('product_name')} (commessa #{doc.get('number')})"
+                evt = "PRELIEVO_SERIALE"
         else:
             raise HTTPException(400, f"tipo_gestione non valido: {tg}")
 

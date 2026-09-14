@@ -375,6 +375,15 @@ function CommessaDetail({ id, onBack }) {
     catch (e) { toast.error("Seriale non valido", { description: e?.response?.data?.detail }); }
     finally { setBusy(false); }
   };
+  const doRemoveSerial = async (idx, sn) => {
+    setBusy(true);
+    try {
+      const { data } = await axios.post(`${API}/commesse/${id}/pick`, { riga_index: idx, serial: sn, remove: true });
+      setC(data);
+      toast.success(`Seriale ${sn} rimosso`);
+    } catch (e) { toast.error("Rimozione fallita", { description: e?.response?.data?.detail }); }
+    finally { setBusy(false); }
+  };
   const doComplete = async () => {
     setBusy(true);
     try { const { data } = await axios.post(`${API}/commesse/${id}/complete`); setC(data); setConfirmComplete(false); toast.success("Commessa pronta per spedizione"); }
@@ -491,6 +500,7 @@ function CommessaDetail({ id, onBack }) {
       <div className="space-y-2">
         {(c.righe || []).map((r, i) => {
           const done = r.qty_prelevata >= r.qty_richiesta;
+          const rimanenti = Math.max(0, (r.qty_richiesta || 0) - (r.qty_prelevata || 0));
           return (
             <div key={i} className={`et-card p-3 ${done ? "border-emerald-300 bg-emerald-50/30" : ""}`} data-testid={`riga-${i}`}>
               <div className="flex items-start gap-2 flex-wrap">
@@ -501,6 +511,12 @@ function CommessaDetail({ id, onBack }) {
                 <div className={`text-lg font-black font-mono-tight shrink-0 ${done ? "text-emerald-600" : "text-slate-800"}`}>
                   {r.qty_prelevata}/{r.qty_richiesta}
                 </div>
+              </div>
+              {/* F28 — Riepilogo R/P/Rim visibile per entrambi i tipi */}
+              <div className="mt-1.5 grid grid-cols-3 gap-1 text-[11px] font-mono-tight">
+                <div className="bg-slate-100 rounded px-2 py-1"><span className="text-slate-500">Richiesti:</span> <b>{r.qty_richiesta}</b></div>
+                <div className={`rounded px-2 py-1 ${(r.qty_prelevata || 0) > 0 ? "bg-emerald-100 text-emerald-800" : "bg-slate-100"}`}><span className="text-slate-500">Preparati:</span> <b>{r.qty_prelevata}</b></div>
+                <div className={`rounded px-2 py-1 ${rimanenti === 0 ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}><span className="text-slate-500">Rimanenti:</span> <b>{rimanenti}</b></div>
               </div>
               {canPick && !done && r.tipo_gestione === "a_quantita" && (
                 <div className="mt-2 flex items-center gap-2">
@@ -513,18 +529,44 @@ function CommessaDetail({ id, onBack }) {
                   </Button>
                 </div>
               )}
-              {canPick && !done && r.tipo_gestione === "a_seriale" && (
+              {/* F28 — Per A Quantità mostra anche i controlli +/- quando c'è già qualche pezzo preparato (per correzioni) */}
+              {canPick && done && r.tipo_gestione === "a_quantita" && (
+                <div className="mt-2 flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => doPickQty(i, -1)} disabled={busy || r.qty_prelevata <= 0} className="h-10 w-10 p-0" data-testid={`minus-${i}`}>−</Button>
+                  <div className="flex-1 text-center text-xs text-emerald-700 font-semibold">✓ Completo</div>
+                </div>
+              )}
+              {canPick && r.tipo_gestione === "a_seriale" && (
                 <div className="mt-2 flex flex-col sm:flex-row gap-2">
-                  <SerialInput onSubmit={(sn) => doPickSerial(i, sn)} disabled={busy} testid={`sn-input-${i}`} />
-                  <Button size="sm" onClick={() => { setScanRigaIdx(i); setScanMode("serial"); setScannerOpen(true); }} disabled={busy} className="bg-indigo-600 hover:bg-indigo-700 text-white h-10" data-testid={`scan-${i}`}>
+                  <SerialInput onSubmit={(sn) => doPickSerial(i, sn)} disabled={busy || done} testid={`sn-input-${i}`} placeholder={done ? "Quantità richiesta raggiunta" : "Inserisci seriale…"} />
+                  <Button size="sm" onClick={() => { setScanRigaIdx(i); setScanMode("serial"); setScannerOpen(true); }} disabled={busy || done} className="bg-indigo-600 hover:bg-indigo-700 text-white h-10" data-testid={`scan-${i}`}>
                     <QrCode size={14} /> Scan
                   </Button>
                 </div>
               )}
               {r.seriali_prelevati?.length > 0 && (
                 <div className="mt-2 text-xs bg-slate-50 rounded p-2">
-                  <div className="font-semibold text-slate-600 mb-1">Seriali prelevati:</div>
-                  <div className="font-mono-tight break-all text-slate-800">{r.seriali_prelevati.join(", ")}</div>
+                  <div className="font-semibold text-slate-600 mb-1.5">Seriali prelevati ({r.seriali_prelevati.length}):</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {r.seriali_prelevati.map((sn, j) => (
+                      <span key={j} className="inline-flex items-center gap-1 bg-white border border-slate-200 rounded px-2 py-1 font-mono-tight text-slate-800" data-testid={`sn-chip-${i}-${j}`}>
+                        {sn}
+                        {canPick && (
+                          <button
+                            type="button"
+                            onClick={() => doRemoveSerial(i, sn)}
+                            disabled={busy}
+                            className="ml-1 text-red-500 hover:text-red-700 disabled:opacity-40"
+                            title={`Rimuovi ${sn}`}
+                            data-testid={`sn-remove-${i}-${j}`}
+                            aria-label={`Rimuovi seriale ${sn}`}
+                          >
+                            <Trash size={12} weight="bold" />
+                          </button>
+                        )}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -608,12 +650,12 @@ function CommessaDetail({ id, onBack }) {
   );
 }
 
-function SerialInput({ onSubmit, disabled, testid }) {
+function SerialInput({ onSubmit, disabled, testid, placeholder = "Inserisci seriale…" }) {
   const [v, setV] = useState("");
   return (
     <Input value={v} onChange={(e) => setV(e.target.value)}
       onKeyDown={(e) => { if (e.key === "Enter" && v.trim()) { onSubmit(v.trim()); setV(""); } }}
-      placeholder="SN…" disabled={disabled} className="h-10 flex-1 font-mono-tight" data-testid={testid} autoComplete="off" />
+      placeholder={placeholder} disabled={disabled} className="h-10 flex-1 font-mono-tight" data-testid={testid} autoComplete="off" />
   );
 }
 
