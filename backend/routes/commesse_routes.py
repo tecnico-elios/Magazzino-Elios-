@@ -601,8 +601,9 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
     async def create_draft(cid: str, current=Depends(deps.get_current_user)):
         """F25.b — Crea/recupera una BOZZA DI SPEDIZIONE persistente sul server.
         - Idempotente: se esiste già una bozza per la commessa, ritorna quella.
-        - Atomico: transizione stato pronta → bozza_spedizione via find_one_and_update.
+        - Atomico: transizione stato pronta/parziale → bozza_spedizione via find_one_and_update.
         - NON tocca l'inventario Notion.
+        - F29.b — Accetta anche stato 'parziale' (spedizione parziale con residuo).
         """
         await _require_enabled()
         # Ripresa idempotente: se già in bozza_spedizione, restituisci lo snapshot corrente
@@ -611,7 +612,12 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         if existing.get("stato") == "bozza_spedizione":
             return {"ok": True, "resumed": True, "draft": existing.get("shipment_draft"),
                     "commessa": _serialize(existing)}
-        # Transizione atomica da 'pronta' a 'bozza_spedizione'
+        # Verifica preparato > 0 per stati parziale
+        if existing.get("stato") == "parziale":
+            prep = sum(float(r.get("qty_prelevata") or 0) for r in (existing.get("righe") or []))
+            if prep <= 0:
+                raise HTTPException(409, "Nessun materiale preparato: impossibile creare spedizione parziale")
+        # Transizione atomica da 'pronta' O 'parziale' a 'bozza_spedizione'
         draft_payload = await _build_draft_payload(existing, current.get("username"))
         draft_meta = {
             "created_by": current.get("username"), "created_at": _now(),
@@ -619,7 +625,7 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             "payload": draft_payload,
         }
         updated = await db.commesse.find_one_and_update(
-            {"id": cid, "stato": "pronta"},
+            {"id": cid, "stato": {"$in": ["pronta", "parziale"]}},
             {"$set": {"stato": "bozza_spedizione", "shipment_draft": draft_meta, "updated_at": _now()}},
             return_document=True,
         )
@@ -685,15 +691,15 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
                 if body.get("taken_by"): override["taken_by"] = str(body["taken_by"]).strip()
         except Exception:
             pass
-        # Se la commessa è ancora 'pronta', creiamo prima la bozza (retro-compat client)
-        if doc.get("stato") == "pronta":
+        # Se la commessa è ancora 'pronta' o 'parziale', creiamo prima la bozza (retro-compat client)
+        if doc.get("stato") in ("pronta", "parziale"):
             draft_meta = {
                 "created_by": current.get("username"), "created_at": _now(),
                 "updated_at": _now(), "operation_id": doc.get("operation_id"),
                 "payload": await _build_draft_payload(doc, current.get("username")),
             }
             promoted = await db.commesse.find_one_and_update(
-                {"id": cid, "stato": "pronta"},
+                {"id": cid, "stato": {"$in": ["pronta", "parziale"]}},
                 {"$set": {"stato": "bozza_spedizione", "shipment_draft": draft_meta, "updated_at": _now()}},
                 return_document=True,
             )

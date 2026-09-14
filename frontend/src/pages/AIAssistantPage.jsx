@@ -110,25 +110,24 @@ export default function AIAssistantPage() {
   const modeLabel = { consultation: "Solo Consultazione", operational: "Operativa", full_operational: "Operativa Completa" }[status.mode] || status.mode;
 
   return (
-    <div className="w-full max-w-4xl xl:max-w-5xl 2xl:max-w-6xl mx-auto px-2 py-2 sm:px-4 sm:py-4 lg:px-6 lg:py-6 flex flex-col min-h-[calc(100dvh-72px)] sm:min-h-[calc(100dvh-88px)]" data-testid="ai-page">
-      {/* Header — compatto responsive: badge + provider sotto il titolo su mobile */}
-      <div className="et-card p-3 sm:p-4 lg:p-5 mb-2 sm:mb-3 lg:mb-4 flex items-center gap-2 sm:gap-3 lg:gap-4 shrink-0">
-        <div className="w-9 h-9 sm:w-10 sm:h-10 lg:w-12 lg:h-12 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shrink-0">
-          <Robot size={20} weight="bold" className="lg:hidden" />
-          <Robot size={24} weight="bold" className="hidden lg:block" />
+    <div className="w-full max-w-4xl xl:max-w-5xl 2xl:max-w-6xl mx-auto px-2 py-2 sm:px-4 sm:py-3 lg:px-6 lg:py-4 flex flex-col" style={{ height: "calc(100dvh - 64px)" }} data-testid="ai-page">
+      {/* Header compatto — riduce altezza per lasciare spazio a chat */}
+      <div className="et-card p-2 sm:p-3 mb-2 flex items-center gap-2 sm:gap-3 shrink-0">
+        <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shrink-0">
+          <Robot size={18} weight="bold" />
         </div>
         <div className="flex-1 min-w-0">
-          <h1 className="font-display text-sm sm:text-lg lg:text-xl xl:text-2xl font-black text-slate-900 truncate leading-tight">Assistente AI Magazzino</h1>
-          <div className="flex items-center gap-1.5 lg:gap-2 mt-0.5 lg:mt-1 flex-wrap">
-            <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200 text-[9px] sm:text-[10px] lg:text-xs px-1.5 lg:px-2 py-0 lg:py-0.5">{modeLabel}</Badge>
-            {contextSection && <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-[9px] sm:text-[10px] lg:text-xs px-1.5 lg:px-2 py-0 lg:py-0.5">Contesto: {contextSection}</Badge>}
-            <span className="text-[10px] sm:text-[11px] lg:text-xs text-slate-400 truncate max-w-full">{status.provider} · {status.model}</span>
+          <h1 className="font-display text-sm sm:text-base lg:text-lg font-black text-slate-900 truncate leading-tight">Assistente AI Magazzino</h1>
+          <div className="flex items-center gap-1.5 mt-0 flex-wrap">
+            <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200 text-[9px] sm:text-[10px] px-1.5 py-0">{modeLabel}</Badge>
+            {contextSection && <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-[9px] sm:text-[10px] px-1.5 py-0">Contesto: {contextSection}</Badge>}
+            <span className="text-[10px] text-slate-400 truncate max-w-full">{status.provider} · {status.model}</span>
           </div>
         </div>
       </div>
 
-      {/* Chat area — flex-1 con altezza dinamica; scroll interno. Su desktop più aria e larghezza maggiore. */}
-      <div ref={scrollRef} className="flex-1 min-h-[40vh] lg:min-h-[55vh] overflow-y-auto bg-white border border-slate-200 rounded-md p-2 sm:p-4 lg:p-6 space-y-2 sm:space-y-3 lg:space-y-4" data-testid="ai-chat-area">
+      {/* Chat area — flex-1 riempie tutto lo spazio disponibile, scroll interno */}
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto bg-white border border-slate-200 rounded-md p-2 sm:p-3 lg:p-4 space-y-2 sm:space-y-3" data-testid="ai-chat-area">
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
             <div className={`max-w-[92%] sm:max-w-[85%] lg:max-w-[75%] px-2.5 sm:px-3 lg:px-4 py-1.5 sm:py-2 lg:py-2.5 rounded-lg text-[13px] sm:text-sm lg:text-[15px] ${
@@ -161,8 +160,8 @@ export default function AIAssistantPage() {
         )}
       </div>
 
-      {/* Input — sticky-safe: rimane accessibile anche con keyboard mobile aperta */}
-      <div className="mt-2 sm:mt-3 lg:mt-4 flex gap-2 lg:gap-3 shrink-0">
+      {/* Input — sempre visibile in fondo, non scrolla mai */}
+      <div className="mt-2 flex gap-2 shrink-0">
         <Input
           value={input}
           onChange={(e) => setInput(e.target.value)}
