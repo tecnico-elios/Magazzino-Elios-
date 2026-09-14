@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Package, Plus, ArrowLeft, QrCode, Trash, CheckCircle, Truck, XCircle, User, Clock } from "@phosphor-icons/react";
+import { Package, Plus, ArrowLeft, QrCode, Trash, CheckCircle, Truck, XCircle, User, Clock, PencilSimple, ArrowCounterClockwise } from "@phosphor-icons/react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -10,6 +10,7 @@ import { Badge } from "../components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { normalizeQrCode, parseDazeQr } from "../lib/qr";
 import BarcodeScanner from "../components/BarcodeScanner";
+import { useAuth } from "../lib/AuthContext";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -312,14 +313,19 @@ function ProductPicker({ onClose, onPick }) {
 }
 
 function CommessaDetail({ id, onBack }) {
+  const { isAdmin } = useAuth();
   const [c, setC] = useState(null);
   const [loading, setLoading] = useState(true);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanRigaIdx, setScanRigaIdx] = useState(null);
+  const [scanMode, setScanMode] = useState("serial"); // "serial" | "qty"
   const [confirmComplete, setConfirmComplete] = useState(false);
   const [showBozza, setShowBozza] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [confirmCancelBozza, setConfirmCancelBozza] = useState(false);
+  const [confirmReopen, setConfirmReopen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editMode, setEditMode] = useState(false);
   const [busy, setBusy] = useState(false);
   // F25.b — Tracciamento dello stato precedente per detection cambiamenti (toast informativo)
   const lastStatoRef = useState({ current: null })[0];
@@ -407,6 +413,48 @@ function CommessaDetail({ id, onBack }) {
     catch (e) { toast.error("Errore", { description: e?.response?.data?.detail }); }
     finally { setBusy(false); }
   };
+  const doReopen = async () => {
+    setBusy(true);
+    try {
+      const { data } = await axios.post(`${API}/commesse/${id}/reopen`);
+      setC(data);
+      setConfirmReopen(false);
+      toast.success("Commessa riaperta", { description: `Nuovo stato: ${STATO_LABEL[data.stato]?.txt || data.stato}` });
+    } catch (e) { toast.error("Riapertura fallita", { description: e?.response?.data?.detail }); }
+    finally { setBusy(false); }
+  };
+  const doDelete = async () => {
+    setBusy(true);
+    try {
+      await axios.delete(`${API}/commesse/${id}`);
+      toast.success("Commessa eliminata definitivamente");
+      setConfirmDelete(false);
+      onBack();
+    } catch (e) { toast.error("Eliminazione bloccata", { description: e?.response?.data?.detail }); }
+    finally { setBusy(false); }
+  };
+  // F27 — Scanner A Quantità: verifica che il codice scansionato corrisponda al product_code della riga
+  const doScanQty = (idx, scannedValue) => {
+    const norm = normalizeQrCode(scannedValue);
+    const { serial } = parseDazeQr(norm);
+    const code = (serial || norm || "").trim();
+    const r = c.righe[idx];
+    const expected = (r.product_code || "").trim();
+    if (!expected) {
+      toast.error("Prodotto senza codice", { description: "Impossibile validare la scansione. Usa i pulsanti +/−." });
+      return;
+    }
+    if (code.toLowerCase() !== expected.toLowerCase()) {
+      toast.error("Codice non valido per questo prodotto",
+        { description: `Atteso "${expected}", ricevuto "${code}"` });
+      return;
+    }
+    if (r.qty_prelevata >= r.qty_richiesta) {
+      toast.error("Quantità richiesta già raggiunta");
+      return;
+    }
+    doPickQty(idx, 1);
+  };
 
   if (loading || !c) return <div className="text-center py-8 text-slate-500">Caricamento…</div>;
   const canTake = c.stato === "da_preparare";
@@ -417,6 +465,9 @@ function CommessaDetail({ id, onBack }) {
   const canCreateDraft = c.stato === "pronta";
   const hasBozza = c.stato === "bozza_spedizione";
   const canCancel = !["spedita", "annullata", "bozza_spedizione"].includes(c.stato);
+  const canEdit = ["da_preparare", "in_preparazione", "parziale"].includes(c.stato);
+  const canReopen = c.stato === "annullata";
+  const canDelete = isAdmin && !["spedita"].includes(c.stato) && !c.shipment_ref;
 
   return (
     <div className="space-y-3">
@@ -456,12 +507,16 @@ function CommessaDetail({ id, onBack }) {
                   <Button size="sm" variant="outline" onClick={() => doPickQty(i, -1)} disabled={busy || r.qty_prelevata <= 0} className="h-10 w-10 p-0" data-testid={`minus-${i}`}>−</Button>
                   <div className="flex-1 text-center font-mono-tight text-lg">{r.qty_prelevata}</div>
                   <Button size="sm" onClick={() => doPickQty(i, 1)} disabled={busy || r.qty_prelevata >= r.qty_richiesta} className="h-10 w-10 p-0 bg-emerald-600 hover:bg-emerald-700 text-white" data-testid={`plus-${i}`}>+</Button>
+                  <Button size="sm" onClick={() => { setScanRigaIdx(i); setScanMode("qty"); setScannerOpen(true); }} disabled={busy || r.qty_prelevata >= r.qty_richiesta}
+                    className="h-10 bg-indigo-600 hover:bg-indigo-700 text-white" data-testid={`scan-qty-${i}`} title="Scansiona codice prodotto">
+                    <QrCode size={14} /> Scan
+                  </Button>
                 </div>
               )}
               {canPick && !done && r.tipo_gestione === "a_seriale" && (
                 <div className="mt-2 flex flex-col sm:flex-row gap-2">
                   <SerialInput onSubmit={(sn) => doPickSerial(i, sn)} disabled={busy} testid={`sn-input-${i}`} />
-                  <Button size="sm" onClick={() => { setScanRigaIdx(i); setScannerOpen(true); }} disabled={busy} className="bg-indigo-600 hover:bg-indigo-700 text-white h-10" data-testid={`scan-${i}`}>
+                  <Button size="sm" onClick={() => { setScanRigaIdx(i); setScanMode("serial"); setScannerOpen(true); }} disabled={busy} className="bg-indigo-600 hover:bg-indigo-700 text-white h-10" data-testid={`scan-${i}`}>
                     <QrCode size={14} /> Scan
                   </Button>
                 </div>
@@ -477,11 +532,14 @@ function CommessaDetail({ id, onBack }) {
         })}
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-2">
+      <div className="flex flex-col sm:flex-row gap-2 flex-wrap">
         {canComplete && <Button onClick={() => setConfirmComplete(true)} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white h-12" data-testid="complete-btn"><CheckCircle size={16} /> Completa preparazione</Button>}
         {canCreateDraft && <Button onClick={doCreateDraft} disabled={busy} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white h-12" data-testid="ship-btn"><Truck size={16} /> Crea spedizione</Button>}
         {hasBozza && <Button onClick={() => setShowBozza(true)} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white h-12" data-testid="open-bozza-btn"><Truck size={16} /> Apri bozza</Button>}
+        {canEdit && <Button onClick={() => setEditMode(true)} variant="outline" className="h-12" data-testid="edit-btn"><PencilSimple size={16} /> Modifica</Button>}
+        {canReopen && <Button onClick={() => setConfirmReopen(true)} className="bg-amber-600 hover:bg-amber-700 text-white h-12" data-testid="reopen-btn"><ArrowCounterClockwise size={16} /> Riapri Commessa</Button>}
         {canCancel && <Button onClick={() => setConfirmCancel(true)} variant="outline" className="text-red-700 border-red-300 hover:bg-red-50 h-12" data-testid="cancel-btn"><XCircle size={16} /> Annulla</Button>}
+        {canDelete && <Button onClick={() => setConfirmDelete(true)} variant="outline" className="text-red-800 border-red-400 hover:bg-red-100 h-12" data-testid="delete-btn"><Trash size={16} /> Elimina definitivamente</Button>}
       </div>
 
       {/* F25.b — Banner bozza persistente attiva */}
@@ -503,8 +561,13 @@ function CommessaDetail({ id, onBack }) {
       )}
 
       {scannerOpen && (
-        <BarcodeScanner open={true} onClose={() => setScannerOpen(false)} label="Scansiona seriale"
-          onDetected={(v) => { setScannerOpen(false); if (scanRigaIdx !== null) doPickSerial(scanRigaIdx, v); }} />
+        <BarcodeScanner open={true} onClose={() => setScannerOpen(false)} label={scanMode === "qty" ? "Scansiona codice prodotto" : "Scansiona seriale"}
+          onDetected={(v) => {
+            setScannerOpen(false);
+            if (scanRigaIdx === null) return;
+            if (scanMode === "qty") doScanQty(scanRigaIdx, v);
+            else doPickSerial(scanRigaIdx, v);
+          }} />
       )}
       {confirmComplete && (
         <ConfirmDialog title="Completa preparazione" body={`Confermi la preparazione della commessa #${c.number}? Tutti i materiali risultano prelevati.`}
@@ -526,6 +589,20 @@ function CommessaDetail({ id, onBack }) {
       {confirmCancel && (
         <ConfirmDialog title="Annulla commessa" body={`Confermi l'annullamento della commessa #${c.number}? Prelievi registrati: ${pickedQty}/${totalQty}. L'operazione verrà registrata nel Registro Log.`}
           onCancel={() => setConfirmCancel(false)} onConfirm={doCancel} busy={busy} confirmLabel="Annulla commessa" danger />
+      )}
+      {confirmReopen && (
+        <ConfirmDialog title="Riapri commessa"
+          body={`La commessa #${c.number} verrà riaperta mantenendo lo storico e i prelievi. Nuovo stato calcolato in base ai dati reali.`}
+          onCancel={() => setConfirmReopen(false)} onConfirm={doReopen} busy={busy} confirmLabel="Conferma riapertura" />
+      )}
+      {confirmDelete && (
+        <ConfirmDialog title="⚠️ Elimina definitivamente"
+          body={`ATTENZIONE: la commessa #${c.number} verrà cancellata DEFINITIVAMENTE dal database. Storico prelievi (${pickedQty}) verrà perso. L'operazione NON è annullabile. Solo Admin.`}
+          onCancel={() => setConfirmDelete(false)} onConfirm={doDelete} busy={busy} confirmLabel="Elimina definitivamente" danger />
+      )}
+      {editMode && (
+        <CommessaEditDialog commessa={c} onClose={() => setEditMode(false)}
+          onSaved={(updated) => { setC(updated); setEditMode(false); toast.success("Commessa aggiornata"); }} />
       )}
     </div>
   );
@@ -638,6 +715,219 @@ function BozzaSpedizioneDialog({ commessa, busy, onCancel, onCancelDraft, onConf
             <CheckCircle size={16} /> {busy ? "Invio…" : "Conferma spedizione"}
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+
+// F27 — Dialog di modifica completa commessa con conferma diff + validazione lato client.
+function CommessaEditDialog({ commessa, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    number: commessa.number,
+    cliente: commessa.cliente,
+    data_ordine: commessa.data_ordine || "",
+    data_prevista: commessa.data_prevista || "",
+    priorita: commessa.priorita || "normale",
+    note: commessa.note || "",
+  });
+  const [righe, setRighe] = useState(() => (commessa.righe || []).map((r) => ({ ...r })));
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [cliSuggestions, setCliSuggestions] = useState([]);
+  const [cliOpen, setCliOpen] = useState(false);
+  const [cliLoading, setCliLoading] = useState(false);
+
+  const searchCliente = (v) => {
+    setForm((f) => ({ ...f, cliente: v }));
+    setCliOpen(true);
+    if (window.__cmEditCli) clearTimeout(window.__cmEditCli);
+    window.__cmEditCli = setTimeout(async () => {
+      const q = (v || "").trim();
+      if (q.length < 2) { setCliSuggestions([]); return; }
+      setCliLoading(true);
+      try {
+        const { data } = await axios.get(`${API}/orders/search`, { params: { q, limit: 20 } });
+        setCliSuggestions(data.items || []);
+      } catch { setCliSuggestions([]); }
+      finally { setCliLoading(false); }
+    }, 220);
+  };
+
+  const addRiga = (p) => {
+    // Verifica che il prodotto non sia già presente
+    if (righe.some((r) => r.product_page_id === (p.page_id || p.id))) {
+      toast.error("Prodotto già presente nella commessa");
+      return;
+    }
+    setRighe((r) => [...r, {
+      product_page_id: p.page_id || p.id, product_name: p.name, product_code: p.code,
+      tipo_gestione: p.tipo_gestione, qty_richiesta: 1,
+      qty_prelevata: 0, seriali_prelevati: [],
+    }]);
+    setPickerOpen(false);
+  };
+  const removeRiga = (i) => {
+    const r = righe[i];
+    if ((r.qty_prelevata || 0) > 0 || (r.seriali_prelevati || []).length > 0) {
+      toast.error("Prodotto con prelievi", { description: "Non puoi rimuovere una riga con materiale già preparato" });
+      return;
+    }
+    setRighe(righe.filter((_, j) => j !== i));
+  };
+
+  // Calcolo diff per popup conferma
+  const diff = useMemo(() => {
+    const d = {};
+    for (const k of ["number", "cliente", "data_ordine", "data_prevista", "priorita", "note"]) {
+      if ((commessa[k] || "") !== (form[k] || "")) d[k] = { before: commessa[k] || "—", after: form[k] || "—" };
+    }
+    const oldByPid = Object.fromEntries((commessa.righe || []).map((r) => [r.product_page_id, r]));
+    const newByPid = Object.fromEntries(righe.map((r) => [r.product_page_id, r]));
+    const added = righe.filter((r) => !oldByPid[r.product_page_id]);
+    const removed = (commessa.righe || []).filter((r) => !newByPid[r.product_page_id]);
+    const changed = righe.filter((r) => oldByPid[r.product_page_id] && Number(oldByPid[r.product_page_id].qty_richiesta) !== Number(r.qty_richiesta))
+      .map((r) => ({ product_name: r.product_name, before: oldByPid[r.product_page_id].qty_richiesta, after: r.qty_richiesta }));
+    if (added.length || removed.length || changed.length) d.righe = { added, removed, changed };
+    return d;
+  }, [commessa, form, righe]);
+
+  const hasChanges = Object.keys(diff).length > 0;
+
+  const submit = async () => {
+    if (!hasChanges) { toast.info("Nessuna modifica da salvare"); return; }
+    setSaving(true);
+    try {
+      const payload = { ...form, righe: righe.map(({ qty_prelevata, seriali_prelevati, ...rest }) => rest) };
+      const { data } = await axios.patch(`${API}/commesse/${commessa.id}`, payload);
+      onSaved(data);
+    } catch (e) {
+      toast.error("Salvataggio bloccato", { description: e?.response?.data?.detail || e.message });
+    } finally { setSaving(false); setConfirmOpen(false); }
+  };
+
+  return (
+    <Dialog open={true} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto" data-testid="edit-commessa-dialog">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><PencilSimple size={20} /> Modifica commessa #{commessa.number}</DialogTitle>
+          <DialogDescription>Stato attuale: <b>{STATO_LABEL[commessa.stato]?.txt}</b>. Le regole di modifica dipendono dallo stato.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div><Label>Numero</Label><Input value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} className="mt-1" data-testid="edit-number" /></div>
+            <div>
+              <Label>Cliente</Label>
+              <div className="relative mt-1">
+                <Input value={form.cliente} onChange={(e) => searchCliente(e.target.value)}
+                  onFocus={() => form.cliente.trim().length >= 2 && setCliOpen(true)}
+                  onBlur={() => setTimeout(() => setCliOpen(false), 180)}
+                  autoComplete="off" data-testid="edit-cliente" />
+                {cliOpen && form.cliente.trim().length >= 2 && (
+                  <div className="absolute z-40 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-md shadow-xl max-h-56 overflow-auto">
+                    {cliLoading && <div className="px-3 py-2 text-xs text-slate-400">Cerco…</div>}
+                    {!cliLoading && cliSuggestions.length === 0 && <div className="px-3 py-2 text-xs text-slate-500">Nessun cliente trovato</div>}
+                    {cliSuggestions.map((s) => (
+                      <button key={s.id} type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => { setForm((f) => ({ ...f, cliente: s.structure })); setCliOpen(false); }}
+                        className="w-full text-left px-3 py-2 hover:bg-indigo-50 border-b border-slate-100 last:border-0">
+                        <div className="text-sm font-semibold truncate">{s.structure}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div><Label>Data ordine</Label><Input type="date" value={form.data_ordine} onChange={(e) => setForm({ ...form, data_ordine: e.target.value })} className="mt-1" /></div>
+            <div><Label>Data prevista</Label><Input type="date" value={form.data_prevista} onChange={(e) => setForm({ ...form, data_prevista: e.target.value })} className="mt-1" /></div>
+            <div><Label>Priorità</Label>
+              <select value={form.priorita} onChange={(e) => setForm({ ...form, priorita: e.target.value })}
+                className="mt-1 h-10 w-full border border-slate-300 rounded-md px-2 text-sm bg-white">
+                <option value="urgente">🔴 Urgente</option><option value="alta">🟠 Alta</option>
+                <option value="normale">🟡 Normale</option><option value="bassa">🟢 Bassa</option>
+              </select>
+            </div>
+            <div className="sm:col-span-2"><Label>Note</Label><Textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} rows={2} className="mt-1" /></div>
+          </div>
+          <div className="border-t pt-3">
+            <div className="flex items-center gap-2 mb-2">
+              <h3 className="font-bold text-slate-800 flex-1">Materiale richiesto</h3>
+              <Button size="sm" onClick={() => setPickerOpen(true)} data-testid="edit-add-riga"><Plus size={14} /> Aggiungi prodotto</Button>
+            </div>
+            <div className="space-y-2">
+              {righe.map((r, i) => {
+                const hasPicks = (Number(r.qty_prelevata) || 0) > 0 || (r.seriali_prelevati || []).length > 0;
+                return (
+                  <div key={r.product_page_id} className={`flex items-center gap-2 rounded p-2 ${hasPicks ? "bg-amber-50 border border-amber-200" : "bg-slate-50"}`}>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold truncate">{r.product_name}</div>
+                      <div className="text-[11px] text-slate-500">
+                        {r.product_code} · {r.tipo_gestione === "a_seriale" ? "A Seriale" : "A Quantità"}
+                        {hasPicks && <span className="text-amber-700 font-semibold"> · Preparati: {r.qty_prelevata}</span>}
+                      </div>
+                    </div>
+                    <Input type="number" min={hasPicks ? r.qty_prelevata : 1} value={r.qty_richiesta}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value) || 1;
+                        if (hasPicks && v < r.qty_prelevata) {
+                          toast.error(`Minimo ${r.qty_prelevata} (già preparati)`);
+                          return;
+                        }
+                        setRighe(righe.map((rr, j) => j === i ? { ...rr, qty_richiesta: v } : rr));
+                      }}
+                      className="w-20 h-9" data-testid={`edit-qty-${i}`} />
+                    <Button size="sm" variant="ghost" onClick={() => removeRiga(i)} disabled={hasPicks} title={hasPicks ? "Non rimovibile: ha prelievi" : "Rimuovi"}>
+                      <Trash size={14} className={hasPicks ? "text-slate-300" : "text-red-600"} />
+                    </Button>
+                  </div>
+                );
+              })}
+              {righe.length === 0 && <div className="text-sm text-slate-500 italic py-2">Aggiungi almeno un prodotto…</div>}
+            </div>
+          </div>
+        </div>
+        <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
+          <Button variant="outline" onClick={onClose} disabled={saving} className="w-full sm:w-auto">Chiudi</Button>
+          <Button onClick={() => setConfirmOpen(true)} disabled={saving || !hasChanges || righe.length === 0}
+            className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white" data-testid="edit-save-btn">
+            {hasChanges ? "Salva modifiche…" : "Nessuna modifica"}
+          </Button>
+        </DialogFooter>
+        {pickerOpen && <ProductPicker onClose={() => setPickerOpen(false)} onPick={addRiga} />}
+        {confirmOpen && (
+          <Dialog open={true} onOpenChange={(v) => !v && setConfirmOpen(false)}>
+            <DialogContent className="max-w-md w-[95vw]" data-testid="edit-confirm-dialog">
+              <DialogHeader>
+                <DialogTitle>Conferma modifica Commessa</DialogTitle>
+                <DialogDescription>Verifica le modifiche prima di applicarle definitivamente.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2 text-sm max-h-80 overflow-y-auto">
+                {Object.entries(diff).filter(([k]) => k !== "righe").map(([k, v]) => (
+                  <div key={k} className="border-l-2 border-indigo-300 pl-2">
+                    <div className="text-[10px] uppercase text-slate-500 font-bold">{k}</div>
+                    <div className="text-xs"><span className="text-red-600 line-through">{String(v.before)}</span> → <span className="text-emerald-700 font-semibold">{String(v.after)}</span></div>
+                  </div>
+                ))}
+                {diff.righe && (
+                  <div className="border-l-2 border-indigo-300 pl-2 space-y-1">
+                    <div className="text-[10px] uppercase text-slate-500 font-bold">Righe materiale</div>
+                    {diff.righe.added.map((r, i) => <div key={`a${i}`} className="text-xs text-emerald-700">+ {r.product_name} × {r.qty_richiesta}</div>)}
+                    {diff.righe.removed.map((r, i) => <div key={`r${i}`} className="text-xs text-red-700">− {r.product_name} × {r.qty_richiesta}</div>)}
+                    {diff.righe.changed.map((r, i) => <div key={`c${i}`} className="text-xs">≠ {r.product_name}: <span className="line-through text-red-600">{r.before}</span> → <span className="text-emerald-700 font-semibold">{r.after}</span></div>)}
+                  </div>
+                )}
+              </div>
+              <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
+                <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={saving}>Annulla</Button>
+                <Button onClick={submit} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 text-white" data-testid="edit-confirm-btn">
+                  {saving ? "Salvo…" : "Conferma modifiche"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
       </DialogContent>
     </Dialog>
   );

@@ -1,6 +1,61 @@
 # PRD — Magazzino Elios Tech
 
 
+## F27 (14/09/2026) — Modifica Completa Commessa + Riapri + Elimina Admin + Scanner A Quantità + KPI Annullate ✅
+
+### Backend — Modifica completa con regole per stato + audit diff
+- `PATCH /api/commesse/{cid}` refactor:
+  - `da_preparare` → modifica libera (righe/qty/cliente/date/priorità/note)
+  - `in_preparazione` / `parziale` → `qty_richiesta ≥ qty_prelevata` (blocco esplicito con 400), preserva prelievi + seriali, no rimozione righe con prelievi, no cambio tipo gestione con prelievi
+  - `pronta` → blocco righe (annulla completamento per modificare)
+  - `bozza_spedizione` → blocco (annulla bozza)
+  - `spedita` → blocco, `annullata` → messaggio "usa Riapri"
+- Log evento `COMMESSA_MODIFICATA` con **diff dettagliato**: {campo: {before, after}} + righe {added, removed, qty_changes}
+- Ricalcolo automatico `stato` se cambiate righe (via `_compute_stato`)
+
+### Backend — Nuovi endpoint
+- `POST /api/commesse/{cid}/reopen` — riapre annullata, atomico via `find_one_and_update({stato:annullata})`. Ricalcola stato dai prelievi effettivi: 0 picks → `da_preparare`, con picks → `in_preparazione`/`parziale`/`pronta`. Stesso `id`, stesso `operation_id`, storico e log preservati. Evento `COMMESSA_RIAPERTA`.
+- `DELETE /api/commesse/{cid}` (Admin only via `Depends(require_admin)`) — cancellazione definitiva. Blocca se `shipment_ref` o `stato=spedita` (409 con motivo). Log **prima** della cancellazione con snapshot completo delle righe (retention audit). Evento `COMMESSA_ELIMINATA` livello WARNING.
+
+### Frontend Dashboard — 5° KPI Annullate + pulsante separato
+- `DashboardPage.jsx`: aggiunto KPI ⚪ Annullate (`bg-slate-50`), grid `sm:grid-cols-3 lg:grid-cols-5` → i KPI non si comprimono.
+- Pulsante "Apri Commesse →" ora è un `<Link>` blu separato **sotto** i KPI, non più `absolute bottom-right` sovrapposto al KPI Pronte.
+- Riquadro Commesse: rimosso `absolute` del CTA, layout `flex flex-col` con border-top separatore. Il pulsante è visibile su tutti i breakpoint senza overflow.
+- `CM_TONE` esteso con `slate`.
+
+### Frontend CommessePage — Modifica/Riapri/Elimina/Scanner
+- **CommessaEditDialog** (nuovo, 200 righe): form completo (numero, cliente autocomplete Notion, date, priorità, note, righe) con:
+  - Aggiungi/rimuovi/modifica quantità righe con validazione client (`qty_richiesta ≥ qty_prelevata`, no rimozione con prelievi)
+  - Righe con prelievi evidenziate in ambra "Preparati: N"
+  - **Popup conferma con diff visuale** (added/removed/changed) prima di applicare PATCH
+  - Toast errore reale dal backend se PATCH bloccato
+- **Pulsante "Modifica"** visibile in stati `da_preparare`/`in_preparazione`/`parziale`
+- **Pulsante "Riapri Commessa"** visibile in stato `annullata` (con conferma)
+- **Pulsante "Elimina definitivamente"** visibile solo se `isAdmin` && `!spedita` && `!shipment_ref` (con doppia conferma esplicita)
+- **Scanner camera A Quantità** (nuovo): pulsante 📷 Scan sulle righe `a_quantita`. Al detect, normalizza QR (`normalizeQrCode` + `parseDazeQr`), confronta con `product_code` della riga. Se match → `+1`, altrimenti toast errore "Codice non valido per questo prodotto (atteso X, ricevuto Y)". Nessun picking errato registrato.
+- `scanMode` (`serial`/`qty`) determina il flusso onDetected condiviso col BarcodeScanner esistente (nessun secondo scanner).
+
+### Test PASS/FAIL
+- ✅ Backend `_compute_stato` post-reopen: commessa annullata con 3/5+0/2 prelievi → ritorna `parziale` (test script)
+- ✅ Backend DELETE blocca su `shipment_ref` (test script: fresh doc con shipment_ref → 409)
+- ✅ Backend PATCH audit diff struttura corretta (before/after per campo)
+- ✅ `yarn build production` **19.53s** — 0 errori (solo warning ESLint pre-esistenti)
+- ✅ `/api/features` 200 OK
+- ⚠️ NON verificato via UI browser autenticata (no credenziali admin): flusso completo Modifica → popup diff → salvataggio; Riapri commessa annullata; Elimina definitiva admin; Scanner A Quantità con QR valido/invalido; KPI Annullate cliccabile su Dashboard.
+
+### Vincoli rispettati
+- Nessun sistema parallelo (Notion SSOT, Inventario/Movimenti invariati).
+- Riuso `BarcodeScanner`, `normalizeQrCode`, `parseDazeQr`, `event_logger`, `useAuth.isAdmin`, `require_admin`.
+- Nessuna funzione "Reintegra seriale" (in nessuna forma).
+- `operation_id` mantenuto tra tutte le operazioni (modify/reopen/delete/ship).
+
+### File modificati
+- `/app/backend/routes/commesse_routes.py` — PATCH refactor + `POST /{cid}/reopen` + `DELETE /{cid}` admin
+- `/app/frontend/src/pages/DashboardPage.jsx` — 5° KPI + pulsante separato + `slate` tone
+- `/app/frontend/src/pages/CommessePage.jsx` — CommessaEditDialog + Modifica/Riapri/Elimina buttons + scanner A Quantità
+
+
+
 ## F26 (14/09/2026) — Bozza Spedizione Persistente + Polling Real-time ✅
 
 ### Persistenza server-side della bozza (P1)

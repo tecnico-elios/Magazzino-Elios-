@@ -180,25 +180,94 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
 
     @router.patch("/{cid}")
     async def update_commessa(cid: str, body: CommessaUpdate, current=Depends(deps.get_current_user)):
+        """F27 — Modifica completa con regole per stato + audit diff dettagliato.
+        - Da preparare: full edit
+        - In preparazione/Parziale: qty_richiesta >= qty_prelevata, no rimozione righe con prelievi, no rimozione seriali già prelevati
+        - Pronta: blocco righe (annulla completamento per modificare)
+        - Bozza spedizione: blocco (annulla prima la bozza)
+        - Spedita/Annullata: blocco (usa reopen)
+        """
         await _require_enabled()
         doc = await db.commesse.find_one({"id": cid})
         if not doc: raise HTTPException(404, "Commessa non trovata")
-        if doc.get("stato") in ("spedita", "annullata"):
-            raise HTTPException(409, "Commessa non modificabile in questo stato")
+        stato = doc.get("stato")
+        if stato in ("spedita", "annullata"):
+            raise HTTPException(409, f"Commessa {stato}: usa 'Riapri' per modificarla" if stato == "annullata" else "Commessa spedita: non modificabile")
+        if stato == "bozza_spedizione":
+            raise HTTPException(409, "Bozza spedizione attiva: annulla la bozza per modificare la commessa")
         updates = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
-        # Se già in preparazione o parziale, non si possono cambiare le righe
-        if doc.get("stato") in ("in_preparazione", "parziale", "pronta") and "righe" in updates:
-            raise HTTPException(409, "Righe non modificabili: preparazione già iniziata. Annulla e ricrea la commessa.")
         if "priorita" in updates and updates["priorita"] not in PRIORITA:
             raise HTTPException(400, "Priorità non valida")
+
         if "righe" in updates:
-            new_righe = []
-            for r in updates["righe"]:
+            if stato == "pronta":
+                raise HTTPException(409, "Commessa pronta: le righe non sono modificabili. Annulla il completamento per modificarle.")
+            old_righe = doc.get("righe") or []
+            old_by_pid = {r.get("product_page_id"): r for r in old_righe}
+            new_input = updates["righe"]
+            merged = []
+            seen_pids = set()
+            for r in new_input:
                 rr = r.model_dump() if hasattr(r, "model_dump") else dict(r)
-                rr["qty_prelevata"] = 0.0
-                rr["seriali_prelevati"] = []
-                new_righe.append(rr)
-            updates["righe"] = new_righe
+                pid = rr.get("product_page_id")
+                seen_pids.add(pid)
+                old = old_by_pid.get(pid)
+                if old and (float(old.get("qty_prelevata") or 0) > 0 or (old.get("seriali_prelevati") or [])):
+                    # Riga con prelievi: preservali + verifica compatibilità quantità
+                    qp = float(old.get("qty_prelevata") or 0)
+                    if float(rr.get("qty_richiesta") or 0) < qp:
+                        raise HTTPException(400,
+                            f"'{rr.get('product_name')}': quantità richiesta ({rr.get('qty_richiesta')}) inferiore alla già preparata ({qp:g}). Aumenta la quantità o rimuovi i prelievi.")
+                    if rr.get("tipo_gestione") != old.get("tipo_gestione"):
+                        raise HTTPException(400,
+                            f"'{rr.get('product_name')}': impossibile cambiare tipo gestione con prelievi già effettuati.")
+                    rr["qty_prelevata"] = qp
+                    rr["seriali_prelevati"] = list(old.get("seriali_prelevati") or [])
+                else:
+                    # Nuova riga o riga senza prelievi
+                    rr["qty_prelevata"] = 0.0
+                    rr["seriali_prelevati"] = []
+                merged.append(rr)
+            # Verifica righe eliminate: quelle con prelievi non possono essere rimosse
+            removed_with_picks = [r for pid, r in old_by_pid.items()
+                                  if pid not in seen_pids and
+                                  (float(r.get("qty_prelevata") or 0) > 0 or (r.get("seriali_prelevati") or []))]
+            if removed_with_picks:
+                names = ", ".join(r.get("product_name") or "?" for r in removed_with_picks)
+                raise HTTPException(400, f"Non puoi rimuovere prodotti con prelievi effettuati: {names}. Prima rimuovi i prelievi.")
+            updates["righe"] = merged
+
+        # Calcola diff prima di applicare (per audit)
+        diff = {}
+        for k in ("cliente", "data_ordine", "data_prevista", "priorita", "note"):
+            if k in updates and doc.get(k) != updates[k]:
+                diff[k] = {"before": doc.get(k), "after": updates[k]}
+        if "righe" in updates:
+            old_pids = {r.get("product_page_id") for r in (doc.get("righe") or [])}
+            new_pids = {r.get("product_page_id") for r in updates["righe"]}
+            added = [r for r in updates["righe"] if r.get("product_page_id") not in old_pids]
+            removed = [r for r in (doc.get("righe") or []) if r.get("product_page_id") not in new_pids]
+            qty_changes = []
+            for r in updates["righe"]:
+                pid = r.get("product_page_id")
+                if pid in old_pids:
+                    old = next((o for o in (doc.get("righe") or []) if o.get("product_page_id") == pid), None)
+                    if old and float(old.get("qty_richiesta") or 0) != float(r.get("qty_richiesta") or 0):
+                        qty_changes.append({"product": r.get("product_name"),
+                                            "before": old.get("qty_richiesta"), "after": r.get("qty_richiesta")})
+            if added or removed or qty_changes:
+                diff["righe"] = {
+                    "added": [{"product": r.get("product_name"), "qty": r.get("qty_richiesta")} for r in added],
+                    "removed": [{"product": r.get("product_name"), "qty": r.get("qty_richiesta")} for r in removed],
+                    "qty_changes": qty_changes,
+                }
+        # Ricalcola stato se righe cambiate (in preparazione ↔ parziale, ecc.)
+        if "righe" in updates:
+            preview = {**doc, **updates}
+            updates["stato"] = _compute_stato(preview)
+            if updates["stato"] == stato:
+                updates.pop("stato")
+
         updates["updated_at"] = _now()
         await db.commesse.update_one({"id": cid}, {"$set": updates})
         await event_logger.log_event(
@@ -206,11 +275,69 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             action="commesse.update", level="INFO", status="SUCCESS",
             user=current.get("username"), operation_id=doc.get("operation_id"),
             endpoint=f"PATCH /api/commesse/{cid}",
-            message=f"Commessa #{doc.get('number')} modificata ({list(updates.keys())})",
-            details={"commessa_id": cid, "changed": list(updates.keys())},
+            customer=doc.get("cliente"),
+            message=f"Commessa #{doc.get('number')} modificata ({len(diff)} campi)",
+            details={"commessa_id": cid, "changed_fields": list(diff.keys()), "diff": diff},
         )
         fresh = await db.commesse.find_one({"id": cid})
         return _serialize(fresh)
+
+    @router.post("/{cid}/reopen")
+    async def reopen_commessa(cid: str, current=Depends(deps.get_current_user)):
+        """F27 — Riapre una commessa annullata mantenendo storico e prelievi.
+        Ricalcola lo stato in base ai prelievi effettivi (da_preparare / in_preparazione / parziale / pronta).
+        Non crea nuova commessa: stesso id, stesso operation_id."""
+        await _require_enabled()
+        doc = await db.commesse.find_one({"id": cid})
+        if not doc: raise HTTPException(404, "Commessa non trovata")
+        if doc.get("stato") != "annullata":
+            raise HTTPException(409, f"Riapri disponibile solo su commesse annullate (stato attuale: {doc.get('stato')})")
+        # Ricalcola stato: se ci sono prelievi → in_preparazione/parziale/pronta; altrimenti da_preparare
+        base = {**doc, "stato": "in_preparazione"}
+        new_stato = _compute_stato(base)
+        if new_stato == "spedita":  # safety
+            new_stato = "pronta"
+        updated = await db.commesse.find_one_and_update(
+            {"id": cid, "stato": "annullata"},
+            {"$set": {"stato": new_stato, "updated_at": _now()},
+             "$unset": {"cancelled_at": ""}},
+            return_document=True,
+        )
+        if not updated:
+            raise HTTPException(409, "Riapertura non riuscita (stato cambiato in concorrenza)")
+        await event_logger.log_event(
+            db, category="COMMESSE", event_type="COMMESSA_RIAPERTA",
+            action="commesse.reopen", level="INFO", status="SUCCESS",
+            user=current.get("username"), operation_id=doc.get("operation_id"),
+            endpoint=f"POST /api/commesse/{cid}/reopen",
+            customer=doc.get("cliente"),
+            message=f"Commessa #{doc.get('number')} riaperta (nuovo stato: {new_stato})",
+            details={"commessa_id": cid, "previous_stato": "annullata", "new_stato": new_stato},
+        )
+        return _serialize(updated)
+
+    @router.delete("/{cid}", dependencies=[Depends(deps.require_admin)])
+    async def delete_commessa(cid: str, current=Depends(deps.get_current_user)):
+        """F27 — Cancellazione DEFINITIVA (solo Admin). Impedita se collegata a spedizione."""
+        await _require_enabled()
+        doc = await db.commesse.find_one({"id": cid})
+        if not doc: raise HTTPException(404, "Commessa non trovata")
+        if doc.get("shipment_ref") or doc.get("stato") == "spedita":
+            raise HTTPException(409, "Commessa collegata a una spedizione già effettuata. Non eliminabile.")
+        # Log PRIMA della cancellazione (retention audit)
+        await event_logger.log_event(
+            db, category="COMMESSE", event_type="COMMESSA_ELIMINATA",
+            action="commesse.delete", level="WARNING", status="SUCCESS",
+            user=current.get("username"), user_role=current.get("role"),
+            operation_id=doc.get("operation_id"),
+            endpoint=f"DELETE /api/commesse/{cid}",
+            customer=doc.get("cliente"),
+            message=f"Commessa #{doc.get('number')} ELIMINATA DEFINITIVAMENTE da Admin {current.get('username')}",
+            details={"commessa_id": cid, "number": doc.get("number"), "cliente": doc.get("cliente"),
+                     "stato": doc.get("stato"), "righe_snapshot": doc.get("righe") or []},
+        )
+        await db.commesse.delete_one({"id": cid})
+        return {"ok": True, "deleted": cid}
 
     @router.post("/{cid}/take")
     async def take_commessa(cid: str, current=Depends(deps.get_current_user)):

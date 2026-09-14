@@ -124,6 +124,7 @@ export default function DashboardPage() {
   const cmInPreparazione = commesseKpi.in_preparazione ?? 0;
   const cmParziale = commesseKpi.parziale ?? 0;
   const cmPronta = commesseKpi.pronta ?? 0;
+  const cmAnnullate = commesseKpi.annullata ?? 0;
   const commesseAttive = (commesseItems || []).filter((c) => ["da_preparare", "in_preparazione", "parziale", "pronta"].includes(c.stato));
   const commesseDaFare = commesseAttive.slice(0, 5); // già ordinate server-side per priorità/data
 
@@ -180,19 +181,21 @@ export default function DashboardPage() {
             className="group relative overflow-hidden rounded-xl p-6 sm:p-8 text-white border border-indigo-400/20 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 hover:border-indigo-300/60 transition-all shadow-[0_10px_40px_-15px_rgba(2,6,23,0.5)] hover:shadow-[0_20px_60px_-15px_rgba(99,102,241,0.35)] md:col-span-2 xl:col-span-1"
           >
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(129,140,248,0.22),transparent_55%)]" aria-hidden />
-            <div className="relative">
+            <div className="relative flex flex-col h-full">
               <div className="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-indigo-500/15 border border-indigo-400/30 text-indigo-200">
                 <ClipboardText size={26} weight="bold" />
               </div>
               <div className="text-3xl sm:text-4xl font-display font-black mt-5 tracking-tight">COMMESSE</div>
               <div className="text-slate-300/80 text-sm mt-2">Gestisci ordini, preparazione e prelievo del materiale</div>
-              <div className="mt-4 grid grid-cols-2 gap-1 text-[11px] sm:text-xs font-mono-tight">
-                <div className="flex items-center gap-1 text-red-300"><span>🔴</span> {cmDaPreparare} da preparare</div>
-                <div className="flex items-center gap-1 text-yellow-300"><span>🟡</span> {cmInPreparazione} in preparazione</div>
-                <div className="flex items-center gap-1 text-orange-300"><span>⚠️</span> {cmParziale} parziali</div>
-                <div className="flex items-center gap-1 text-emerald-300"><span>🟢</span> {cmPronta} pronte</div>
+              {/* F27 — 5 KPI reali + pulsante su riga dedicata */}
+              <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-x-2 gap-y-1.5 text-[11px] sm:text-xs font-mono-tight">
+                <div className="flex items-center gap-1 text-red-300"><span aria-hidden>🔴</span> <span>{cmDaPreparare} da preparare</span></div>
+                <div className="flex items-center gap-1 text-yellow-300"><span aria-hidden>🟡</span> <span>{cmInPreparazione} in preparazione</span></div>
+                <div className="flex items-center gap-1 text-orange-300"><span aria-hidden>⚠️</span> <span>{cmParziale} parziali</span></div>
+                <div className="flex items-center gap-1 text-emerald-300"><span aria-hidden>🟢</span> <span>{cmPronta} pronte</span></div>
+                <div className="flex items-center gap-1 text-slate-400"><span aria-hidden>⚪</span> <span>{cmAnnullate} annullate</span></div>
               </div>
-              <div className="absolute right-0 bottom-0 text-indigo-200/90 text-xs font-mono-tight">
+              <div className="mt-4 pt-3 border-t border-indigo-400/20 text-indigo-200/90 text-xs font-mono-tight font-semibold">
                 Apri Commesse →
               </div>
             </div>
@@ -217,15 +220,25 @@ export default function DashboardPage() {
         </Link>
       </div>
 
-      {/* F23 — KPI Commesse cliccabili (deep-link con ?stato=) — mostrati SOLO se abilitato */}
+      {/* F23/F27 — KPI Commesse cliccabili (deep-link con ?stato=) — 5 KPI + pulsante dedicato */}
       {commesseEnabled && (
         <div>
           <div className="et-eyebrow mb-2 text-indigo-700">📦 Commesse — panoramica lavorazione</div>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-testid="dash-commesse-kpi">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3" data-testid="dash-commesse-kpi">
             <CommessaKpi to="/commesse?stato=da_preparare" icon="🔴" label="Da preparare" value={cmDaPreparare} tone="red" testid="cm-kpi-da-preparare" />
-            <CommessaKpi to="/commesse?stato=in_preparazione" icon="🔧" label="In preparazione" value={cmInPreparazione} tone="yellow" testid="cm-kpi-in-preparazione" />
-            <CommessaKpi to="/commesse?stato=parziale" icon="⚠️" label="Parzialmente preparate" value={cmParziale} tone="orange" testid="cm-kpi-parziale" />
-            <CommessaKpi to="/commesse?stato=pronta" icon="✅" label="Pronte per spedizione" value={cmPronta} tone="emerald" testid="cm-kpi-pronta" />
+            <CommessaKpi to="/commesse?stato=in_preparazione" icon="🟡" label="In preparazione" value={cmInPreparazione} tone="yellow" testid="cm-kpi-in-preparazione" />
+            <CommessaKpi to="/commesse?stato=parziale" icon="⚠️" label="Parziali" value={cmParziale} tone="orange" testid="cm-kpi-parziale" />
+            <CommessaKpi to="/commesse?stato=pronta" icon="🟢" label="Pronte" value={cmPronta} tone="emerald" testid="cm-kpi-pronta" />
+            <CommessaKpi to="/commesse?stato=annullata" icon="⚪" label="Annullate" value={cmAnnullate} tone="slate" testid="cm-kpi-annullate" />
+          </div>
+          <div className="mt-3">
+            <Link
+              to="/commesse"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold shadow-sm transition-colors"
+              data-testid="dash-open-commesse-btn"
+            >
+              Apri Commesse →
+            </Link>
           </div>
         </div>
       )}
@@ -543,6 +556,7 @@ const CM_TONE = {
   yellow:  { border: "border-yellow-200 hover:border-yellow-400", value: "text-yellow-700", bg: "bg-yellow-50/40" },
   orange:  { border: "border-orange-200 hover:border-orange-400", value: "text-orange-700", bg: "bg-orange-50/40" },
   emerald: { border: "border-emerald-200 hover:border-emerald-400", value: "text-emerald-700", bg: "bg-emerald-50/40" },
+  slate:   { border: "border-slate-200 hover:border-slate-400", value: "text-slate-700", bg: "bg-slate-50/40" },
 };
 
 function CommessaKpi({ to, icon, label, value, tone, testid }) {
