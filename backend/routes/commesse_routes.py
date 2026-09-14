@@ -36,6 +36,9 @@ class CommessaCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
     number: str = Field(min_length=1, max_length=50)
     cliente: str = Field(min_length=1, max_length=200)
+    # F28.c — ID Notion dell'ordine "Eliostech Ordini" agganciato al cliente (autocomplete).
+    # Salvato sulla commessa e propagato al payload spedizione per allineamento SSOT.
+    order_page_id: Optional[str] = None
     data_ordine: Optional[str] = None
     data_prevista: Optional[str] = None
     priorita: str = "normale"
@@ -154,6 +157,8 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             "id": str(uuid.uuid4()),
             "number": body.number.strip(),
             "cliente": body.cliente.strip(),
+            # F28.c — Persisti order_page_id se selezionato via autocomplete Notion (SSOT clienti)
+            "order_page_id": (body.order_page_id or "").strip() or None,
             "data_ordine": body.data_ordine,
             "data_prevista": body.data_prevista,
             "priorita": body.priorita,
@@ -513,28 +518,49 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         )
         return _serialize(await db.commesse.find_one({"id": cid}))
 
-    def _build_draft_payload(doc: Dict[str, Any], operator: str) -> Dict[str, Any]:
+    async def _build_draft_payload(doc: Dict[str, Any], operator: str) -> Dict[str, Any]:
         """Costruisce lo snapshot bozza dai dati correnti della commessa.
-        F28.b — include SEMPRE shipping_date (fallback: data_prevista → today).
-        Il campo è obbligatorio in /api/checklist/send (ChecklistPayload)."""
+        F28.b/c — payload IDENTICO a quello inviato da /ChecklistPage (spedizione normale):
+        include shipping_date, order_page_id, notes, e qr_codes allineati ai seriali."""
         items_payload = []
         for r in doc.get("righe") or []:
+            serials = list(r.get("seriali_prelevati") or [])
+            # F28.c — Recupera i QR code associati ai seriali (SSOT: db.qr_associations)
+            # Stessa collection usata da /checklist/send. Ogni seriale può avere 0 o 1 QR attivo.
+            qr_codes: List[str] = []
+            if serials:
+                sn_lows = [s.strip().lower() for s in serials if s]
+                if sn_lows:
+                    cursor = db.qr_associations.find({"serial_lower": {"$in": sn_lows}, "active": True})
+                    qr_map: Dict[str, str] = {}
+                    async for d in cursor:
+                        qr_map[d.get("serial_lower")] = d.get("qr_code") or ""
+                    qr_codes = [qr_map.get(s.strip().lower(), "") for s in serials]
             items_payload.append({
                 "page_id": r.get("product_page_id"),
                 "name": r.get("product_name"),
                 "product_code": r.get("product_code"),
                 "serialized": (r.get("tipo_gestione") == "a_seriale"),
-                "serials": list(r.get("seriali_prelevati") or []),
+                "serials": serials,
+                "qr_codes": qr_codes,  # F28.c — allineati per index ai seriali (stringa vuota se assente)
                 "quantity": float(r.get("qty_prelevata") or 0),
                 "unit": "pz",
             })
         # Data spedizione: usa data_prevista della commessa se presente, altrimenti oggi
         ship_date = doc.get("data_prevista") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        # F28.c — Note: prefisso automatico con riferimento commessa per tracciabilità Notion.
+        # Se il campo "notes" del ChecklistPayload non è mappato su Notion, questa stringa
+        # rimane comunque nel Registro Log/audit come parte del payload.
+        base_notes = (doc.get("note") or "").strip()
+        combined_notes = f"Commessa #{doc.get('number')}" + (f" — {base_notes}" if base_notes else "")
         return {
             "shipping_date": ship_date,
             "operator": operator,
             "structure": doc.get("cliente"),
             "taken_by": doc.get("operatore_carico") or operator,
+            # F28.c — order_page_id: identico al flusso ChecklistPage (evita ambiguità ricerca)
+            "order_page_id": doc.get("order_page_id"),
+            "notes": combined_notes,
             "items": items_payload,
             "commessa_ref": doc.get("number"),
         }
@@ -554,7 +580,7 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             return {"ok": True, "resumed": True, "draft": existing.get("shipment_draft"),
                     "commessa": _serialize(existing)}
         # Transizione atomica da 'pronta' a 'bozza_spedizione'
-        draft_payload = _build_draft_payload(existing, current.get("username"))
+        draft_payload = await _build_draft_payload(existing, current.get("username"))
         draft_meta = {
             "created_by": current.get("username"), "created_at": _now(),
             "updated_at": _now(), "operation_id": existing.get("operation_id"),
@@ -632,7 +658,7 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             draft_meta = {
                 "created_by": current.get("username"), "created_at": _now(),
                 "updated_at": _now(), "operation_id": doc.get("operation_id"),
-                "payload": _build_draft_payload(doc, current.get("username")),
+                "payload": await _build_draft_payload(doc, current.get("username")),
             }
             promoted = await db.commesse.find_one_and_update(
                 {"id": cid, "stato": "pronta"},
@@ -654,7 +680,7 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         base = os.environ.get("INTERNAL_API_BASE") or "http://localhost:8001"
         # Usa il payload persistito (se presente) altrimenti ricostruisci dai dati correnti
         draft = doc.get("shipment_draft") or {}
-        payload = draft.get("payload") or _build_draft_payload(doc, current.get("username"))
+        payload = draft.get("payload") or await _build_draft_payload(doc, current.get("username"))
         # F28.b — Assicura shipping_date SEMPRE presente (retro-compat con bozze pre-fix)
         if not payload.get("shipping_date"):
             payload["shipping_date"] = doc.get("data_prevista") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -663,6 +689,9 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         # Ricostruisci items nel formato atteso da /checklist/send (senza product_code)
         items_payload = [{k: v for k, v in it.items() if k != "product_code"} for it in payload.get("items", [])]
         payload = {**payload, "items": items_payload}
+        # F28.c — Rimuovi eventuali campi extra non riconosciuti da ChecklistPayload (extra="ignore" li ignora,
+        # ma per pulizia log/curl li omettiamo). commessa_ref viene silenziosamente ignorato dal backend
+        # (ChecklistPayload ha extra="ignore") ma lo lasciamo perché serve al log della commessa.
         try:
             async with httpx.AsyncClient(timeout=90.0, headers={"Authorization": auth_header}) as client:
                 r = await client.post(f"{base}/api/checklist/send", json=payload)
