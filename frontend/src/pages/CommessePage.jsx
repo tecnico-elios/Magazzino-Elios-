@@ -402,10 +402,17 @@ function CommessaDetail({ id, onBack }) {
     } catch (e) { toast.error("Errore creazione bozza", { description: e?.response?.data?.detail }); }
     finally { setBusy(false); }
   };
-  const doConfirmShip = async () => {
+  const doConfirmShip = async (opts = {}) => {
     setBusy(true);
-    try { const { data } = await axios.post(`${API}/commesse/${id}/ship`); setC(data.commessa); setShowBozza(false);
-      toast.success("Spedizione confermata", { description: data.shipment?.message });
+    try {
+      const body = opts && opts.shipping_date ? { shipping_date: opts.shipping_date } : {};
+      const { data } = await axios.post(`${API}/commesse/${id}/ship`, body);
+      setC(data.commessa); setShowBozza(false);
+      if (data.already_shipped) {
+        toast.info("Commessa già spedita", { description: `Rif: ${data.shipment?.checklist_id}` });
+      } else {
+        toast.success("Spedizione confermata", { description: data.shipment?.message });
+      }
       if (data.shipment?.inventory_warnings?.length) toast.warning("Attenzione Inventario", { description: data.shipment.inventory_warnings.join(" · "), duration: 15000 });
     } catch (e) { toast.error("Spedizione fallita", { description: e?.response?.data?.detail }); }
     finally { setBusy(false); }
@@ -692,6 +699,10 @@ function BozzaSpedizioneDialog({ commessa, busy, onCancel, onCancelDraft, onConf
         tipo_gestione: r.tipo_gestione,
         qty_prelevata: r.qty_prelevata, seriali_prelevati: r.seriali_prelevati || [],
       }));
+  // F28.b — Data spedizione modificabile (default: draft persistito → data_prevista → oggi)
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const initialDate = draft?.payload?.shipping_date || commessa.data_prevista || todayISO;
+  const [shipDate, setShipDate] = useState(initialDate);
   return (
     <Dialog open={true} onOpenChange={(v) => !v && onCancel()}>
       <DialogContent className="max-w-lg w-[95vw]" data-testid="bozza-spedizione-dialog">
@@ -716,6 +727,13 @@ function BozzaSpedizioneDialog({ commessa, busy, onCancel, onCancelDraft, onConf
                 Creata da <b>{draft.created_by}</b> · op: <span className="font-mono-tight">{commessa.operation_id}</span>
               </div>
             )}
+          </div>
+          {/* F28.b — Data spedizione editable (obbligatoria per il backend) */}
+          <div>
+            <Label className="text-[11px] uppercase tracking-wider text-slate-600 font-bold">Data spedizione *</Label>
+            <Input type="date" value={shipDate} onChange={(e) => setShipDate(e.target.value)}
+              className="mt-1 h-10 font-mono-tight" data-testid="bozza-ship-date" required />
+            <div className="text-[11px] text-slate-500 mt-1">Verrà inviata al modulo Spedizioni come data ufficiale di uscita.</div>
           </div>
           <div>
             <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1.5">Materiale ({righe.length} righe)</div>
@@ -751,7 +769,7 @@ function BozzaSpedizioneDialog({ commessa, busy, onCancel, onCancelDraft, onConf
             data-testid="bozza-cancel">
             <XCircle size={16} /> Annulla bozza
           </Button>
-          <Button onClick={onConfirm} disabled={busy}
+          <Button onClick={() => onConfirm({ shipping_date: shipDate })} disabled={busy || !shipDate}
             className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white"
             data-testid="bozza-confirm">
             <CheckCircle size={16} /> {busy ? "Invio…" : "Conferma spedizione"}

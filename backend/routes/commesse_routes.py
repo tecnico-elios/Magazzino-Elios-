@@ -514,7 +514,9 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         return _serialize(await db.commesse.find_one({"id": cid}))
 
     def _build_draft_payload(doc: Dict[str, Any], operator: str) -> Dict[str, Any]:
-        """Costruisce lo snapshot bozza dai dati correnti della commessa."""
+        """Costruisce lo snapshot bozza dai dati correnti della commessa.
+        F28.b — include SEMPRE shipping_date (fallback: data_prevista → today).
+        Il campo è obbligatorio in /api/checklist/send (ChecklistPayload)."""
         items_payload = []
         for r in doc.get("righe") or []:
             items_payload.append({
@@ -526,7 +528,10 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
                 "quantity": float(r.get("qty_prelevata") or 0),
                 "unit": "pz",
             })
+        # Data spedizione: usa data_prevista della commessa se presente, altrimenti oggi
+        ship_date = doc.get("data_prevista") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
         return {
+            "shipping_date": ship_date,
             "operator": operator,
             "structure": doc.get("cliente"),
             "taken_by": doc.get("operatore_carico") or operator,
@@ -600,13 +605,28 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
 
     @router.post("/{cid}/ship")
     async def ship_commessa(cid: str, request: Request, current=Depends(deps.get_current_user)):
-        """F25.b — CONFERMA la spedizione (partendo da bozza persistente).
-        Esegue realmente /api/checklist/send, scala l'inventario Notion e passa a 'spedita'.
-        Retro-compat: se la commessa è ancora in 'pronta', la promuoviamo prima a bozza
-        atomicamente e poi confermiamo (client vecchi continuano a funzionare)."""
+        """F25.b/F28.b — CONFERMA la spedizione (partendo da bozza persistente).
+        - Body opzionale {shipping_date: "YYYY-MM-DD"} per override.
+        - Idempotente: se già spedita ritorna 200 con `already_shipped: true` (no doppia spedizione).
+        - Esegue /api/checklist/send solo una volta (transizione atomica → spedita)."""
         await _require_enabled()
         doc = await db.commesse.find_one({"id": cid})
         if not doc: raise HTTPException(404, "Commessa non trovata")
+        # F28.b — Idempotenza: se già spedita, ritorna il risultato precedente
+        if doc.get("stato") == "spedita" and doc.get("shipment_ref"):
+            return {"ok": True, "already_shipped": True,
+                    "shipment": {"checklist_id": doc.get("shipment_ref"),
+                                 "message": f"Commessa già spedita (id {doc.get('shipment_ref')})"},
+                    "commessa": _serialize(doc)}
+        # Body opzionale con override shipping_date/taken_by
+        override: Dict[str, Any] = {}
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                if body.get("shipping_date"): override["shipping_date"] = str(body["shipping_date"]).strip()
+                if body.get("taken_by"): override["taken_by"] = str(body["taken_by"]).strip()
+        except Exception:
+            pass
         # Se la commessa è ancora 'pronta', creiamo prima la bozza (retro-compat client)
         if doc.get("stato") == "pronta":
             draft_meta = {
@@ -621,6 +641,11 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             )
             if not promoted:
                 fresh = await db.commesse.find_one({"id": cid})
+                # Race: se un altro operatore l'ha appena spedita, ritorna idempotente
+                if fresh and fresh.get("stato") == "spedita":
+                    return {"ok": True, "already_shipped": True,
+                            "shipment": {"checklist_id": fresh.get("shipment_ref"), "message": "Commessa già spedita"},
+                            "commessa": _serialize(fresh)}
                 raise HTTPException(409, f"Impossibile confermare: stato {fresh.get('stato')}")
             doc = promoted
         if doc.get("stato") != "bozza_spedizione":
@@ -630,6 +655,11 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         # Usa il payload persistito (se presente) altrimenti ricostruisci dai dati correnti
         draft = doc.get("shipment_draft") or {}
         payload = draft.get("payload") or _build_draft_payload(doc, current.get("username"))
+        # F28.b — Assicura shipping_date SEMPRE presente (retro-compat con bozze pre-fix)
+        if not payload.get("shipping_date"):
+            payload["shipping_date"] = doc.get("data_prevista") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        # Applica override utente (data / preso da)
+        payload = {**payload, **override}
         # Ricostruisci items nel formato atteso da /checklist/send (senza product_code)
         items_payload = [{k: v for k, v in it.items() if k != "product_code"} for it in payload.get("items", [])]
         payload = {**payload, "items": items_payload}
