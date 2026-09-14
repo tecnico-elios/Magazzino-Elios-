@@ -19,7 +19,7 @@ import event_logger
 
 logger = logging.getLogger(__name__)
 
-STATI = ("da_preparare", "in_preparazione", "parziale", "pronta", "bozza_spedizione", "spedita", "annullata")
+STATI = ("da_preparare", "in_preparazione", "parziale", "pronta", "bozza_spedizione", "parzialmente_spedita", "spedita", "annullata")
 PRIORITA = ("urgente", "alta", "normale", "bassa")
 
 
@@ -80,7 +80,7 @@ def _serialize(doc: Dict[str, Any]) -> Dict[str, Any]:
 def _compute_stato(doc: Dict[str, Any]) -> str:
     """Ricalcola stato in base ai prelievi delle righe (esclude stati terminali/bozza)."""
     # F25.b — bozza_spedizione è uno stato manuale: non lo ricalcoliamo dalle righe.
-    if doc.get("stato") in ("spedita", "annullata", "bozza_spedizione"):
+    if doc.get("stato") in ("spedita", "annullata", "bozza_spedizione", "parzialmente_spedita"):
         return doc["stato"]
     if not doc.get("operatore_carico"):
         return "da_preparare"
@@ -145,7 +145,8 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         return _serialize(doc)
 
     @router.post("")
-    async def create_commessa(body: CommessaCreate, current=Depends(deps.get_current_user)):
+    async def create_commessa(body: CommessaCreate, current=Depends(deps.require_admin)):
+        """F29 — SOLO ADMIN può creare commesse (sicurezza backend, non solo UI)."""
         await _require_enabled()
         if body.priorita not in PRIORITA:
             raise HTTPException(400, "Priorità non valida")
@@ -185,7 +186,8 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         return _serialize(doc)
 
     @router.patch("/{cid}")
-    async def update_commessa(cid: str, body: CommessaUpdate, current=Depends(deps.get_current_user)):
+    async def update_commessa(cid: str, body: CommessaUpdate, current=Depends(deps.require_admin)):
+        """F29 — SOLO ADMIN può modificare commesse (sicurezza backend + UI)."""
         """F27 — Modifica completa con regole per stato + audit diff dettagliato.
         - Da preparare: full edit
         - In preparazione/Parziale: qty_richiesta >= qty_prelevata, no rimozione righe con prelievi, no rimozione seriali già prelevati
@@ -289,8 +291,8 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         return _serialize(fresh)
 
     @router.post("/{cid}/reopen")
-    async def reopen_commessa(cid: str, current=Depends(deps.get_current_user)):
-        """F27 — Riapre una commessa annullata mantenendo storico e prelievi.
+    async def reopen_commessa(cid: str, current=Depends(deps.require_admin)):
+        """F27/F29 — SOLO ADMIN. Riapre una commessa annullata mantenendo storico e prelievi.
         Ricalcola lo stato in base ai prelievi effettivi (da_preparare / in_preparazione / parziale / pronta).
         Non crea nuova commessa: stesso id, stesso operation_id."""
         await _require_enabled()
@@ -323,8 +325,8 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         return _serialize(updated)
 
     @router.delete("/{cid}", dependencies=[Depends(deps.require_admin)])
-    async def delete_commessa(cid: str, current=Depends(deps.get_current_user)):
-        """F27 — Cancellazione DEFINITIVA (solo Admin). Impedita se collegata a spedizione."""
+    async def delete_commessa(cid: str, current=Depends(deps.require_admin)):
+        """F27/F29 — Cancellazione DEFINITIVA (SOLO Admin). Impedita se collegata a spedizione."""
         await _require_enabled()
         doc = await db.commesse.find_one({"id": cid})
         if not doc: raise HTTPException(404, "Commessa non trovata")
@@ -518,6 +520,36 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         )
         return _serialize(await db.commesse.find_one({"id": cid}))
 
+    @router.post("/{cid}/reopen-preparation")
+    async def reopen_preparation(cid: str, current=Depends(deps.require_admin)):
+        """F29 — Riapre la preparazione di una commessa 'pronta' o 'parzialmente_spedita'
+        (per continuare il picking sul residuo). Solo admin."""
+        await _require_enabled()
+        doc = await db.commesse.find_one({"id": cid})
+        if not doc: raise HTTPException(404, "Commessa non trovata")
+        if doc.get("stato") not in ("pronta", "parzialmente_spedita"):
+            raise HTTPException(409, f"Riapertura preparazione non consentita: stato {doc.get('stato')}")
+        # Da parzialmente_spedita: torna 'in_preparazione' per il residuo
+        # (righe già hanno qty_spedita accumulato, il "residuo" viene calcolato lato UI/pick)
+        updated = await db.commesse.find_one_and_update(
+            {"id": cid, "stato": {"$in": ["pronta", "parzialmente_spedita"]}},
+            {"$set": {"stato": "in_preparazione", "updated_at": _now()}, "$unset": {"completed_at": ""}},
+            return_document=True,
+        )
+        if not updated:
+            raise HTTPException(409, "Riapertura preparazione non riuscita (stato cambiato)")
+        await event_logger.log_event(
+            db, category="COMMESSE", event_type="PREPARAZIONE_RIAPERTA",
+            action="commesse.reopen_preparation", level="INFO", status="SUCCESS",
+            user=current.get("username"), user_role=current.get("role"),
+            operation_id=doc.get("operation_id"),
+            endpoint=f"POST /api/commesse/{cid}/reopen-preparation",
+            customer=doc.get("cliente"),
+            message=f"Preparazione commessa #{doc.get('number')} riaperta da {doc.get('stato')}",
+            details={"commessa_id": cid, "previous_stato": doc.get("stato")},
+        )
+        return _serialize(updated)
+
     async def _build_draft_payload(doc: Dict[str, Any], operator: str) -> Dict[str, Any]:
         """Costruisce lo snapshot bozza dai dati correnti della commessa.
         F28.b/c — payload IDENTICO a quello inviato da /ChecklistPage (spedizione normale):
@@ -710,13 +742,47 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             raise
         except Exception as e:
             raise HTTPException(500, f"Errore chiamata spedizione: {e}")
-        await db.commesse.update_one({"id": cid}, {
-            "$set": {
-                "stato": "spedita", "shipped_at": _now(), "updated_at": _now(),
-                "shipment_ref": ship_result.get("checklist_id"),
-            },
-            "$unset": {"shipment_draft": ""},
-        })
+        # F29 — Spedizione parziale: se dopo lo scarico Notion rimane materiale non ancora spedito
+        # (qty_prelevata < qty_richiesta), la commessa va in 'parzialmente_spedita' e le righe
+        # vengono resettate (qty_prelevata=0, seriali_prelevati=[]) MA accumuliamo qty_spedita/seriali_spediti
+        # per storico e per calcolo del residuo. La preparazione può essere riaperta con
+        # /reopen-preparation per il ciclo successivo.
+        righe = doc.get("righe") or []
+        any_residuo = False
+        new_righe = []
+        for r in righe:
+            qr = float(r.get("qty_richiesta") or 0)
+            qp = float(r.get("qty_prelevata") or 0)
+            qs_prev = float(r.get("qty_spedita") or 0)
+            new_qs = qs_prev + qp
+            residuo = qr - new_qs
+            if residuo > 0:
+                any_residuo = True
+            new_righe.append({
+                **r,
+                "qty_prelevata": 0.0,
+                "seriali_prelevati": [],
+                "qty_spedita": new_qs,
+                "seriali_spediti": list(r.get("seriali_spediti") or []) + list(r.get("seriali_prelevati") or []),
+            })
+        # Determina stato finale in base al residuo (spedizione parziale vs completa)
+        final_stato = "parzialmente_spedita" if any_residuo else "spedita"
+        upd = {"$set": {
+            "stato": final_stato, "shipped_at": _now(), "updated_at": _now(),
+            "shipment_ref": ship_result.get("checklist_id"),
+            "righe": new_righe,
+        }, "$unset": {"shipment_draft": ""}}
+        # Storico spedizioni multiple (aggiunge al vettore shipments_history)
+        history_entry = {
+            "shipment_id": ship_result.get("checklist_id"),
+            "shipped_at": _now(), "operator": current.get("username"),
+            "items": [{"product_name": r.get("product_name"),
+                       "qty": float(r.get("qty_prelevata") or 0),
+                       "seriali": list(r.get("seriali_prelevati") or [])}
+                      for r in righe if float(r.get("qty_prelevata") or 0) > 0],
+        }
+        upd["$push"] = {"shipments_history": history_entry}
+        await db.commesse.update_one({"id": cid}, upd)
         await event_logger.log_event(
             db, category="COMMESSE", event_type="COMMESSA_SPEDITA",
             action="commesse.ship", level="INFO", status="SUCCESS",
@@ -729,7 +795,8 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         return {"ok": True, "shipment": ship_result, "commessa": _serialize(await db.commesse.find_one({"id": cid}))}
 
     @router.post("/{cid}/cancel")
-    async def cancel_commessa(cid: str, current=Depends(deps.get_current_user)):
+    async def cancel_commessa(cid: str, current=Depends(deps.require_admin)):
+        """F29 — SOLO ADMIN può annullare commesse."""
         await _require_enabled()
         doc = await db.commesse.find_one({"id": cid})
         if not doc: raise HTTPException(404, "Commessa non trovata")

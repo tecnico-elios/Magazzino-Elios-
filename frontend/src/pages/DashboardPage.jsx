@@ -17,6 +17,7 @@ import {
   User,
 } from "@phosphor-icons/react";
 import { fmtTime, useTz } from "../lib/tz";
+import { formatDateIT } from "../lib/dateFmt";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const DEFAULT_REFRESH_MS = 60 * 1000; // fallback se le impostazioni non sono caricate
@@ -125,8 +126,13 @@ export default function DashboardPage() {
   const cmParziale = commesseKpi.parziale ?? 0;
   const cmPronta = commesseKpi.pronta ?? 0;
   const cmAnnullate = commesseKpi.annullata ?? 0;
-  const commesseAttive = (commesseItems || []).filter((c) => ["da_preparare", "in_preparazione", "parziale", "pronta"].includes(c.stato));
-  const commesseDaFare = commesseAttive.slice(0, 5); // già ordinate server-side per priorità/data
+  // F29 — "Da fare adesso" sostituita da 3 sezioni operative:
+  // 🔴 DA FARE (da_preparare + in_preparazione + parziale)
+  // 📦 DA SPEDIRE (pronta + parzialmente_spedita)
+  // ⚠️ ATTENZIONE (solo criticità - vuota per default)
+  const commesseDaFare = (commesseItems || []).filter((c) => ["da_preparare", "in_preparazione", "parziale"].includes(c.stato)).slice(0, 6);
+  const commesseDaSpedire = (commesseItems || []).filter((c) => ["pronta", "parzialmente_spedita", "bozza_spedizione"].includes(c.stato)).slice(0, 6);
+  const commesseAttive = (commesseItems || []).filter((c) => !["spedita", "annullata"].includes(c.stato));
 
   return (
     <div
@@ -243,18 +249,32 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* F23 — "Da fare adesso": commesse attive ordinate per priorità/data, click apre dettaglio */}
+      {/* F29 — "Da fare adesso" sostituita da 3 sezioni operative distinte */}
       {commesseEnabled && commesseDaFare.length > 0 && (
-        <section className="bg-white border border-red-200 rounded-md overflow-hidden shadow-sm" data-testid="dash-da-fare-adesso">
+        <section className="bg-white border border-red-200 rounded-md overflow-hidden shadow-sm" data-testid="dash-da-fare">
           <div className="px-4 py-3 border-b border-red-200 bg-red-50 flex items-center justify-between">
             <div className="flex items-center gap-2 text-red-800 font-bold text-sm">
-              🔴 Da fare adesso
-              <span className="text-red-500 font-normal text-xs">({commesseAttive.length} attive)</span>
+              🔴 Da fare
+              <span className="text-red-500 font-normal text-xs">({commesseAttive.filter((c) => ["da_preparare", "in_preparazione", "parziale"].includes(c.stato)).length} attive)</span>
             </div>
-            <Link to="/commesse" className="text-xs text-red-700 hover:text-red-900 underline">Vedi tutte →</Link>
+            <Link to="/commesse?stato=in_preparazione" className="text-xs text-red-700 hover:text-red-900 underline">Vedi tutte →</Link>
           </div>
           <ul className="divide-y divide-slate-100">
-            {commesseDaFare.map((c) => <DaFareRow key={c.id || c.number} c={c} />)}
+            {commesseDaFare.map((c) => <DaFareRow key={c.id || c.number} c={c} action="apri" />)}
+          </ul>
+        </section>
+      )}
+      {commesseEnabled && commesseDaSpedire.length > 0 && (
+        <section className="bg-white border border-indigo-200 rounded-md overflow-hidden shadow-sm" data-testid="dash-da-spedire">
+          <div className="px-4 py-3 border-b border-indigo-200 bg-indigo-50 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-indigo-800 font-bold text-sm">
+              📦 Da spedire
+              <span className="text-indigo-500 font-normal text-xs">({commesseDaSpedire.length})</span>
+            </div>
+            <Link to="/commesse?stato=pronta" className="text-xs text-indigo-700 hover:text-indigo-900 underline">Vedi tutte →</Link>
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {commesseDaSpedire.map((c) => <DaFareRow key={c.id || c.number} c={c} action="spedisci" />)}
           </ul>
         </section>
       )}
@@ -589,12 +609,16 @@ const STATO_BADGE = {
   in_preparazione: { txt: "In preparazione", cls: "bg-yellow-50 text-yellow-800 border-yellow-200" },
   parziale:        { txt: "Parziale",        cls: "bg-orange-50 text-orange-800 border-orange-200" },
   pronta:          { txt: "Pronta",          cls: "bg-emerald-50 text-emerald-800 border-emerald-200" },
+  parzialmente_spedita: { txt: "Parzialmente spedita", cls: "bg-amber-50 text-amber-800 border-amber-200" },
+  bozza_spedizione: { txt: "Bozza spedizione", cls: "bg-indigo-50 text-indigo-800 border-indigo-200" },
 };
 
-function DaFareRow({ c }) {
+function DaFareRow({ c, action = "apri" }) {
   const righe = c.righe || [];
   const totReq = righe.reduce((s, r) => s + (Number(r.qty_richiesta) || 0), 0);
   const totPrev = righe.reduce((s, r) => s + (Number(r.qty_prelevata) || 0), 0);
+  const totSped = righe.reduce((s, r) => s + (Number(r.qty_spedita) || 0), 0);
+  const residuo = totReq - totSped;
   const prio = PRIO_BADGE[c.priorita] || PRIO_BADGE.normale;
   const stato = STATO_BADGE[c.stato] || { txt: c.stato, cls: "bg-slate-100 text-slate-700 border-slate-200" };
   return (
@@ -607,17 +631,23 @@ function DaFareRow({ c }) {
           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${stato.cls}`}>{stato.txt}</span>
         </div>
         <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono-tight">
-          <span>{totPrev}/{totReq} prodotti preparati</span>
+          {c.stato === "parzialmente_spedita"
+            ? <span>{totSped}/{totReq} spediti · <b className="text-amber-700">{residuo} da spedire</b></span>
+            : <span>{totPrev}/{totReq} preparati</span>}
           {c.operatore_carico && <span className="flex items-center gap-1"><User size={12} /> {c.operatore_carico}</span>}
-          {c.data_prevista && <span title="Data di spedizione prevista">📅 {c.data_prevista}</span>}
+          {c.data_prevista && <span title="Data di spedizione prevista">📅 {formatDateIT(c.data_prevista)}</span>}
         </div>
       </div>
       <Link
         to={`/commesse?open=${encodeURIComponent(c.id || c.number)}`}
-        className="text-xs font-semibold text-indigo-700 hover:text-indigo-900 underline shrink-0"
+        className={`text-xs font-semibold shrink-0 px-3 py-1.5 rounded ${
+          action === "spedisci"
+            ? "bg-indigo-600 hover:bg-indigo-700 text-white"
+            : "text-indigo-700 hover:text-indigo-900 underline"
+        }`}
         data-testid={`da-fare-open-${c.number}`}
       >
-        Apri commessa →
+        {action === "spedisci" ? (c.stato === "parzialmente_spedita" ? "📦 Completa spedizione" : "📦 Crea spedizione") : "Apri commessa →"}
       </Link>
     </li>
   );

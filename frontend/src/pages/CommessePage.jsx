@@ -9,6 +9,7 @@ import { Textarea } from "../components/ui/textarea";
 import { Badge } from "../components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { normalizeQrCode, parseDazeQr } from "../lib/qr";
+import { formatDateIT } from "../lib/dateFmt";
 import BarcodeScanner from "../components/BarcodeScanner";
 import { useAuth } from "../lib/AuthContext";
 
@@ -20,6 +21,7 @@ const STATO_LABEL = {
   parziale: { txt: "Parziale", cls: "bg-orange-100 text-orange-800 border-orange-200", icon: "🟠" },
   pronta: { txt: "Pronta", cls: "bg-emerald-100 text-emerald-800 border-emerald-200", icon: "🟢" },
   bozza_spedizione: { txt: "Bozza spedizione", cls: "bg-indigo-100 text-indigo-800 border-indigo-200", icon: "📝" },
+  parzialmente_spedita: { txt: "Parzialmente spedita", cls: "bg-amber-100 text-amber-800 border-amber-200", icon: "📦" },
   spedita: { txt: "Spedita", cls: "bg-slate-200 text-slate-700 border-slate-300", icon: "🚚" },
   annullata: { txt: "Annullata", cls: "bg-slate-100 text-slate-500 border-slate-200", icon: "⚪" },
 };
@@ -30,7 +32,8 @@ const PRIO_LABEL = {
   bassa: { txt: "Bassa", cls: "bg-emerald-400 text-slate-900", icon: "🟢" },
 };
 
-export default function CommessePage() {
+function CommessePage() {
+  const { isAdmin } = useAuth();
   const [selected, setSelected] = useState(null);
   const [creating, setCreating] = useState(false);
   // F23.b — Deep-link dalla Dashboard: /commesse?stato=xxx apre già filtrato
@@ -51,11 +54,13 @@ export default function CommessePage() {
       ) : creating ? (
         <CommessaCreate onDone={(id) => { setCreating(false); if (id) setSelected(id); }} />
       ) : (
-        <CommesseList onOpen={setSelected} onCreate={() => setCreating(true)} initialStato={initialStato} />
+        <CommesseList onOpen={setSelected} onCreate={isAdmin ? () => setCreating(true) : null} initialStato={initialStato} />
       )}
     </div>
   );
 }
+
+export default CommessePage;
 
 function CommesseList({ onOpen, onCreate, initialStato = "" }) {
   const [items, setItems] = useState([]);
@@ -113,7 +118,7 @@ function CommesseList({ onOpen, onCreate, initialStato = "" }) {
                 <span className="text-sm text-slate-700 flex-1 min-w-0 truncate">{c.cliente}</span>
               </div>
               <div className="mt-1 text-xs text-slate-500 flex items-center gap-3 flex-wrap">
-                {c.data_prevista && <span title="Data di spedizione prevista">📅 {c.data_prevista}</span>}
+                {c.data_prevista && <span title="Data di spedizione prevista">📅 {formatDateIT(c.data_prevista)}</span>}
                 {c.operatore_carico && <span><User size={11} className="inline" /> {c.operatore_carico}</span>}
                 <span>{c.righe?.length ?? 0} righe</span>
               </div>
@@ -439,6 +444,15 @@ function CommessaDetail({ id, onBack }) {
     } catch (e) { toast.error("Riapertura fallita", { description: e?.response?.data?.detail }); }
     finally { setBusy(false); }
   };
+  const doReopenPreparation = async () => {
+    setBusy(true);
+    try {
+      const { data } = await axios.post(`${API}/commesse/${id}/reopen-preparation`);
+      setC(data);
+      toast.success("Preparazione riaperta", { description: "Ora puoi continuare il picking" });
+    } catch (e) { toast.error("Riapertura fallita", { description: e?.response?.data?.detail }); }
+    finally { setBusy(false); }
+  };
   const doDelete = async () => {
     setBusy(true);
     try {
@@ -481,9 +495,12 @@ function CommessaDetail({ id, onBack }) {
   const canCreateDraft = c.stato === "pronta";
   const hasBozza = c.stato === "bozza_spedizione";
   const canCancel = !["spedita", "annullata", "bozza_spedizione"].includes(c.stato);
-  const canEdit = ["da_preparare", "in_preparazione", "parziale"].includes(c.stato);
-  const canReopen = c.stato === "annullata";
+  const canEdit = isAdmin && ["da_preparare", "in_preparazione", "parziale"].includes(c.stato);
+  const canReopen = isAdmin && c.stato === "annullata";
   const canDelete = isAdmin && !["spedita"].includes(c.stato) && !c.shipment_ref;
+  const canReopenPreparation = isAdmin && ["pronta", "parzialmente_spedita"].includes(c.stato);
+  const canCancelByRole = isAdmin;  // F29 — solo admin annulla
+  const canCreateDraftGate = canCreateDraft || c.stato === "parzialmente_spedita";
 
   return (
     <div className="space-y-3">
@@ -497,7 +514,7 @@ function CommessaDetail({ id, onBack }) {
           <Badge className={PRIO_LABEL[c.priorita]?.cls}>{PRIO_LABEL[c.priorita]?.txt}</Badge>
           {c.operatore_carico && <span className="text-xs text-slate-600"><User size={12} className="inline" /> {c.operatore_carico}</span>}
         </div>
-        {c.data_prevista && <div className="text-xs text-slate-600"><Clock size={12} className="inline" /> Data di spedizione prevista: {c.data_prevista}</div>}
+        {c.data_prevista && <div className="text-xs text-slate-600"><Clock size={12} className="inline" /> Data di spedizione prevista: {formatDateIT(c.data_prevista)}</div>}
         {c.note && <div className="text-xs text-slate-600 whitespace-pre-wrap break-words">📝 {c.note}</div>}
         <div className="text-xs text-slate-500 font-mono-tight">op: {c.operation_id}</div>
       </div>
@@ -585,9 +602,10 @@ function CommessaDetail({ id, onBack }) {
         {canComplete && <Button onClick={() => setConfirmComplete(true)} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white h-12" data-testid="complete-btn"><CheckCircle size={16} /> Completa preparazione</Button>}
         {canCreateDraft && <Button onClick={doCreateDraft} disabled={busy} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white h-12" data-testid="ship-btn"><Truck size={16} /> Crea spedizione</Button>}
         {hasBozza && <Button onClick={() => setShowBozza(true)} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white h-12" data-testid="open-bozza-btn"><Truck size={16} /> Apri bozza</Button>}
+        {canReopenPreparation && <Button onClick={doReopenPreparation} disabled={busy} variant="outline" className="text-amber-700 border-amber-300 hover:bg-amber-50 h-12" data-testid="reopen-prep-btn"><ArrowCounterClockwise size={16} /> {c.stato === "parzialmente_spedita" ? "📦 Completa spedizione" : "Riapri preparazione"}</Button>}
         {canEdit && <Button onClick={() => setEditMode(true)} variant="outline" className="h-12" data-testid="edit-btn"><PencilSimple size={16} /> Modifica</Button>}
         {canReopen && <Button onClick={() => setConfirmReopen(true)} className="bg-amber-600 hover:bg-amber-700 text-white h-12" data-testid="reopen-btn"><ArrowCounterClockwise size={16} /> Riapri Commessa</Button>}
-        {canCancel && <Button onClick={() => setConfirmCancel(true)} variant="outline" className="text-red-700 border-red-300 hover:bg-red-50 h-12" data-testid="cancel-btn"><XCircle size={16} /> Annulla</Button>}
+        {canCancel && canCancelByRole && <Button onClick={() => setConfirmCancel(true)} variant="outline" className="text-red-700 border-red-300 hover:bg-red-50 h-12" data-testid="cancel-btn"><XCircle size={16} /> Annulla</Button>}
         {canDelete && <Button onClick={() => setConfirmDelete(true)} variant="outline" className="text-red-800 border-red-400 hover:bg-red-100 h-12" data-testid="delete-btn"><Trash size={16} /> Elimina definitivamente</Button>}
       </div>
 
@@ -659,10 +677,18 @@ function CommessaDetail({ id, onBack }) {
 
 function SerialInput({ onSubmit, disabled, testid, placeholder = "Inserisci seriale…" }) {
   const [v, setV] = useState("");
+  const submit = () => { if (v.trim()) { onSubmit(v.trim()); setV(""); } };
   return (
-    <Input value={v} onChange={(e) => setV(e.target.value)}
-      onKeyDown={(e) => { if (e.key === "Enter" && v.trim()) { onSubmit(v.trim()); setV(""); } }}
-      placeholder={placeholder} disabled={disabled} className="h-10 flex-1 font-mono-tight" data-testid={testid} autoComplete="off" />
+    <div className="flex gap-2 flex-1 min-w-0">
+      <Input value={v} onChange={(e) => setV(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+        placeholder={placeholder} disabled={disabled} className="h-10 flex-1 font-mono-tight" data-testid={testid} autoComplete="off" />
+      <Button size="sm" onClick={submit} disabled={disabled || !v.trim()}
+        className="h-10 bg-emerald-600 hover:bg-emerald-700 text-white shrink-0" data-testid={`${testid}-add-btn`}
+        title="Inserisci seriale">
+        <Plus size={14} weight="bold" />
+      </Button>
+    </div>
   );
 }
 
