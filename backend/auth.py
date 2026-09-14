@@ -43,6 +43,9 @@ PERMISSION_MODULES = [
     # F14 — Retroattività: permesso extra concedibile al RESPONSABILE
     # (Admin lo ha implicitamente, Operator mai).
     "modifica_retroattiva",
+    # F30 — Gestione Commesse: permette al RESPONSABILE di CREARE e MODIFICARE
+    # commesse (elimina/annulla/riapri restano riservate all'Admin).
+    "gestione_commesse",
 ]
 
 

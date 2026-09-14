@@ -109,6 +109,15 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         if not await _get_feature(db):
             raise HTTPException(403, "Gestione Commesse disabilitata")
 
+    async def _require_commesse_manager(current=Depends(deps.require_password_current)):
+        """F30 — Admin OPPURE Responsabile con permesso `gestione_commesse`.
+        Copre solo creazione e modifica. Elimina/annulla/riapri restano su require_admin.
+        `has_permission` è già True per Admin e Master, quindi copre tutti i casi.
+        """
+        if not auth_mod.has_permission(current, "gestione_commesse"):
+            raise HTTPException(403, "Permesso 'Gestione commesse' richiesto")
+        return current
+
     @router.get("")
     async def list_commesse(
         stato: Optional[str] = Query(None),
@@ -145,8 +154,8 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         return _serialize(doc)
 
     @router.post("")
-    async def create_commessa(body: CommessaCreate, current=Depends(deps.require_admin)):
-        """F29 — SOLO ADMIN può creare commesse (sicurezza backend, non solo UI)."""
+    async def create_commessa(body: CommessaCreate, current=Depends(_require_commesse_manager)):
+        """F29/F30 — Admin o Responsabile con permesso 'gestione_commesse' può creare commesse."""
         await _require_enabled()
         if body.priorita not in PRIORITA:
             raise HTTPException(400, "Priorità non valida")
@@ -186,8 +195,8 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         return _serialize(doc)
 
     @router.patch("/{cid}")
-    async def update_commessa(cid: str, body: CommessaUpdate, current=Depends(deps.require_admin)):
-        """F29 — SOLO ADMIN può modificare commesse (sicurezza backend + UI)."""
+    async def update_commessa(cid: str, body: CommessaUpdate, current=Depends(_require_commesse_manager)):
+        """F29/F30 — Admin o Responsabile con permesso 'gestione_commesse' può modificare commesse."""
         """F27 — Modifica completa con regole per stato + audit diff dettagliato.
         - Da preparare: full edit
         - In preparazione/Parziale: qty_richiesta >= qty_prelevata, no rimozione righe con prelievi, no rimozione seriali già prelevati

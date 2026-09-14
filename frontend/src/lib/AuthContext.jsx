@@ -208,6 +208,14 @@ export function AuthProvider({ children }) {
     applyRefreshedToken,
     isAdmin: !!user && user.role === "admin",
     isOperator: !!user && user.role === "operator",
+    isResponsabile: !!user && user.role === "responsabile",
+    // F30 — Helper permessi granulari (Admin sempre true; Responsabile true se il modulo è nei suoi permissions).
+    hasPermission: (module) => {
+      if (!user) return false;
+      if (user.role === "admin") return true;
+      const perms = Array.isArray(user.permissions) ? user.permissions : [];
+      return perms.includes(module);
+    },
     isAuthenticated: !!user,
     mustChangePassword: !!user?.must_change_password,
     isLoading: user === undefined,

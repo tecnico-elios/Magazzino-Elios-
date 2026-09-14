@@ -33,7 +33,8 @@ const PRIO_LABEL = {
 };
 
 function CommessePage() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, hasPermission } = useAuth();
+  const canManage = isAdmin || hasPermission("gestione_commesse");
   const [selected, setSelected] = useState(null);
   const [creating, setCreating] = useState(false);
   // F23.b — Deep-link dalla Dashboard: /commesse?stato=xxx apre già filtrato
@@ -54,7 +55,7 @@ function CommessePage() {
       ) : creating ? (
         <CommessaCreate onDone={(id) => { setCreating(false); if (id) setSelected(id); }} />
       ) : (
-        <CommesseList onOpen={setSelected} onCreate={isAdmin ? () => setCreating(true) : null} initialStato={initialStato} />
+        <CommesseList onOpen={setSelected} onCreate={canManage ? () => setCreating(true) : null} initialStato={initialStato} />
       )}
     </div>
   );
@@ -318,7 +319,8 @@ function ProductPicker({ onClose, onPick }) {
 }
 
 function CommessaDetail({ id, onBack }) {
-  const { isAdmin } = useAuth();
+  const { isAdmin, hasPermission } = useAuth();
+  const canManage = isAdmin || hasPermission("gestione_commesse");
   const [c, setC] = useState(null);
   const [loading, setLoading] = useState(true);
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -496,7 +498,7 @@ function CommessaDetail({ id, onBack }) {
   const canShipPartial = c.stato === "parziale" && pickedQty > 0 && pickedQty < totalQty;
   const hasBozza = c.stato === "bozza_spedizione";
   const canCancel = !["spedita", "annullata", "bozza_spedizione"].includes(c.stato);
-  const canEdit = isAdmin && ["da_preparare", "in_preparazione", "parziale"].includes(c.stato);
+  const canEdit = canManage && ["da_preparare", "in_preparazione", "parziale"].includes(c.stato);
   const canReopen = isAdmin && c.stato === "annullata";
   const canDelete = isAdmin && !["spedita"].includes(c.stato) && !c.shipment_ref;
   const canReopenPreparation = isAdmin && ["pronta", "parzialmente_spedita"].includes(c.stato);

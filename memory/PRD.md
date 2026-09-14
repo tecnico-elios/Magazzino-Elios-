@@ -1,6 +1,39 @@
 # PRD — Magazzino Elios Tech
 
 
+## F30 (14/09/2026) — Permesso granulare "Gestione Commesse" per Responsabile ✅
+
+### Obiettivo
+Consentire al ruolo **Responsabile** di creare e modificare le commesse quando l'Admin gli concede il permesso `gestione_commesse` — senza toccare le operazioni distruttive (elimina/annulla/riapri restano Admin-only).
+
+### Backend
+- `auth.py`: aggiunto `"gestione_commesse"` a `PERMISSION_MODULES`. `has_permission()` già supporta il match sui `permissions[]` del responsabile.
+- `routes/commesse_routes.py`: nuovo helper interno `_require_commesse_manager` che accetta Admin/Master OPPURE Responsabile con permesso `gestione_commesse` (via `has_permission`). Applicato SOLO a:
+  - `POST /api/commesse` (creazione)
+  - `PATCH /api/commesse/{cid}` (modifica)
+- Le rotte `POST /reopen`, `DELETE`, `POST /reopen_preparation`, `POST /cancel` restano su `deps.require_admin` (immutato).
+- Default: nessun responsabile riceve automaticamente il permesso — concessione **manuale** via UI Admin.
+
+### Frontend
+- `lib/AuthContext.jsx`: esposti `isResponsabile` e `hasPermission(module)` (Admin sempre true; Responsabile true se il modulo è nei suoi permissions).
+- `pages/CommessePage.jsx`: introdotto `canManage = isAdmin || hasPermission("gestione_commesse")` usato per:
+  - Mostrare bottone "Crea commessa" nella lista
+  - Abilitare `canEdit` (modifica) sul dettaglio commessa
+  - `canReopen`/`canDelete`/`canReopenPreparation`/`canCancelByRole` restano legati a `isAdmin` (invariati).
+- `pages/AdminUsersPage.jsx`: nuova checkbox **"Gestione Commesse"** nel dialog Permessi (`PermissionsDialog`), sotto i moduli extra configurabili.
+
+### Test (manuali, no testing agent — vincolo utente)
+- ✅ Backend `has_permission` verificata via `python -c`: admin=True, master=True, responsabile_senza=False, responsabile_con=True, operator=False
+- ✅ `POST /api/commesse` senza JWT → 401 (protezione base)
+- ✅ `yarn build` OK (+119 B su bundle main, nessun errore)
+- ✅ Backend `ruff` / `ast.parse` OK
+- ✅ Supervisor backend restart OK
+
+### Come concederlo
+Admin → Gestione Utenti → utente `responsabile` → Permessi → attiva "Gestione Commesse" → Salva.
+
+
+
 ## F27 (14/09/2026) — Modifica Completa Commessa + Riapri + Elimina Admin + Scanner A Quantità + KPI Annullate ✅
 
 ### Backend — Modifica completa con regole per stato + audit diff
