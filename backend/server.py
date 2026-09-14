@@ -21,7 +21,7 @@ import inventory_local
 from inventory_router import get_svc as _get_inv_svc, get_source as _get_inv_source
 import auth as auth_mod
 import event_logger
-from routes import auth_routes, admin_users_routes, admin_extra_routes, qr_routes, retro_routes, orders_routes, ai_routes
+from routes import auth_routes, admin_users_routes, admin_extra_routes, qr_routes, retro_routes, orders_routes, ai_routes, commesse_routes
 try:
     from zoneinfo import ZoneInfo
     ROME_TZ = ZoneInfo("Europe/Rome")
@@ -1694,6 +1694,33 @@ app.include_router(qr_routes.build_router(db, auth_deps), prefix="/api")
 app.include_router(orders_routes.build_router(db, auth_deps), prefix="/api")
 app.include_router(retro_routes.build_router(db, auth_deps, send_email_fn=send_email), prefix="/api")
 app.include_router(ai_routes.build_router(db, auth_deps), prefix="/api")
+app.include_router(commesse_routes.build_router(db, auth_deps), prefix="/api")
+
+
+# F23 — Feature flags pubblici (letti dal frontend per gating menu/dashboard)
+@api_router.get("/features")
+async def get_features():
+    doc = await db.settings.find_one({"_id": "features"}) or {}
+    return {"commesse_enabled": bool(doc.get("commesse_enabled", False))}
+
+
+@api_router.put("/admin/features")
+async def set_features(body: dict, current=Depends(auth_deps.require_admin)):
+    allowed = {"commesse_enabled"}
+    updates = {k: bool(v) for k, v in (body or {}).items() if k in allowed}
+    if not updates:
+        raise HTTPException(400, "Nessun feature flag valido")
+    await db.settings.update_one({"_id": "features"}, {"$set": updates}, upsert=True)
+    await event_logger.log_event(
+        db, category="AI" if False else "INVENTARIO", event_type="FEATURE_TOGGLE",
+        action="admin.features.set", level="INFO", status="SUCCESS",
+        user=current.get("username"), user_role=current.get("role"),
+        endpoint="PUT /api/admin/features",
+        message=f"Feature flags aggiornati: {updates}",
+        details={"updates": updates},
+    )
+    fresh = await db.settings.find_one({"_id": "features"}) or {}
+    return {"commesse_enabled": bool(fresh.get("commesse_enabled", False))}
 
 
 @app.on_event("startup")

@@ -12,7 +12,9 @@ import {
   CaretDown,
   Lock,
   Robot,
+  Clipboard,
 } from "@phosphor-icons/react";
+import { useFeatures } from "../lib/FeaturesContext";
 import { useInventoryCtx } from "../lib/InventoryContext";
 import { useAuth } from "../lib/AuthContext";
 import ChangeMyPasswordDialog from "./ChangeMyPasswordDialog";
@@ -22,13 +24,11 @@ import { fmtTime, useTz } from "../lib/tz";
 const BASE_NAV = [
   { to: "/", label: "Dashboard", icon: House, end: true, testid: "nav-dashboard" },
   { to: "/inventario", label: "Inventario", icon: Package, testid: "nav-inventario" },
-  // F14 (20/02) — Arrivi e Spedizioni RIMOSSI dalla nav principale su richiesta utente.
-  //   Restano raggiungibili dalle card grandi in Dashboard e via URL diretti /arrivi /spedizioni.
   { to: "/movimenti", label: "Movimenti", icon: ArrowsClockwise, testid: "nav-movimenti" },
   { to: "/anomalie", label: "Anomalie", icon: Warning, testid: "nav-anomalie" },
-  // F20 (26/02) — Voce Assistente AI in navbar principale
   { to: "/assistente-ai", label: "Assistente AI", icon: Robot, testid: "nav-ai" },
 ];
+const COMMESSE_NAV = { to: "/commesse", label: "Commesse", icon: Clipboard, testid: "nav-commesse" };
 
 const ADMIN_NAV = [
   { to: "/admin", label: "Admin", icon: Gear, testid: "nav-admin" },
@@ -38,11 +38,16 @@ const ADMIN_NAV = [
 export default function AppLayout() {
   const { refreshedAt, refresh, loading } = useInventoryCtx();
   const { user, logout, isAdmin } = useAuth();
+  const { commesse_enabled } = useFeatures();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [pwdOpen, setPwdOpen] = useState(false);
 
-  const nav = isAdmin ? [...BASE_NAV, ...ADMIN_NAV] : BASE_NAV;
+  // F23 — Inserisci "Commesse" tra "Inventario" e "Movimenti" quando abilitata
+  const baseNav = commesse_enabled
+    ? [BASE_NAV[0], BASE_NAV[1], COMMESSE_NAV, ...BASE_NAV.slice(2)]
+    : BASE_NAV;
+  const nav = isAdmin ? [...baseNav, ...ADMIN_NAV] : baseNav;
 
   const handleLogout = () => {
     setMenuOpen(false);

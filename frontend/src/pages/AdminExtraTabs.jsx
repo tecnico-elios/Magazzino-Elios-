@@ -2334,3 +2334,41 @@ export function AISettingsTab() {
   );
 }
 
+
+// ---------- F23 — Feature flags Admin (Funzioni) ----------
+export function FeaturesTab() {
+  const [feat, setFeat] = useState(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    axios.get(`${API}/features`).then(({ data }) => setFeat(data)).catch(() => setFeat({ commesse_enabled: false }));
+  }, []);
+  const upd = async (patch) => {
+    setSaving(true);
+    try {
+      const { data } = await axios.put(`${API}/admin/features`, patch);
+      setFeat(data);
+      toast.success("Salvato. Ricarica la pagina per aggiornare il menu.");
+    } catch (e) { toast.error("Errore", { description: formatError(e) }); }
+    finally { setSaving(false); }
+  };
+  if (!feat) return <div className="text-sm text-slate-500">Caricamento…</div>;
+  return (
+    <div className="space-y-4 max-w-2xl" data-testid="features-tab">
+      <div>
+        <h3 className="font-display text-lg font-bold text-slate-900">Funzioni opzionali</h3>
+        <p className="text-sm text-slate-600 mt-1">Attiva/disattiva moduli aggiuntivi. Disattivando non vengono cancellati dati.</p>
+      </div>
+      <div className="et-card-elevated p-4">
+        <SettingSwitch
+          label="📦 Gestione Commesse"
+          hint="Attiva la sezione Commesse (Ordini → Preparazione → Prelievo → Spedizione). OFF di default. Disattivando i dati restano salvati."
+          checked={!!feat.commesse_enabled}
+          onChange={(v) => upd({ commesse_enabled: v })}
+          disabled={saving}
+          testid="commesse-toggle"
+        />
+      </div>
+    </div>
+  );
+}
+

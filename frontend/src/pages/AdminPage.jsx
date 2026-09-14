@@ -33,7 +33,7 @@ import {
   ListMagnifyingGlass,
   UsersFour,
 } from "@phosphor-icons/react";
-import { AuditLogTab, SettingsTab, SettingsGeneralTab, SettingsMagazzinoTab, SettingsScannerTab, SettingsSicurezzaTab, SettingsArriviTab, SettingsSpedizioniTab, ProductsAdminTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab, SessionsTab, InventorySourceTab, ManutenzioneTab, NotionSettingsTab, RetroattivitaEmailToggle, SystemLogsTab, ExportMovimentiTab, AISettingsTab } from "./AdminExtraTabs";
+import { AuditLogTab, SettingsTab, SettingsGeneralTab, SettingsMagazzinoTab, SettingsScannerTab, SettingsSicurezzaTab, SettingsArriviTab, SettingsSpedizioniTab, ProductsAdminTab, CleanupTestTab, SerialHistoryTab, GlobalSearchTab, SessionsTab, InventorySourceTab, ManutenzioneTab, NotionSettingsTab, RetroattivitaEmailToggle, SystemLogsTab, ExportMovimentiTab, AISettingsTab, FeaturesTab } from "./AdminExtraTabs";
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // Auth is now handled by AuthContext + axios interceptor (Bearer token).
@@ -845,6 +845,7 @@ export default function AdminPage() {
         { key: "settings-arrivi", label: "Arrivi", icon: Gear, Comp: SettingsArriviTab },
         { key: "settings-spedizioni", label: "Spedizioni", icon: Gear, Comp: SettingsSpedizioniTab },
         { key: "recipients", label: "Notifiche", icon: Envelope, Comp: RecipientsTab },
+        { key: "features", label: "Funzioni", icon: Gear, Comp: FeaturesTab },
         { key: "ai", label: "Assistente AI", icon: Gear, Comp: AISettingsTab },
         { key: "notion", label: "Notion", icon: ArrowsClockwise, Comp: NotionSettingsTab },
         { key: "inventory-source", label: "Fonte Inventario", icon: Package, Comp: InventorySourceTab },

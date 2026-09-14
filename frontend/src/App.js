@@ -12,7 +12,9 @@ import MovimentiPage from "@/pages/MovimentiPage";
 import AnomaliePage from "@/pages/AnomaliePage";
 import ChecklistPage from "@/pages/ChecklistPage";
 import AIAssistantPage from "@/pages/AIAssistantPage";
+import CommessePage from "@/pages/CommessePage";
 import AdminPage from "@/pages/AdminPage";
+import { FeaturesProvider } from "@/lib/FeaturesContext";
 import AdminUsersPage from "@/pages/AdminUsersPage";
 import RetroattivitaPage from "@/pages/RetroattivitaPage";
 import LoginPage from "@/pages/LoginPage";
@@ -35,6 +37,7 @@ function App() {
       <BrowserRouter>
         <AuthProvider>
           <InventoryProvider>
+            <FeaturesProvider>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
@@ -64,6 +67,7 @@ function App() {
                 <Route path="/anomalie" element={<AnomaliePage />} />
                 <Route path="/retroattivita" element={<RetroattivitaPage />} />
                 <Route path="/assistente-ai" element={<AIAssistantPage />} />
+                <Route path="/commesse" element={<CommessePage />} />
               </Route>
               <Route
                 path="/admin"
@@ -87,6 +91,7 @@ function App() {
               />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
+            </FeaturesProvider>
           </InventoryProvider>
         </AuthProvider>
       </BrowserRouter>

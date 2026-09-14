@@ -202,6 +202,20 @@ TOOLS_SCHEMA: List[Dict[str, Any]] = [
         "description": "Riepilogo KPI magazzino: totale prodotti, valore inventario, sotto scorta, esauriti, ultime attività.",
         "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {
+        "name": "search_commesse",
+        "description": "Cerca commesse (ordini di preparazione magazzino) per stato/priorità/cliente. Stati: da_preparare, in_preparazione, parziale, pronta, spedita, annullata.",
+        "parameters": {"type": "object", "properties": {
+            "stato": {"type": "string"}, "cliente": {"type": "string"},
+            "priorita": {"type": "string", "enum": ["urgente", "alta", "normale", "bassa"]},
+            "limit": {"type": "integer", "default": 20},
+        }, "required": []}}},
+    {"type": "function", "function": {
+        "name": "get_commessa",
+        "description": "Recupera dettagli completi di una commessa (righe, seriali prelevati, stato per riga). Usa il number della commessa (es. '125').",
+        "parameters": {"type": "object", "properties": {
+            "number": {"type": "string"},
+        }, "required": ["number"]}}},
+    {"type": "function", "function": {
         "name": "get_product_serials",
         "description": "Recupera l'elenco COMPLETO dei seriali di un prodotto A Seriale. Riconosce query in linguaggio naturale con stesso matching di search_products (es. 'Pro 22 5M' = 'Pulsar Pro 22kw 5M'). Se la query è ambigua e matcha più prodotti, ritorna i seriali raggruppati per prodotto. Usa `include_shipped=true` per includere anche i seriali già spediti.",
         "parameters": {"type": "object", "properties": {
@@ -425,6 +439,37 @@ async def dispatch_tool(db, svc, tool_name: str, args: Dict[str, Any], current_u
                 "empty": [{"name": i.get("name")} for i in empty[:15]],
                 "total_low_stock": len(low), "total_empty": len(empty),
             }
+
+        if tool_name == "search_commesse":
+            # F23 — Rispetta feature flag: se OFF, ritorna vuoto senza inventare
+            feat = await db.settings.find_one({"_id": "features"}) or {}
+            if not feat.get("commesse_enabled"):
+                return {"error": "commesse_disabled", "items": []}
+            q: Dict[str, Any] = {}
+            if args.get("stato"): q["stato"] = args["stato"]
+            if args.get("priorita"): q["priorita"] = args["priorita"]
+            if args.get("cliente"): q["cliente"] = {"$regex": re.escape(args["cliente"]), "$options": "i"}
+            limit = int(args.get("limit") or 20)
+            items = []
+            async for d in db.commesse.find(q).sort("created_at", -1).limit(limit):
+                d.pop("_id", None)
+                for k in ("created_at", "updated_at", "presa_in_carico_at"):
+                    if isinstance(d.get(k), datetime): d[k] = d[k].isoformat()
+                items.append({k: d.get(k) for k in ("number", "cliente", "stato", "priorita", "data_prevista", "operatore_carico", "righe", "operation_id")})
+            return {"items": items, "total_returned": len(items)}
+
+        if tool_name == "get_commessa":
+            feat = await db.settings.find_one({"_id": "features"}) or {}
+            if not feat.get("commesse_enabled"):
+                return {"error": "commesse_disabled"}
+            num = (args.get("number") or "").strip()
+            if not num: return {"error": "missing_number"}
+            d = await db.commesse.find_one({"number": num})
+            if not d: return {"error": "not_found"}
+            d.pop("_id", None)
+            for k in ("created_at", "updated_at", "presa_in_carico_at", "completed_at", "shipped_at"):
+                if isinstance(d.get(k), datetime): d[k] = d[k].isoformat()
+            return {"commessa": d}
 
         if tool_name == "get_product_serials":
             # F22 (26/02/2026) — Elenco seriali completo per prodotto (solo A Seriale).
