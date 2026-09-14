@@ -192,12 +192,12 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             raise HTTPException(400, "Priorità non valida")
         if "righe" in updates:
             new_righe = []
-        for r in updates["righe"]:
-            rr = r.model_dump() if hasattr(r, "model_dump") else dict(r)
-            rr["qty_prelevata"] = 0.0
-            rr["seriali_prelevati"] = []
-            new_righe.append(rr)
-        updates["righe"] = new_righe
+            for r in updates["righe"]:
+                rr = r.model_dump() if hasattr(r, "model_dump") else dict(r)
+                rr["qty_prelevata"] = 0.0
+                rr["seriali_prelevati"] = []
+                new_righe.append(rr)
+            updates["righe"] = new_righe
         updates["updated_at"] = _now()
         await db.commesse.update_one({"id": cid}, {"$set": updates})
         await event_logger.log_event(
@@ -214,17 +214,32 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
     @router.post("/{cid}/take")
     async def take_commessa(cid: str, current=Depends(deps.get_current_user)):
         await _require_enabled()
-        doc = await db.commesse.find_one({"id": cid})
-        if not doc: raise HTTPException(404, "Commessa non trovata")
-        if doc.get("stato") not in ("da_preparare",):
+        # F23.b — Presa in carico ATOMICA per prevenire race condition tra operatori.
+        # find_one_and_update accetta la mutazione SOLO se lo stato è ancora 'da_preparare'
+        # e non c'è già un operatore_carico. Il secondo operatore che tenta in parallelo
+        # riceve doc=None → 409 (nessun falso successo, log corretto).
+        updated = await db.commesse.find_one_and_update(
+            {"id": cid, "stato": "da_preparare", "$or": [
+                {"operatore_carico": None}, {"operatore_carico": {"$exists": False}}
+            ]},
+            {"$set": {
+                "stato": "in_preparazione",
+                "operatore_carico": current.get("username"),
+                "presa_in_carico_at": _now(), "updated_at": _now(),
+            }},
+            return_document=True,
+        )
+        if not updated:
+            # Verifica motivo del fallimento per messaggio chiaro
+            doc = await db.commesse.find_one({"id": cid})
+            if not doc: raise HTTPException(404, "Commessa non trovata")
             if doc.get("operatore_carico") and doc.get("operatore_carico") != current.get("username"):
-                raise HTTPException(409, f"Già in carico a {doc.get('operatore_carico')}")
+                raise HTTPException(409, f"Commessa già presa in carico da {doc.get('operatore_carico')}")
+            if doc.get("operatore_carico") == current.get("username"):
+                # Idempotente: se sono io stesso, restituisco lo stato attuale
+                return _serialize(doc)
             raise HTTPException(409, f"Presa in carico non consentita nello stato {doc.get('stato')}")
-        await db.commesse.update_one({"id": cid}, {"$set": {
-            "stato": "in_preparazione",
-            "operatore_carico": current.get("username"),
-            "presa_in_carico_at": _now(), "updated_at": _now(),
-        }})
+        doc = updated
         await event_logger.log_event(
             db, category="COMMESSE", event_type="COMMESSA_PRESA_IN_CARICO",
             action="commesse.take", level="INFO", status="SUCCESS",
@@ -234,8 +249,7 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             message=f"Commessa #{doc.get('number')} presa in carico da {current.get('username')}",
             details={"commessa_id": cid},
         )
-        fresh = await db.commesse.find_one({"id": cid})
-        return _serialize(fresh)
+        return _serialize(doc)
 
     @router.post("/{cid}/pick")
     async def pick_commessa(cid: str, body: PickBody, current=Depends(deps.get_current_user)):

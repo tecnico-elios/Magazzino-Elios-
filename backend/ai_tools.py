@@ -203,15 +203,29 @@ TOOLS_SCHEMA: List[Dict[str, Any]] = [
         "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {
         "name": "search_commesse",
-        "description": "Cerca commesse (ordini di preparazione magazzino) per stato/priorità/cliente. Stati: da_preparare, in_preparazione, parziale, pronta, spedita, annullata.",
+        "description": (
+            "Cerca commesse (ordini di preparazione magazzino) per stato/priorità/cliente. "
+            "Stati validi: da_preparare, in_preparazione, parziale, pronta, spedita, annullata. "
+            "Sinonimi accettati (li normalizzo io): 'parzialmente preparata'='parziale', "
+            "'pronta per spedizione'='pronta', 'da fare/da preparare'='da_preparare'. "
+            "Ritorna commesse con avanzamento (prelevato/richiesto), operatore in carico, data prevista. "
+            "Rispetta il feature flag: se disabilitato ritorna commesse_disabled e items vuoti (NON inventare)."
+        ),
         "parameters": {"type": "object", "properties": {
-            "stato": {"type": "string"}, "cliente": {"type": "string"},
+            "stato": {"type": "string", "description": "Stato o sinonimo (vedi description)"},
+            "cliente": {"type": "string"},
             "priorita": {"type": "string", "enum": ["urgente", "alta", "normale", "bassa"]},
             "limit": {"type": "integer", "default": 20},
         }, "required": []}}},
     {"type": "function", "function": {
         "name": "get_commessa",
-        "description": "Recupera dettagli completi di una commessa (righe, seriali prelevati, stato per riga). Usa il number della commessa (es. '125').",
+        "description": (
+            "Recupera dettagli COMPLETI di una commessa: cliente, stato, priorità, operatore in carico, "
+            "righe con quantità richiesta/prelevata, seriali già prelevati, e sommario 'materiale mancante' "
+            "(cosa non è ancora stato preso). Usa il number della commessa (es. '125'). "
+            "Utile per rispondere a: 'cosa manca alla commessa X', 'chi ha preso in carico X', "
+            "'quali seriali sono stati prelevati per X', 'abbiamo tutto per la commessa X'."
+        ),
         "parameters": {"type": "object", "properties": {
             "number": {"type": "string"},
         }, "required": ["number"]}}},
@@ -444,32 +458,78 @@ async def dispatch_tool(db, svc, tool_name: str, args: Dict[str, Any], current_u
             # F23 — Rispetta feature flag: se OFF, ritorna vuoto senza inventare
             feat = await db.settings.find_one({"_id": "features"}) or {}
             if not feat.get("commesse_enabled"):
-                return {"error": "commesse_disabled", "items": []}
+                return {"error": "commesse_disabled", "items": [], "hint": "Modulo Commesse disattivato in Admin → Funzioni"}
+            # Normalizza sinonimi stato
+            STATE_SYN = {
+                "parzialmente preparata": "parziale", "parzialmente preparate": "parziale",
+                "parzialmente": "parziale",
+                "pronta per spedizione": "pronta", "pronte per spedizione": "pronta",
+                "pronta per la spedizione": "pronta",
+                "da fare": "da_preparare", "da preparare": "da_preparare",
+                "in preparazione": "in_preparazione",
+            }
             q: Dict[str, Any] = {}
-            if args.get("stato"): q["stato"] = args["stato"]
+            raw_stato = (args.get("stato") or "").strip().lower()
+            if raw_stato:
+                q["stato"] = STATE_SYN.get(raw_stato, raw_stato.replace(" ", "_"))
             if args.get("priorita"): q["priorita"] = args["priorita"]
             if args.get("cliente"): q["cliente"] = {"$regex": re.escape(args["cliente"]), "$options": "i"}
             limit = int(args.get("limit") or 20)
             items = []
-            async for d in db.commesse.find(q).sort("created_at", -1).limit(limit):
+            async for d in db.commesse.find(q).sort([("priorita", 1), ("data_prevista", 1), ("created_at", -1)]).limit(limit):
                 d.pop("_id", None)
                 for k in ("created_at", "updated_at", "presa_in_carico_at"):
                     if isinstance(d.get(k), datetime): d[k] = d[k].isoformat()
-                items.append({k: d.get(k) for k in ("number", "cliente", "stato", "priorita", "data_prevista", "operatore_carico", "righe", "operation_id")})
+                righe = d.get("righe") or []
+                tot_req = sum(float(r.get("qty_richiesta") or 0) for r in righe)
+                tot_prev = sum(float(r.get("qty_prelevata") or 0) for r in righe)
+                items.append({
+                    "number": d.get("number"),
+                    "cliente": d.get("cliente"),
+                    "stato": d.get("stato"),
+                    "priorita": d.get("priorita"),
+                    "data_prevista": d.get("data_prevista"),
+                    "operatore_carico": d.get("operatore_carico"),
+                    "avanzamento": f"{tot_prev:g}/{tot_req:g}",
+                    "righe_count": len(righe),
+                    "operation_id": d.get("operation_id"),
+                })
             return {"items": items, "total_returned": len(items)}
 
         if tool_name == "get_commessa":
             feat = await db.settings.find_one({"_id": "features"}) or {}
             if not feat.get("commesse_enabled"):
-                return {"error": "commesse_disabled"}
+                return {"error": "commesse_disabled", "hint": "Modulo Commesse disattivato in Admin → Funzioni"}
             num = (args.get("number") or "").strip()
             if not num: return {"error": "missing_number"}
+            # Supporta sia number esatto sia "125" quando salvato come "#125"
             d = await db.commesse.find_one({"number": num})
-            if not d: return {"error": "not_found"}
+            if not d:
+                d = await db.commesse.find_one({"number": {"$regex": f"^#?{re.escape(num)}$", "$options": "i"}})
+            if not d: return {"error": "not_found", "hint": f"Nessuna commessa con number '{num}'"}
             d.pop("_id", None)
             for k in ("created_at", "updated_at", "presa_in_carico_at", "completed_at", "shipped_at"):
                 if isinstance(d.get(k), datetime): d[k] = d[k].isoformat()
-            return {"commessa": d}
+            righe = d.get("righe") or []
+            materiale_mancante = []
+            materiale_prelevato = []
+            for r in righe:
+                req = float(r.get("qty_richiesta") or 0)
+                prev = float(r.get("qty_prelevata") or 0)
+                miss = req - prev
+                base = {"product_name": r.get("product_name"), "product_code": r.get("product_code"),
+                        "tipo_gestione": r.get("tipo_gestione"),
+                        "qty_richiesta": req, "qty_prelevata": prev}
+                if miss > 0:
+                    materiale_mancante.append({**base, "qty_mancante": miss})
+                if prev > 0:
+                    materiale_prelevato.append({**base, "seriali_prelevati": r.get("seriali_prelevati") or []})
+            return {
+                "commessa": d,
+                "materiale_mancante": materiale_mancante,
+                "materiale_prelevato": materiale_prelevato,
+                "completa": len(materiale_mancante) == 0,
+            }
 
         if tool_name == "get_product_serials":
             # F22 (26/02/2026) — Elenco seriali completo per prodotto (solo A Seriale).

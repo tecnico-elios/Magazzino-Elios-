@@ -1698,13 +1698,15 @@ app.include_router(commesse_routes.build_router(db, auth_deps), prefix="/api")
 
 
 # F23 — Feature flags pubblici (letti dal frontend per gating menu/dashboard)
-@api_router.get("/features")
+# NOTA: usiamo @app.get/put col path completo perché api_router è già stato incluso sopra
+# (app.include_router(api_router) a linea 1687) e le rotte aggiunte dopo non verrebbero registrate.
+@app.get("/api/features")
 async def get_features():
     doc = await db.settings.find_one({"_id": "features"}) or {}
     return {"commesse_enabled": bool(doc.get("commesse_enabled", False))}
 
 
-@api_router.put("/admin/features")
+@app.put("/api/admin/features")
 async def set_features(body: dict, current=Depends(auth_deps.require_admin)):
     allowed = {"commesse_enabled"}
     updates = {k: bool(v) for k, v in (body or {}).items() if k in allowed}

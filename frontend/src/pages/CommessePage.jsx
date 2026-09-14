@@ -31,6 +31,17 @@ const PRIO_LABEL = {
 export default function CommessePage() {
   const [selected, setSelected] = useState(null);
   const [creating, setCreating] = useState(false);
+  // F23.b — Deep-link dalla Dashboard: /commesse?stato=xxx apre già filtrato
+  // e /commesse?open=<id> apre direttamente il dettaglio.
+  const [initialStato, setInitialStato] = useState("");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const st = params.get("stato") || "";
+    const open = params.get("open") || "";
+    if (st) setInitialStato(st);
+    if (open) setSelected(open);
+  }, []);
   return (
     <div className="max-w-6xl mx-auto px-2 py-3 sm:px-4 sm:py-6" data-testid="commesse-page">
       {selected ? (
@@ -38,17 +49,17 @@ export default function CommessePage() {
       ) : creating ? (
         <CommessaCreate onDone={(id) => { setCreating(false); if (id) setSelected(id); }} />
       ) : (
-        <CommesseList onOpen={setSelected} onCreate={() => setCreating(true)} />
+        <CommesseList onOpen={setSelected} onCreate={() => setCreating(true)} initialStato={initialStato} />
       )}
     </div>
   );
 }
 
-function CommesseList({ onOpen, onCreate }) {
+function CommesseList({ onOpen, onCreate, initialStato = "" }) {
   const [items, setItems] = useState([]);
   const [kpi, setKpi] = useState({});
   const [loading, setLoading] = useState(true);
-  const [filterStato, setFilterStato] = useState("");
+  const [filterStato, setFilterStato] = useState(initialStato);
   const load = () => {
     setLoading(true);
     axios.get(`${API}/commesse`, { params: filterStato ? { stato: filterStato } : {} })

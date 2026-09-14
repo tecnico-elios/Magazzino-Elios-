@@ -1,5 +1,54 @@
 # PRD — Magazzino Elios Tech
 
+
+## F24 (14/09/2026) — Dashboard Commesse + AI Responsive + Race-safe Take ✅
+
+### 🐛 BUG FIX — /api/features 404
+- Le rotte `/features` e `/admin/features` erano decorate con `@api_router.get/put` DOPO `app.include_router(api_router)` (linea 1687), quindi non venivano registrate → Admin → Funzioni dava 404.
+- Fix in `server.py`: decorate ora con `@app.get("/api/features")` / `@app.put("/api/admin/features")` a path completo.
+
+### 🔒 Race Condition presa in carico commessa (P1 — richiesta utente)
+- Prima: `find_one` + `update_one` in due step → race window.
+- Ora: `find_one_and_update` atomico in `commesse_routes.py::take_commessa` con filtro `stato=da_preparare` + `operatore_carico=None`. Il secondo operatore riceve 409 con messaggio chiaro; log `COMMESSA_PRESA_IN_CARICO` invariato ma coerente.
+- Idempotenza: se lo stesso operatore ritenta, ritorna il doc corrente (no errore).
+- Test verificato via script Python parallelo (2× `find_one_and_update` con `asyncio.gather`) → alice=SUCCESS, bob=FAIL: PASS.
+
+### 📊 Integrazione Commesse in Dashboard (F23 punto 25-26)
+- **DashboardPage.jsx**: aggiunto flag `commesseEnabled` letto da `/api/features` + fetch parallelo `/api/commesse?limit=200` (stessa fonte della pagina `/commesse` — nessun secondo conteggio).
+- **4 KPI cliccabili** (deep-link `/commesse?stato=…`): Da preparare, In preparazione, Parzialmente preparate (`parziale`), Pronte per spedizione (`pronta`).
+- **Riquadro Commesse grande** accanto ad Arrivi/Spedizioni (grid `xl:grid-cols-3`) con riepilogo dinamico dei 4 stati.
+- **Sezione "🔴 Da fare adesso"**: top 5 commesse attive già ordinate server-side per priorità (urgente→bassa) + data prevista, mostra n° commessa, cliente, badge priorità/stato, X/Y prodotti preparati, operatore in carico, data prevista, link "Apri commessa →" con `?open=<id>`.
+- **CommessePage.jsx**: legge query param `?stato=` e `?open=` per deep-linking dalla Dashboard.
+- **Gating**: tutto invisibile se `commesse_enabled=false`. Nessuna modifica a Notion SSOT/Inventario/Arrivi/Spedizioni/Movimenti/Retroattività/Auth/Logging/operation_id.
+
+### 🎨 AI Assistant Responsive (PC/Tablet/Mobile)
+- **AIAssistantPage.jsx**: aggiunti breakpoint `lg:`/`xl:`/`2xl:` — larghezza `max-w-5xl xl:max-w-6xl` su desktop, padding maggiori, chat area `min-h-[55vh]` su desktop, bubble `max-w-[75%]` su desktop, font `text-[15px]`, input `h-12` con label "Invia" a fianco dell'icona.
+- Nessuna modifica alla logica funzionale (send, execute, cancel, session, tool calls).
+
+### 🤖 AI Tools Commesse — potenziati con dati reali
+- `search_commesse` — schema esteso con sinonimi ("parzialmente preparata"→`parziale`, "pronta per spedizione"→`pronta`, "da fare"→`da_preparare`). Ora ritorna anche `avanzamento` (X/Y), `operatore_carico`, `data_prevista`. Ordinamento server-side per priorità/data.
+- `get_commessa` — ora ritorna `materiale_mancante` (prodotti + qty), `materiale_prelevato` (con seriali già presi), `completa` (bool). Supporta lookup con o senza `#` prefix.
+- Feature flag gating: se `commesse_enabled=false`, entrambi i tool ritornano `commesses_disabled` senza inventare dati.
+
+### 🧪 Test PASS/FAIL
+- ✅ `/api/features` → 200 `{"commesse_enabled":true}` (era 404)
+- ✅ Race condition atomica `take_commessa` (test parallelo asyncio.gather)
+- ✅ AI tool `search_commesse` normalizza sinonimi ("parzialmente preparata"→parziale)
+- ✅ AI tool `get_commessa` restituisce `materiale_mancante`/`materiale_prelevato`
+- ✅ Feature flag gating attivo nei tool AI (nessuna invenzione dati con OFF)
+- ✅ Frontend hot-reload compila (solo warning ESLint pre-esistenti in altri file — non introdotti)
+- ✅ Screenshot login su 375px OK — layout mobile invariato
+- ⚠️ **NON TESTATO end-to-end via UI** (nessuna credenziale admin disponibile in `/app/memory/test_credentials.md`): rendering visivo Dashboard con dati reali, deep-link `/commesse?stato=…`, screenshot AI a 1440px con chat aperta. Codice coerente, nessun errore sintattico.
+
+### File modificati
+- `/app/backend/server.py` — rotte features spostate a `@app.get/put`
+- `/app/backend/routes/commesse_routes.py` — take atomico + fix indent bug in update
+- `/app/backend/ai_tools.py` — schema+dispatcher search_commesse/get_commessa
+- `/app/frontend/src/pages/DashboardPage.jsx` — sezioni Commesse + KPI + Da fare adesso
+- `/app/frontend/src/pages/CommessePage.jsx` — deep-link `?stato=` e `?open=`
+- `/app/frontend/src/pages/AIAssistantPage.jsx` — breakpoint desktop
+
+
 ## F16-F17 (26/02/2026) — P0 Inventario Fix + Retroattività Chirurgica + Export CSV ✅
 
 ### 🔴 P0 FIX — SN spediti restano in Inventario Notion (Feb 2026)
