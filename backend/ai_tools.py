@@ -467,6 +467,8 @@ async def dispatch_tool(db, svc, tool_name: str, args: Dict[str, Any], current_u
                 "pronta per la spedizione": "pronta",
                 "da fare": "da_preparare", "da preparare": "da_preparare",
                 "in preparazione": "in_preparazione",
+                "bozza": "bozza_spedizione", "bozza spedizione": "bozza_spedizione",
+                "in bozza": "bozza_spedizione",
             }
             q: Dict[str, Any] = {}
             raw_stato = (args.get("stato") or "").strip().lower()

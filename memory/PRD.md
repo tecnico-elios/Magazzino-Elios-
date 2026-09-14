@@ -1,6 +1,61 @@
 # PRD — Magazzino Elios Tech
 
 
+## F26 (14/09/2026) — Bozza Spedizione Persistente + Polling Real-time ✅
+
+### Persistenza server-side della bozza (P1)
+- Nuovo stato `bozza_spedizione` nel ciclo di vita commessa: `da_preparare → in_preparazione → parziale → pronta → bozza_spedizione → spedita`.
+- `POST /api/commesse/{cid}/draft` — crea/recupera bozza. Atomico via `find_one_and_update({stato:pronta})` → 409 se non pronta. **Idempotente**: se già in bozza, ritorna la stessa (nessun duplicato).
+- `POST /api/commesse/{cid}/draft/cancel` — atomico da `bozza_spedizione → pronta`, unset `shipment_draft`. Nessun tocco inventario.
+- `POST /api/commesse/{cid}/ship` — ora richiede `bozza_spedizione`. Retro-compat: se ancora in `pronta`, la promuove atomicamente prima di confermare (i client vecchi funzionano).
+- Snapshot `shipment_draft` persistito in `db.commesse`: `{created_by, created_at, updated_at, operation_id, payload}` con tutti gli item (product_page_id, name, code, serialized, serials, quantity). Ripresa a qualsiasi device.
+- `_compute_stato` preserva `bozza_spedizione` (non ricalcolato dalle righe).
+- Eventi log: `BOZZA_CREATA`, `BOZZA_ANNULLATA` (livello INFO, category COMMESSE, correlati via `operation_id`).
+
+### Polling real-time (P2)
+- `CommessaDetail` — polling silent ogni **8s** su `GET /api/commesse/{cid}`. Rileva cambio stato e mostra toast "Commessa aggiornata" (non invasivo). Riapre automaticamente la bozza se lo stato cambia in bozza_spedizione.
+- `CommesseList` — polling silent ogni **8s** su `GET /api/commesse?stato=…`. Aggiorna KPI + lista senza spinner.
+- `DashboardPage` — polling silent ogni **10s** su `GET /api/commesse?limit=200` (già esistente, riusa cache lato server-side lettura Mongo, no Notion polling).
+- Nessuna infrastruttura nuova (WebSocket/SSE evitati come da richiesta). Endpoint sono già leggeri: `/api/commesse` fa una find in Mongo con projection e sort O(logN), no Notion fetch.
+
+### Frontend flusso Bozza
+- `CommessaDetail`:
+  - `canCreateDraft = stato==pronta` → pulsante "Crea spedizione" chiama `POST /draft` e apre dialog
+  - `hasBozza = stato==bozza_spedizione` → banner persistente "📝 Bozza in attesa · Creata da X il …" + pulsante "Riapri bozza →"
+  - Se sono nel dettaglio e trovo una bozza (anche ripresa da altro device), il dialog si apre automaticamente
+  - `canCancel` esclude `bozza_spedizione` (per annullare devi prima annullare la bozza)
+- `BozzaSpedizioneDialog`:
+  - Legge il payload persistito da `commessa.shipment_draft.payload` (fallback ai dati correnti per retro-compat)
+  - Mostra badge "Persistente", `created_by` e `operation_id`
+  - 3 pulsanti: **Chiudi** (chiude dialog, bozza resta), **Annulla bozza** (con conferma → `POST /draft/cancel`), **Conferma spedizione** (→ `POST /ship`)
+- `STATO_LABEL.bozza_spedizione = { txt: "Bozza spedizione", icon: "📝", cls: indigo }` — visibile in liste, KPI, banner.
+
+### AI tools
+- `search_commesse`: aggiunto sinonimo "bozza" / "bozza spedizione" / "in bozza" → `bozza_spedizione` (l'AI ora riconosce anche questo stato).
+
+### Test PASS/FAIL (script Python + build production)
+- ✅ `POST /draft` **idempotente**: primo=CREATED, secondo=RESUMED (nessun duplicato)
+- ✅ Race condition atomica su `POST /draft` (2× parallel `find_one_and_update({stato:pronta})` → solo uno vince, l'altro NON riceve falso successo)
+- ✅ `_compute_stato` preserva `bozza_spedizione`
+- ✅ Retro-compat `POST /ship` da stato `pronta` (promuove auto a bozza atomicamente)
+- ✅ `yarn build production` compila in 22.18s (nessun errore, solo warning ESLint pre-esistenti)
+- ✅ `/api/features` 200 OK
+- ⚠️ **NON verificato end-to-end via UI browser autenticata** (nessuna credenziale admin): flusso completo Crea bozza → refresh browser → riapri commessa → dialog si riapre; multi-device (Bozza creata su PC visibile su smartphone entro 8s tramite polling); Dashboard KPI si aggiorna entro 10s dopo cambio stato su altra sessione. Codice + logica coerenti.
+
+### File modificati (questa sessione)
+- `/app/backend/routes/commesse_routes.py` — nuovo stato + endpoint draft/draft-cancel + refactor ship
+- `/app/backend/ai_tools.py` — sinonimo "bozza" per search_commesse
+- `/app/frontend/src/pages/CommessePage.jsx` — polling detail/list + flusso bozza + STATO_LABEL + banner
+- `/app/frontend/src/pages/DashboardPage.jsx` — polling 10s commesse KPI
+
+### Vincoli rispettati
+- Notion SSOT invariato: bozza è solo MongoDB, l'inventario Notion viene aggiornato SOLO alla conferma via `/checklist/send` (logica esistente riusata).
+- Nessun sistema parallelo (inventario/spedizioni/movimenti/log invariati).
+- Nessun testing agent usato. Nessuna funzione "Reintegra seriale".
+- `operation_id` mantenuto lungo tutta la catena Commessa → Picking → Bozza → Spedizione → Inventario → Movimenti → Log.
+
+
+
 ## F25 (14/09/2026) — Menu Cleanup + Dashboard Reorder + Cliente Notion + Bozza Spedizione ✅
 
 ### Menu superiore — Commesse rimossa

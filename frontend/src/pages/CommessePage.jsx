@@ -18,6 +18,7 @@ const STATO_LABEL = {
   in_preparazione: { txt: "In preparazione", cls: "bg-yellow-100 text-yellow-800 border-yellow-200", icon: "🟡" },
   parziale: { txt: "Parziale", cls: "bg-orange-100 text-orange-800 border-orange-200", icon: "🟠" },
   pronta: { txt: "Pronta", cls: "bg-emerald-100 text-emerald-800 border-emerald-200", icon: "🟢" },
+  bozza_spedizione: { txt: "Bozza spedizione", cls: "bg-indigo-100 text-indigo-800 border-indigo-200", icon: "📝" },
   spedita: { txt: "Spedita", cls: "bg-slate-200 text-slate-700 border-slate-300", icon: "🚚" },
   annullata: { txt: "Annullata", cls: "bg-slate-100 text-slate-500 border-slate-200", icon: "⚪" },
 };
@@ -60,14 +61,21 @@ function CommesseList({ onOpen, onCreate, initialStato = "" }) {
   const [kpi, setKpi] = useState({});
   const [loading, setLoading] = useState(true);
   const [filterStato, setFilterStato] = useState(initialStato);
-  const load = () => {
-    setLoading(true);
+  const load = (silent = false) => {
+    if (!silent) setLoading(true);
     axios.get(`${API}/commesse`, { params: filterStato ? { stato: filterStato } : {} })
       .then(({ data }) => { setItems(data.items || []); setKpi(data.kpi || {}); })
-      .catch((e) => toast.error("Errore caricamento", { description: e?.response?.data?.detail }))
+      .catch((e) => !silent && toast.error("Errore caricamento", { description: e?.response?.data?.detail }))
       .finally(() => setLoading(false));
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [filterStato]);
+  // F25.b — Polling leggero 8s per aggiornamento automatico stato commesse tra operatori.
+  // Riusa lo stesso endpoint /commesse (cache side-effect-free, restituisce kpi+items).
+  useEffect(() => {
+    const id = setInterval(() => load(true), 8000);
+    return () => clearInterval(id);
+    /* eslint-disable-next-line */
+  }, [filterStato]);
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
@@ -309,15 +317,36 @@ function CommessaDetail({ id, onBack }) {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanRigaIdx, setScanRigaIdx] = useState(null);
   const [confirmComplete, setConfirmComplete] = useState(false);
-  const [confirmShip, setConfirmShip] = useState(false);
+  const [showBozza, setShowBozza] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmCancelBozza, setConfirmCancelBozza] = useState(false);
   const [busy, setBusy] = useState(false);
+  // F25.b — Tracciamento dello stato precedente per detection cambiamenti (toast informativo)
+  const lastStatoRef = useState({ current: null })[0];
 
-  const load = () => {
-    setLoading(true);
-    axios.get(`${API}/commesse/${id}`).then(({ data }) => setC(data)).catch(() => toast.error("Commessa non trovata")).finally(() => setLoading(false));
+  const load = (silent = false) => {
+    if (!silent) setLoading(true);
+    axios.get(`${API}/commesse/${id}`)
+      .then(({ data }) => {
+        if (silent && lastStatoRef.current && lastStatoRef.current !== data.stato) {
+          // Cambio stato rilevato da polling — notifica non invasiva
+          toast.info("Commessa aggiornata", { description: `Nuovo stato: ${STATO_LABEL[data.stato]?.txt || data.stato}`, duration: 4000 });
+        }
+        lastStatoRef.current = data.stato;
+        setC(data);
+        // Riapri automaticamente la bozza se lo stato è bozza_spedizione (ripresa)
+        if (data.stato === "bozza_spedizione" && !silent) setShowBozza(true);
+      })
+      .catch(() => !silent && toast.error("Commessa non trovata"))
+      .finally(() => !silent && setLoading(false));
   };
-  useEffect(load, [id]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
+  // F25.b — Polling leggero 8s per real-time cross-operatore
+  useEffect(() => {
+    const iv = setInterval(() => load(true), 8000);
+    return () => clearInterval(iv);
+    /* eslint-disable-next-line */
+  }, [id]);
 
   const doTake = async () => {
     setBusy(true);
@@ -346,12 +375,30 @@ function CommessaDetail({ id, onBack }) {
     catch (e) { toast.error("Errore", { description: e?.response?.data?.detail }); }
     finally { setBusy(false); }
   };
-  const doShip = async () => {
+  const doCreateDraft = async () => {
+    // F25.b — Crea/recupera bozza persistente lato server prima di mostrare il dialog
     setBusy(true);
-    try { const { data } = await axios.post(`${API}/commesse/${id}/ship`); setC(data.commessa); setConfirmShip(false);
-      toast.success("Spedizione creata", { description: data.shipment?.message });
+    try {
+      const { data } = await axios.post(`${API}/commesse/${id}/draft`);
+      setC(data.commessa);
+      setShowBozza(true);
+      if (data.resumed) toast.info("Bozza esistente recuperata", { description: `Creata da ${data.draft?.created_by || "operatore"}` });
+      else toast.success("Bozza spedizione creata");
+    } catch (e) { toast.error("Errore creazione bozza", { description: e?.response?.data?.detail }); }
+    finally { setBusy(false); }
+  };
+  const doConfirmShip = async () => {
+    setBusy(true);
+    try { const { data } = await axios.post(`${API}/commesse/${id}/ship`); setC(data.commessa); setShowBozza(false);
+      toast.success("Spedizione confermata", { description: data.shipment?.message });
       if (data.shipment?.inventory_warnings?.length) toast.warning("Attenzione Inventario", { description: data.shipment.inventory_warnings.join(" · "), duration: 15000 });
     } catch (e) { toast.error("Spedizione fallita", { description: e?.response?.data?.detail }); }
+    finally { setBusy(false); }
+  };
+  const doCancelDraft = async () => {
+    setBusy(true);
+    try { const { data } = await axios.post(`${API}/commesse/${id}/draft/cancel`); setC(data.commessa); setShowBozza(false); setConfirmCancelBozza(false); toast.success("Bozza annullata"); }
+    catch (e) { toast.error("Errore", { description: e?.response?.data?.detail }); }
     finally { setBusy(false); }
   };
   const doCancel = async () => {
@@ -367,8 +414,9 @@ function CommessaDetail({ id, onBack }) {
   const totalQty = (c.righe || []).reduce((s, r) => s + (r.qty_richiesta || 0), 0);
   const pickedQty = (c.righe || []).reduce((s, r) => s + (r.qty_prelevata || 0), 0);
   const canComplete = totalQty > 0 && pickedQty >= totalQty && ["in_preparazione", "parziale"].includes(c.stato);
-  const canShip = c.stato === "pronta";
-  const canCancel = !["spedita", "annullata"].includes(c.stato);
+  const canCreateDraft = c.stato === "pronta";
+  const hasBozza = c.stato === "bozza_spedizione";
+  const canCancel = !["spedita", "annullata", "bozza_spedizione"].includes(c.stato);
 
   return (
     <div className="space-y-3">
@@ -431,9 +479,28 @@ function CommessaDetail({ id, onBack }) {
 
       <div className="flex flex-col sm:flex-row gap-2">
         {canComplete && <Button onClick={() => setConfirmComplete(true)} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white h-12" data-testid="complete-btn"><CheckCircle size={16} /> Completa preparazione</Button>}
-        {canShip && <Button onClick={() => setConfirmShip(true)} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white h-12" data-testid="ship-btn"><Truck size={16} /> Crea spedizione</Button>}
+        {canCreateDraft && <Button onClick={doCreateDraft} disabled={busy} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white h-12" data-testid="ship-btn"><Truck size={16} /> Crea spedizione</Button>}
+        {hasBozza && <Button onClick={() => setShowBozza(true)} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white h-12" data-testid="open-bozza-btn"><Truck size={16} /> Apri bozza</Button>}
         {canCancel && <Button onClick={() => setConfirmCancel(true)} variant="outline" className="text-red-700 border-red-300 hover:bg-red-50 h-12" data-testid="cancel-btn"><XCircle size={16} /> Annulla</Button>}
       </div>
+
+      {/* F25.b — Banner bozza persistente attiva */}
+      {hasBozza && !showBozza && (
+        <div className="et-card p-3 border-l-4 border-indigo-500 bg-indigo-50/40" data-testid="bozza-banner">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-bold text-indigo-900">📝 Bozza spedizione in attesa</div>
+              <div className="text-xs text-indigo-700 mt-0.5">
+                Creata da <b>{c.shipment_draft?.created_by || "—"}</b>
+                {c.shipment_draft?.created_at && ` il ${new Date(c.shipment_draft.created_at).toLocaleString("it-IT")}`}
+              </div>
+            </div>
+            <Button size="sm" onClick={() => setShowBozza(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white" data-testid="resume-bozza-btn">
+              Riapri bozza →
+            </Button>
+          </div>
+        </div>
+      )}
 
       {scannerOpen && (
         <BarcodeScanner open={true} onClose={() => setScannerOpen(false)} label="Scansiona seriale"
@@ -443,10 +510,18 @@ function CommessaDetail({ id, onBack }) {
         <ConfirmDialog title="Completa preparazione" body={`Confermi la preparazione della commessa #${c.number}? Tutti i materiali risultano prelevati.`}
           onCancel={() => setConfirmComplete(false)} onConfirm={doComplete} busy={busy} confirmLabel="Conferma" />
       )}
-      {confirmShip && (
+      {showBozza && hasBozza && (
         <BozzaSpedizioneDialog commessa={c} busy={busy}
-          onCancel={() => setConfirmShip(false)}
-          onConfirm={doShip} />
+          onCancel={() => setShowBozza(false)}
+          onCancelDraft={() => setConfirmCancelBozza(true)}
+          onConfirm={doConfirmShip} />
+      )}
+      {confirmCancelBozza && (
+        <ConfirmDialog title="Annulla bozza"
+          body={`Confermi l'annullamento della bozza di spedizione? La commessa tornerà nello stato "Pronta". Nessuna modifica all'inventario.`}
+          onCancel={() => setConfirmCancelBozza(false)}
+          onConfirm={doCancelDraft} busy={busy}
+          confirmLabel="Annulla bozza" danger />
       )}
       {confirmCancel && (
         <ConfirmDialog title="Annulla commessa" body={`Confermi l'annullamento della commessa #${c.number}? Prelievi registrati: ${pickedQty}/${totalQty}. L'operazione verrà registrata nel Registro Log.`}
@@ -483,8 +558,21 @@ function ConfirmDialog({ title, body, onCancel, onConfirm, busy, confirmLabel = 
 
 // F24 §15 — Bozza Spedizione: preview completa dei prodotti/seriali derivati dalla commessa.
 // L'inventario Notion viene aggiornato SOLO dopo "Conferma spedizione".
-function BozzaSpedizioneDialog({ commessa, busy, onCancel, onConfirm }) {
-  const righe = commessa.righe || [];
+function BozzaSpedizioneDialog({ commessa, busy, onCancel, onCancelDraft, onConfirm }) {
+  // F25.b — Preferisce il payload persistito della bozza; fallback ai dati correnti.
+  const draft = commessa.shipment_draft || {};
+  const draftItems = draft?.payload?.items;
+  const righe = (draftItems && draftItems.length > 0)
+    ? draftItems.map((it) => ({
+        product_name: it.name, product_code: it.product_code || "",
+        tipo_gestione: it.serialized ? "a_seriale" : "a_quantita",
+        qty_prelevata: it.quantity, seriali_prelevati: it.serials || [],
+      }))
+    : (commessa.righe || []).map((r) => ({
+        product_name: r.product_name, product_code: r.product_code,
+        tipo_gestione: r.tipo_gestione,
+        qty_prelevata: r.qty_prelevata, seriali_prelevati: r.seriali_prelevati || [],
+      }));
   return (
     <Dialog open={true} onOpenChange={(v) => !v && onCancel()}>
       <DialogContent className="max-w-lg w-[95vw]" data-testid="bozza-spedizione-dialog">
@@ -492,9 +580,10 @@ function BozzaSpedizioneDialog({ commessa, busy, onCancel, onConfirm }) {
           <DialogTitle className="flex items-center gap-2">
             <Truck size={20} weight="bold" className="text-indigo-600" />
             Bozza Spedizione
+            <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200 text-[10px] ml-1">Persistente</Badge>
           </DialogTitle>
           <DialogDescription>
-            Verifica i dati prima di confermare. L'inventario Notion verrà aggiornato solo dopo la conferma.
+            Verifica i dati prima di confermare. La bozza è salvata sul server: puoi chiudere e riaprire senza perdere il lavoro.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 text-sm">
@@ -502,7 +591,12 @@ function BozzaSpedizioneDialog({ commessa, busy, onCancel, onConfirm }) {
             <div><div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Commessa</div><div className="font-mono-tight font-semibold">#{commessa.number}</div></div>
             <div><div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Cliente</div><div className="font-semibold truncate">{commessa.cliente}</div></div>
             <div><div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Operatore</div><div className="truncate">{commessa.operatore_carico || "—"}</div></div>
-            <div><div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Stato</div><div className="uppercase text-xs font-bold text-emerald-700">BOZZA</div></div>
+            <div><div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Stato</div><div className="uppercase text-xs font-bold text-indigo-700">📝 BOZZA</div></div>
+            {draft?.created_by && (
+              <div className="col-span-2 text-[11px] text-slate-500">
+                Creata da <b>{draft.created_by}</b> · op: <span className="font-mono-tight">{commessa.operation_id}</span>
+              </div>
+            )}
           </div>
           <div>
             <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1.5">Materiale ({righe.length} righe)</div>
@@ -530,7 +624,12 @@ function BozzaSpedizioneDialog({ commessa, busy, onCancel, onConfirm }) {
           </div>
         </div>
         <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
-          <Button variant="outline" onClick={onCancel} disabled={busy} className="w-full sm:w-auto" data-testid="bozza-cancel">
+          <Button variant="outline" onClick={onCancel} disabled={busy} className="w-full sm:w-auto" data-testid="bozza-close">
+            Chiudi
+          </Button>
+          <Button variant="outline" onClick={onCancelDraft} disabled={busy}
+            className="w-full sm:w-auto text-red-700 border-red-300 hover:bg-red-50"
+            data-testid="bozza-cancel">
             <XCircle size={16} /> Annulla bozza
           </Button>
           <Button onClick={onConfirm} disabled={busy}

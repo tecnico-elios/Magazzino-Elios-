@@ -103,6 +103,12 @@ export default function DashboardPage() {
 
   // F23 — Ricarica commesse quando il flag cambia (attivazione live da Admin)
   useEffect(() => { loadCommesse(); }, [loadCommesse]);
+  // F25.b — Polling leggero ogni 10s per aggiornare i KPI Commesse in tempo semi-reale
+  useEffect(() => {
+    if (!commesseEnabled) return;
+    const iv = setInterval(() => loadCommesse(), 10000);
+    return () => clearInterval(iv);
+  }, [commesseEnabled, loadCommesse]);
 
   const totalProducts = kpi?.total_products ?? 0;
   const totalUnits = kpi?.total_units ?? 0;

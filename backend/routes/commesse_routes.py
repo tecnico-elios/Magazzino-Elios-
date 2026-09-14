@@ -19,7 +19,7 @@ import event_logger
 
 logger = logging.getLogger(__name__)
 
-STATI = ("da_preparare", "in_preparazione", "parziale", "pronta", "spedita", "annullata")
+STATI = ("da_preparare", "in_preparazione", "parziale", "pronta", "bozza_spedizione", "spedita", "annullata")
 PRIORITA = ("urgente", "alta", "normale", "bassa")
 
 
@@ -74,8 +74,9 @@ def _serialize(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _compute_stato(doc: Dict[str, Any]) -> str:
-    """Ricalcola stato in base ai prelievi delle righe (esclude spedita/annullata)."""
-    if doc.get("stato") in ("spedita", "annullata"):
+    """Ricalcola stato in base ai prelievi delle righe (esclude stati terminali/bozza)."""
+    # F25.b — bozza_spedizione è uno stato manuale: non lo ricalcoliamo dalle righe.
+    if doc.get("stato") in ("spedita", "annullata", "bozza_spedizione"):
         return doc["stato"]
     if not doc.get("operatore_carico"):
         return "da_preparare"
@@ -373,33 +374,126 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         )
         return _serialize(await db.commesse.find_one({"id": cid}))
 
-    @router.post("/{cid}/ship")
-    async def ship_commessa(cid: str, request: Request, current=Depends(deps.get_current_user)):
-        """Genera una spedizione reale via /api/checklist/send. Scala l'inventario Notion."""
-        await _require_enabled()
-        doc = await db.commesse.find_one({"id": cid})
-        if not doc: raise HTTPException(404, "Commessa non trovata")
-        if doc.get("stato") != "pronta":
-            raise HTTPException(409, "Solo commesse 'pronte' possono generare una spedizione")
-        auth_header = request.headers.get("Authorization") or ""
-        base = os.environ.get("INTERNAL_API_BASE") or "http://localhost:8001"
+    def _build_draft_payload(doc: Dict[str, Any], operator: str) -> Dict[str, Any]:
+        """Costruisce lo snapshot bozza dai dati correnti della commessa."""
         items_payload = []
         for r in doc.get("righe") or []:
             items_payload.append({
                 "page_id": r.get("product_page_id"),
                 "name": r.get("product_name"),
+                "product_code": r.get("product_code"),
                 "serialized": (r.get("tipo_gestione") == "a_seriale"),
-                "serials": r.get("seriali_prelevati") or [],
+                "serials": list(r.get("seriali_prelevati") or []),
                 "quantity": float(r.get("qty_prelevata") or 0),
                 "unit": "pz",
             })
-        payload = {
-            "operator": current.get("username"),
+        return {
+            "operator": operator,
             "structure": doc.get("cliente"),
-            "taken_by": doc.get("operatore_carico") or current.get("username"),
+            "taken_by": doc.get("operatore_carico") or operator,
             "items": items_payload,
             "commessa_ref": doc.get("number"),
         }
+
+    @router.post("/{cid}/draft")
+    async def create_draft(cid: str, current=Depends(deps.get_current_user)):
+        """F25.b — Crea/recupera una BOZZA DI SPEDIZIONE persistente sul server.
+        - Idempotente: se esiste già una bozza per la commessa, ritorna quella.
+        - Atomico: transizione stato pronta → bozza_spedizione via find_one_and_update.
+        - NON tocca l'inventario Notion.
+        """
+        await _require_enabled()
+        # Ripresa idempotente: se già in bozza_spedizione, restituisci lo snapshot corrente
+        existing = await db.commesse.find_one({"id": cid})
+        if not existing: raise HTTPException(404, "Commessa non trovata")
+        if existing.get("stato") == "bozza_spedizione":
+            return {"ok": True, "resumed": True, "draft": existing.get("shipment_draft"),
+                    "commessa": _serialize(existing)}
+        # Transizione atomica da 'pronta' a 'bozza_spedizione'
+        draft_payload = _build_draft_payload(existing, current.get("username"))
+        draft_meta = {
+            "created_by": current.get("username"), "created_at": _now(),
+            "updated_at": _now(), "operation_id": existing.get("operation_id"),
+            "payload": draft_payload,
+        }
+        updated = await db.commesse.find_one_and_update(
+            {"id": cid, "stato": "pronta"},
+            {"$set": {"stato": "bozza_spedizione", "shipment_draft": draft_meta, "updated_at": _now()}},
+            return_document=True,
+        )
+        if not updated:
+            fresh = await db.commesse.find_one({"id": cid})
+            raise HTTPException(409, f"Bozza non creabile: stato attuale {fresh.get('stato')}")
+        await event_logger.log_event(
+            db, category="COMMESSE", event_type="BOZZA_CREATA",
+            action="commesse.draft.create", level="INFO", status="SUCCESS",
+            user=current.get("username"), operation_id=existing.get("operation_id"),
+            endpoint=f"POST /api/commesse/{cid}/draft",
+            customer=existing.get("cliente"),
+            message=f"Bozza spedizione creata per commessa #{existing.get('number')}",
+            details={"commessa_id": cid, "righe_count": len(draft_payload["items"])},
+        )
+        return {"ok": True, "resumed": False, "draft": draft_meta, "commessa": _serialize(updated)}
+
+    @router.post("/{cid}/draft/cancel")
+    async def cancel_draft(cid: str, current=Depends(deps.get_current_user)):
+        """Annulla la bozza persistente e riporta la commessa a 'pronta'. Nessun tocco inventario."""
+        await _require_enabled()
+        updated = await db.commesse.find_one_and_update(
+            {"id": cid, "stato": "bozza_spedizione"},
+            {"$set": {"stato": "pronta", "updated_at": _now()}, "$unset": {"shipment_draft": ""}},
+            return_document=True,
+        )
+        if not updated:
+            fresh = await db.commesse.find_one({"id": cid})
+            if not fresh: raise HTTPException(404, "Commessa non trovata")
+            raise HTTPException(409, f"Nessuna bozza attiva: stato {fresh.get('stato')}")
+        await event_logger.log_event(
+            db, category="COMMESSE", event_type="BOZZA_ANNULLATA",
+            action="commesse.draft.cancel", level="INFO", status="SUCCESS",
+            user=current.get("username"), operation_id=updated.get("operation_id"),
+            endpoint=f"POST /api/commesse/{cid}/draft/cancel",
+            customer=updated.get("cliente"),
+            message=f"Bozza spedizione annullata per commessa #{updated.get('number')}",
+            details={"commessa_id": cid},
+        )
+        return {"ok": True, "commessa": _serialize(updated)}
+
+    @router.post("/{cid}/ship")
+    async def ship_commessa(cid: str, request: Request, current=Depends(deps.get_current_user)):
+        """F25.b — CONFERMA la spedizione (partendo da bozza persistente).
+        Esegue realmente /api/checklist/send, scala l'inventario Notion e passa a 'spedita'.
+        Retro-compat: se la commessa è ancora in 'pronta', la promuoviamo prima a bozza
+        atomicamente e poi confermiamo (client vecchi continuano a funzionare)."""
+        await _require_enabled()
+        doc = await db.commesse.find_one({"id": cid})
+        if not doc: raise HTTPException(404, "Commessa non trovata")
+        # Se la commessa è ancora 'pronta', creiamo prima la bozza (retro-compat client)
+        if doc.get("stato") == "pronta":
+            draft_meta = {
+                "created_by": current.get("username"), "created_at": _now(),
+                "updated_at": _now(), "operation_id": doc.get("operation_id"),
+                "payload": _build_draft_payload(doc, current.get("username")),
+            }
+            promoted = await db.commesse.find_one_and_update(
+                {"id": cid, "stato": "pronta"},
+                {"$set": {"stato": "bozza_spedizione", "shipment_draft": draft_meta, "updated_at": _now()}},
+                return_document=True,
+            )
+            if not promoted:
+                fresh = await db.commesse.find_one({"id": cid})
+                raise HTTPException(409, f"Impossibile confermare: stato {fresh.get('stato')}")
+            doc = promoted
+        if doc.get("stato") != "bozza_spedizione":
+            raise HTTPException(409, "Confermabile solo da bozza_spedizione o pronta")
+        auth_header = request.headers.get("Authorization") or ""
+        base = os.environ.get("INTERNAL_API_BASE") or "http://localhost:8001"
+        # Usa il payload persistito (se presente) altrimenti ricostruisci dai dati correnti
+        draft = doc.get("shipment_draft") or {}
+        payload = draft.get("payload") or _build_draft_payload(doc, current.get("username"))
+        # Ricostruisci items nel formato atteso da /checklist/send (senza product_code)
+        items_payload = [{k: v for k, v in it.items() if k != "product_code"} for it in payload.get("items", [])]
+        payload = {**payload, "items": items_payload}
         try:
             async with httpx.AsyncClient(timeout=90.0, headers={"Authorization": auth_header}) as client:
                 r = await client.post(f"{base}/api/checklist/send", json=payload)
@@ -418,10 +512,13 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             raise
         except Exception as e:
             raise HTTPException(500, f"Errore chiamata spedizione: {e}")
-        await db.commesse.update_one({"id": cid}, {"$set": {
-            "stato": "spedita", "shipped_at": _now(), "updated_at": _now(),
-            "shipment_ref": ship_result.get("checklist_id"),
-        }})
+        await db.commesse.update_one({"id": cid}, {
+            "$set": {
+                "stato": "spedita", "shipped_at": _now(), "updated_at": _now(),
+                "shipment_ref": ship_result.get("checklist_id"),
+            },
+            "$unset": {"shipment_draft": ""},
+        })
         await event_logger.log_event(
             db, category="COMMESSE", event_type="COMMESSA_SPEDITA",
             action="commesse.ship", level="INFO", status="SUCCESS",
