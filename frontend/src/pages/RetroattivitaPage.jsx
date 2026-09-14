@@ -422,9 +422,9 @@ function EditDialog({ row, kind, onClose, onDone }) {
             </div>
           )}
 
-          {/* F16 (26/02) — CAMBIO PRODOTTO A SERIALE: mantiene lo stesso record,
-                cambia solo la relazione Item in uscita (utile per "spedito il prodotto sbagliato"). */}
-          {productTipo === "a_seriale" && kind === "spedizione" && (
+          {/* F16 (26/02) — CAMBIO PRODOTTO (A Seriale e A Quantità).
+                Mantiene lo stesso record Notion, cambia solo la relazione Item in uscita. */}
+          {productTipo && kind === "spedizione" && (
             <div className="rounded-md border border-indigo-300 bg-indigo-50/40 p-3">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -435,14 +435,16 @@ function EditDialog({ row, kind, onClose, onDone }) {
                   data-testid="retro-change-product-toggle"
                 />
                 <span className="text-xs font-semibold text-indigo-900">
-                  Correggi prodotto (mantieni stesso seriale, cambia solo il modello)
+                  {productTipo === "a_seriale"
+                    ? "Correggi prodotto (mantieni stesso seriale, cambia solo il modello)"
+                    : "Correggi prodotto (cambia il modello, mantieni la quantità)"}
                 </span>
               </label>
               {changeProduct && (
                 <div className="mt-2 flex items-center gap-2">
                   <div className="flex-1 min-w-0">
                     {newProduct ? (
-                      <div className="text-xs bg-white border border-indigo-200 rounded px-2 py-1.5">
+                      <div className="text-xs bg-white border border-indigo-200 rounded px-2 py-1.5 break-words">
                         <span className="text-slate-500">Nuovo prodotto: </span>
                         <b className="text-indigo-800">{newProduct.name}</b>
                       </div>
@@ -455,7 +457,7 @@ function EditDialog({ row, kind, onClose, onDone }) {
                     size="sm"
                     variant="outline"
                     onClick={() => setProductPickerOpen(true)}
-                    className="border-indigo-300 text-indigo-700 hover:bg-indigo-100"
+                    className="border-indigo-300 text-indigo-700 hover:bg-indigo-100 shrink-0"
                     data-testid="retro-change-product-btn"
                   >
                     {newProduct ? "Cambia" : "Scegli prodotto"}
@@ -613,7 +615,7 @@ function EditDialog({ row, kind, onClose, onDone }) {
         <ProductPickerDialog
           onClose={() => setProductPickerOpen(false)}
           onPick={(p) => { setNewProduct(p); setProductPickerOpen(false); }}
-          filterTipo="a_seriale"
+          filterTipo={productTipo || "a_seriale"}
           currentPageId={productMeta.page_id}
         />
       )}
@@ -649,7 +651,9 @@ function ProductPickerDialog({ onClose, onPick, filterTipo = "a_seriale", curren
         <DialogHeader>
           <DialogTitle className="text-indigo-800">Scegli il prodotto corretto</DialogTitle>
           <DialogDescription>
-            Solo prodotti "A Seriale". Il seriale della riga verrà spostato sul nuovo prodotto (stesso record Notion).
+            {filterTipo === "a_seriale"
+              ? "Solo prodotti \"A Seriale\". Il seriale della riga verrà spostato sul nuovo prodotto (stesso record Notion)."
+              : "Solo prodotti \"A Quantità\". La quantità della riga verrà spostata sul nuovo prodotto (stesso record Notion)."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
@@ -679,7 +683,7 @@ function ProductPickerDialog({ onClose, onPick, filterTipo = "a_seriale", curren
                     <div className="text-sm font-semibold text-slate-900 truncate">{it.name || "—"}</div>
                     <div className="text-[11px] text-slate-500 font-mono-tight truncate">{it.code || "—"} · {it.category || "—"}</div>
                   </div>
-                  <span className="text-[10px] px-2 h-6 inline-flex items-center rounded-full font-semibold shrink-0 bg-emerald-100 text-emerald-800">A Seriale</span>
+                  <span className={`text-[10px] px-2 h-6 inline-flex items-center rounded-full font-semibold shrink-0 ${filterTipo === "a_seriale" ? "bg-emerald-100 text-emerald-800" : "bg-sky-100 text-sky-800"}`}>{filterTipo === "a_seriale" ? "A Seriale" : "A Quantità"}</span>
                 </button>
               ))
             )}

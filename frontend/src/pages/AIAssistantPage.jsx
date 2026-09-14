@@ -110,37 +110,37 @@ export default function AIAssistantPage() {
   const modeLabel = { consultation: "Solo Consultazione", operational: "Operativa", full_operational: "Operativa Completa" }[status.mode] || status.mode;
 
   return (
-    <div className="max-w-4xl mx-auto p-3 sm:p-6 flex flex-col h-[calc(100vh-140px)]" data-testid="ai-page">
-      {/* Header — essenziale: titolo, modalità, provider/modello */}
-      <div className="et-card p-4 mb-3 flex items-center gap-3">
-        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shrink-0">
-          <Robot size={22} weight="bold" />
+    <div className="w-full max-w-4xl mx-auto px-2 py-2 sm:px-4 sm:py-4 flex flex-col min-h-[calc(100dvh-72px)] sm:min-h-[calc(100dvh-88px)]" data-testid="ai-page">
+      {/* Header — compatto responsive: badge + provider sotto il titolo su mobile */}
+      <div className="et-card p-3 sm:p-4 mb-2 sm:mb-3 flex items-center gap-2 sm:gap-3 shrink-0">
+        <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shrink-0">
+          <Robot size={20} weight="bold" />
         </div>
         <div className="flex-1 min-w-0">
-          <h1 className="font-display text-lg font-black text-slate-900 truncate">Assistente AI Magazzino Elios</h1>
-          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-            <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200 text-[10px]">{modeLabel}</Badge>
-            {contextSection && <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-[10px]">Contesto: {contextSection}</Badge>}
-            <span className="text-[11px] text-slate-400">Provider: {status.provider} · {status.model}</span>
+          <h1 className="font-display text-sm sm:text-lg font-black text-slate-900 truncate leading-tight">Assistente AI Magazzino</h1>
+          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+            <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200 text-[9px] sm:text-[10px] px-1.5 py-0">{modeLabel}</Badge>
+            {contextSection && <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-[9px] sm:text-[10px] px-1.5 py-0">Contesto: {contextSection}</Badge>}
+            <span className="text-[10px] sm:text-[11px] text-slate-400 truncate max-w-full">{status.provider} · {status.model}</span>
           </div>
         </div>
       </div>
 
-      {/* Chat area */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto bg-white border border-slate-200 rounded-md p-3 sm:p-4 space-y-3" data-testid="ai-chat-area">
+      {/* Chat area — flex-1 con altezza dinamica; scroll interno */}
+      <div ref={scrollRef} className="flex-1 min-h-[40vh] overflow-y-auto bg-white border border-slate-200 rounded-md p-2 sm:p-4 space-y-2 sm:space-y-3" data-testid="ai-chat-area">
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-            <div className={`max-w-[85%] px-3 py-2 rounded-lg text-sm ${
+            <div className={`max-w-[92%] sm:max-w-[85%] px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-[13px] sm:text-sm ${
               m.role === "user" ? "bg-indigo-600 text-white" :
               m.role === "error" ? "bg-red-50 border border-red-200 text-red-800" :
               m.role === "system" ? "bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs" :
               "bg-slate-100 text-slate-900"
             }`} data-testid={`ai-msg-${m.role}-${i}`}>
-              {m.role === "ai" && <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1">Assistente AI</div>}
-              <div className="whitespace-pre-wrap break-words">{m.content}</div>
+              {m.role === "ai" && <div className="text-[9px] sm:text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1">Assistente AI</div>}
+              <div className="whitespace-pre-wrap break-words overflow-wrap-anywhere" style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}>{m.content}</div>
               {m.toolCalls?.length > 0 && (
-                <div className="mt-1.5 text-[10px] text-slate-400">
-                  Tool utilizzati: {m.toolCalls.map((t) => t.tool).join(", ")}
+                <div className="mt-1.5 text-[9px] sm:text-[10px] text-slate-400 break-words">
+                  Tool: {m.toolCalls.map((t) => t.tool).join(", ")}
                 </div>
               )}
             </div>
@@ -148,7 +148,7 @@ export default function AIAssistantPage() {
         ))}
         {sending && (
           <div className="flex justify-start">
-            <div className="bg-slate-100 px-3 py-2 rounded-lg text-sm text-slate-500 flex items-center gap-2" data-testid="ai-thinking">
+            <div className="bg-slate-100 px-2.5 py-1.5 rounded-lg text-xs sm:text-sm text-slate-500 flex items-center gap-2" data-testid="ai-thinking">
               <div className="flex gap-1">
                 <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
                 <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
@@ -160,22 +160,23 @@ export default function AIAssistantPage() {
         )}
       </div>
 
-      {/* Input */}
-      <div className="mt-3 flex gap-2">
+      {/* Input — sticky-safe: rimane accessibile anche con keyboard mobile aperta */}
+      <div className="mt-2 sm:mt-3 flex gap-2 shrink-0">
         <Input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !sending) { e.preventDefault(); send(); } }}
           placeholder="Chiedi qualcosa al magazzino…"
-          className="h-11 flex-1"
+          className="h-11 sm:h-11 flex-1 text-sm sm:text-base"
           disabled={sending}
           data-testid="ai-input"
         />
         <Button
           onClick={() => send()}
           disabled={sending || !input.trim()}
-          className="h-11 bg-indigo-600 hover:bg-indigo-700 text-white px-5"
+          className="h-11 bg-indigo-600 hover:bg-indigo-700 text-white px-4 sm:px-5 shrink-0"
           data-testid="ai-send-btn"
+          aria-label="Invia"
         >
           <PaperPlaneRight size={16} weight="bold" />
         </Button>
@@ -184,32 +185,32 @@ export default function AIAssistantPage() {
       {/* Popup di conferma operazione */}
       {pendingOp && (
         <Dialog open={true} onOpenChange={(v) => !v && cancelPending()}>
-          <DialogContent className="max-w-md" data-testid="ai-confirm-dialog">
+          <DialogContent className="max-w-md w-[95vw] sm:w-full" data-testid="ai-confirm-dialog">
             <DialogHeader>
-              <DialogTitle className="text-amber-700 flex items-center gap-2">
+              <DialogTitle className="text-amber-700 flex items-center gap-2 text-base sm:text-lg">
                 <Warning size={20} weight="bold" /> Conferma operazione AI
               </DialogTitle>
-              <DialogDescription>L'AI ha preparato questa operazione. Vuoi eseguirla realmente?</DialogDescription>
+              <DialogDescription className="text-xs sm:text-sm">L'AI ha preparato questa operazione. Vuoi eseguirla realmente?</DialogDescription>
             </DialogHeader>
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm space-y-1.5">
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs sm:text-sm space-y-1.5" style={{ wordBreak: "break-word" }}>
               <div><b>Tipo:</b> {pendingOp.summary?.operation_type === "shipment" ? "Spedizione" : "Arrivo"}</div>
               <div><b>Prodotto:</b> {pendingOp.summary?.product_name} <span className="text-slate-500">({pendingOp.summary?.product_code})</span></div>
               <div><b>Quantità:</b> {pendingOp.summary?.quantity}</div>
               {pendingOp.summary?.serials?.length > 0 && (
-                <div><b>Seriali:</b> <span className="font-mono-tight">{pendingOp.summary.serials.join(", ")}</span></div>
+                <div><b>Seriali:</b> <span className="font-mono-tight break-all">{pendingOp.summary.serials.join(", ")}</span></div>
               )}
               {pendingOp.summary?.cliente && <div><b>Cliente:</b> {pendingOp.summary.cliente}</div>}
               {pendingOp.summary?.fornitore && <div><b>Fornitore:</b> {pendingOp.summary.fornitore}</div>}
               {pendingOp.summary?.taken_by && <div><b>Preso da:</b> {pendingOp.summary.taken_by}</div>}
-              <div className="text-xs text-slate-500 mt-2">
+              <div className="text-[11px] sm:text-xs text-slate-500 mt-2 break-all">
                 Preview ID: <span className="font-mono-tight">{pendingOp.preview_id}</span>
               </div>
             </div>
-            <DialogFooter className="flex-col sm:flex-row gap-2">
-              <Button variant="outline" onClick={cancelPending} data-testid="ai-cancel-op">
+            <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
+              <Button variant="outline" onClick={cancelPending} data-testid="ai-cancel-op" className="w-full sm:w-auto">
                 <XCircle size={16} /> Annulla
               </Button>
-              <Button onClick={confirmPending} className="bg-emerald-600 hover:bg-emerald-700 text-white" data-testid="ai-confirm-op">
+              <Button onClick={confirmPending} className="bg-emerald-600 hover:bg-emerald-700 text-white w-full sm:w-auto" data-testid="ai-confirm-op">
                 <CheckCircle size={16} /> Conferma esecuzione
               </Button>
             </DialogFooter>
