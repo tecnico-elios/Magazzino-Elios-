@@ -12,9 +12,7 @@ import {
   CaretDown,
   Lock,
   Robot,
-  Clipboard,
 } from "@phosphor-icons/react";
-import { useFeatures } from "../lib/FeaturesContext";
 import { useInventoryCtx } from "../lib/InventoryContext";
 import { useAuth } from "../lib/AuthContext";
 import ChangeMyPasswordDialog from "./ChangeMyPasswordDialog";
@@ -28,7 +26,8 @@ const BASE_NAV = [
   { to: "/anomalie", label: "Anomalie", icon: Warning, testid: "nav-anomalie" },
   { to: "/assistente-ai", label: "Assistente AI", icon: Robot, testid: "nav-ai" },
 ];
-const COMMESSE_NAV = { to: "/commesse", label: "Commesse", icon: Clipboard, testid: "nav-commesse" };
+// F24 — La voce "Commesse" NON deve comparire nel menu superiore.
+// Il modulo è accessibile solo dal blocco Dashboard (gated da commesse_enabled).
 
 const ADMIN_NAV = [
   { to: "/admin", label: "Admin", icon: Gear, testid: "nav-admin" },
@@ -38,16 +37,12 @@ const ADMIN_NAV = [
 export default function AppLayout() {
   const { refreshedAt, refresh, loading } = useInventoryCtx();
   const { user, logout, isAdmin } = useAuth();
-  const { commesse_enabled } = useFeatures();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [pwdOpen, setPwdOpen] = useState(false);
 
-  // F23 — Inserisci "Commesse" tra "Inventario" e "Movimenti" quando abilitata
-  const baseNav = commesse_enabled
-    ? [BASE_NAV[0], BASE_NAV[1], COMMESSE_NAV, ...BASE_NAV.slice(2)]
-    : BASE_NAV;
-  const nav = isAdmin ? [...baseNav, ...ADMIN_NAV] : baseNav;
+  // F24 — Commesse non è più nel menu superiore (accessibile via Dashboard).
+  const nav = isAdmin ? [...BASE_NAV, ...ADMIN_NAV] : BASE_NAV;
 
   const handleLogout = () => {
     setMenuOpen(false);

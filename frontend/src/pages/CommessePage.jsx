@@ -74,13 +74,16 @@ function CommesseList({ onOpen, onCreate, initialStato = "" }) {
         <h1 className="font-display text-xl sm:text-2xl font-black text-slate-900 flex items-center gap-2 flex-1"><Package weight="duotone" size={28} /> Commesse</h1>
         <Button onClick={onCreate} className="bg-indigo-600 hover:bg-indigo-700 text-white" data-testid="commessa-new-btn"><Plus size={16} /> Nuova</Button>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3" data-testid="commesse-overview">
         {["da_preparare", "in_preparazione", "parziale", "pronta"].map((s) => (
           <button key={s} onClick={() => setFilterStato(filterStato === s ? "" : s)}
-            className={`et-card p-3 text-left ${filterStato === s ? "ring-2 ring-indigo-500" : ""}`}
+            className={`et-card p-3 sm:p-4 text-left flex flex-col justify-between min-h-[92px] sm:min-h-[104px] transition-all hover:shadow-md ${filterStato === s ? "ring-2 ring-indigo-500" : ""}`}
             data-testid={`kpi-${s}`}>
-            <div className="text-xs text-slate-500">{STATO_LABEL[s].icon} {STATO_LABEL[s].txt}</div>
-            <div className="text-2xl font-black text-slate-900">{kpi[s] ?? 0}</div>
+            <div className="flex items-center gap-1.5 text-[11px] sm:text-xs text-slate-500 leading-tight">
+              <span className="text-base sm:text-lg shrink-0" aria-hidden>{STATO_LABEL[s].icon}</span>
+              <span className="font-semibold truncate">{STATO_LABEL[s].txt}</span>
+            </div>
+            <div className="text-2xl sm:text-3xl font-black text-slate-900 font-mono-tight mt-2 leading-none">{kpi[s] ?? 0}</div>
           </button>
         ))}
       </div>
@@ -115,6 +118,11 @@ function CommesseList({ onOpen, onCreate, initialStato = "" }) {
 
 function CommessaCreate({ onDone }) {
   const [form, setForm] = useState({ number: "", cliente: "", data_ordine: "", data_prevista: "", priorita: "normale", note: "" });
+  // F24 §6 — Autocomplete cliente da Notion (stesso endpoint delle Spedizioni, SSOT unico)
+  const [clienteOrderId, setClienteOrderId] = useState(null);
+  const [cliSuggestions, setCliSuggestions] = useState([]);
+  const [cliOpen, setCliOpen] = useState(false);
+  const [cliLoading, setCliLoading] = useState(false);
   const [righe, setRighe] = useState([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -125,13 +133,33 @@ function CommessaCreate({ onDone }) {
     }]);
     setPickerOpen(false);
   };
+  const searchCliente = (v) => {
+    setForm((f) => ({ ...f, cliente: v }));
+    setClienteOrderId(null);
+    setCliOpen(true);
+    if (window.__cmCliSug) clearTimeout(window.__cmCliSug);
+    window.__cmCliSug = setTimeout(async () => {
+      const q = (v || "").trim();
+      if (q.length < 2) { setCliSuggestions([]); return; }
+      setCliLoading(true);
+      try {
+        const { data } = await axios.get(`${API}/orders/search`, { params: { q, limit: 20 } });
+        setCliSuggestions(data.items || []);
+      } catch { setCliSuggestions([]); }
+      finally { setCliLoading(false); }
+    }, 220);
+  };
   const submit = async () => {
     if (!form.number.trim() || !form.cliente.trim() || righe.length === 0) {
       toast.error("Numero, cliente e almeno una riga sono obbligatori"); return;
     }
     setSaving(true);
     try {
-      const { data } = await axios.post(`${API}/commesse`, { ...form, righe });
+      // Se cliente non è in Notion, l'operatore lo crea implicitamente via testo libero
+      // (Notion accetterà il valore come nuova struttura — stessa semantica di /checklist/send).
+      const payload = { ...form, righe };
+      if (clienteOrderId) payload.order_page_id = clienteOrderId;
+      const { data } = await axios.post(`${API}/commesse`, payload);
       toast.success(`Commessa #${data.number} creata`);
       onDone(data.id);
     } catch (e) {
@@ -147,7 +175,53 @@ function CommessaCreate({ onDone }) {
       <div className="et-card p-3 sm:p-4 space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div><Label>Numero *</Label><Input value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} className="mt-1" data-testid="new-number" /></div>
-          <div><Label>Cliente *</Label><Input value={form.cliente} onChange={(e) => setForm({ ...form, cliente: e.target.value })} className="mt-1" data-testid="new-cliente" /></div>
+          <div>
+            <Label>Cliente *</Label>
+            <div className="relative mt-1">
+              <Input
+                value={form.cliente}
+                onChange={(e) => searchCliente(e.target.value)}
+                onFocus={() => form.cliente.trim().length >= 2 && setCliOpen(true)}
+                onBlur={() => setTimeout(() => setCliOpen(false), 180)}
+                placeholder="🔍 Cerca cliente…"
+                autoComplete="off"
+                className="pr-9"
+                data-testid="new-cliente"
+              />
+              {clienteOrderId && (
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-emerald-600 text-sm" title="Cliente Notion selezionato">✓</span>
+              )}
+              {cliOpen && form.cliente.trim().length >= 2 && (
+                <div className="absolute z-40 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-md shadow-xl max-h-64 overflow-auto"
+                     data-testid="cliente-suggestions">
+                  {cliLoading && <div className="px-3 py-2 text-xs text-slate-400">Cerco…</div>}
+                  {!cliLoading && cliSuggestions.length === 0 && (
+                    <div className="px-3 py-3 text-sm" data-testid="cliente-no-results">
+                      <div className="text-red-600 mb-1">Nessun cliente trovato</div>
+                      <div className="text-xs text-slate-500">"{form.cliente}" verrà registrato come nuovo cliente su Notion al primo utilizzo.</div>
+                    </div>
+                  )}
+                  {cliSuggestions.map((s) => (
+                    <button key={s.id} type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => { setForm((f) => ({ ...f, cliente: s.structure })); setClienteOrderId(s.id); setCliOpen(false); setCliSuggestions([]); }}
+                      className="w-full text-left px-3 py-2 hover:bg-indigo-50 border-b border-slate-100 last:border-0 min-h-[44px]"
+                      data-testid={`cliente-sug-${s.id}`}>
+                      <div className="font-semibold text-sm text-slate-900 truncate">{s.structure}</div>
+                      {s.title && s.title !== s.structure && (
+                        <div className="text-xs text-slate-500 truncate">{s.title}</div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {!clienteOrderId && form.cliente.trim().length >= 2 && (
+              <p className="text-[11px] text-amber-700 mt-1">
+                ℹ️ Seleziona un cliente dall'elenco oppure procedi per crearne uno nuovo.
+              </p>
+            )}
+          </div>
           <div><Label>Data ordine</Label><Input type="date" value={form.data_ordine} onChange={(e) => setForm({ ...form, data_ordine: e.target.value })} className="mt-1" /></div>
           <div><Label>Data prevista</Label><Input type="date" value={form.data_prevista} onChange={(e) => setForm({ ...form, data_prevista: e.target.value })} className="mt-1" /></div>
           <div><Label>Priorità</Label>
@@ -370,8 +444,9 @@ function CommessaDetail({ id, onBack }) {
           onCancel={() => setConfirmComplete(false)} onConfirm={doComplete} busy={busy} confirmLabel="Conferma" />
       )}
       {confirmShip && (
-        <ConfirmDialog title="Crea spedizione" body={`La commessa #${c.number} verrà spedita al cliente ${c.cliente}. L'inventario Notion verrà aggiornato.`}
-          onCancel={() => setConfirmShip(false)} onConfirm={doShip} busy={busy} confirmLabel="Conferma spedizione" />
+        <BozzaSpedizioneDialog commessa={c} busy={busy}
+          onCancel={() => setConfirmShip(false)}
+          onConfirm={doShip} />
       )}
       {confirmCancel && (
         <ConfirmDialog title="Annulla commessa" body={`Confermi l'annullamento della commessa #${c.number}? Prelievi registrati: ${pickedQty}/${totalQty}. L'operazione verrà registrata nel Registro Log.`}
@@ -399,6 +474,69 @@ function ConfirmDialog({ title, body, onCancel, onConfirm, busy, confirmLabel = 
           <Button variant="outline" onClick={onCancel} disabled={busy} className="w-full sm:w-auto">Annulla</Button>
           <Button onClick={onConfirm} disabled={busy} className={`w-full sm:w-auto ${danger ? "bg-red-600 hover:bg-red-700" : "bg-indigo-600 hover:bg-indigo-700"} text-white`}>
             {busy ? "…" : confirmLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// F24 §15 — Bozza Spedizione: preview completa dei prodotti/seriali derivati dalla commessa.
+// L'inventario Notion viene aggiornato SOLO dopo "Conferma spedizione".
+function BozzaSpedizioneDialog({ commessa, busy, onCancel, onConfirm }) {
+  const righe = commessa.righe || [];
+  return (
+    <Dialog open={true} onOpenChange={(v) => !v && onCancel()}>
+      <DialogContent className="max-w-lg w-[95vw]" data-testid="bozza-spedizione-dialog">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Truck size={20} weight="bold" className="text-indigo-600" />
+            Bozza Spedizione
+          </DialogTitle>
+          <DialogDescription>
+            Verifica i dati prima di confermare. L'inventario Notion verrà aggiornato solo dopo la conferma.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <div className="grid grid-cols-2 gap-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+            <div><div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Commessa</div><div className="font-mono-tight font-semibold">#{commessa.number}</div></div>
+            <div><div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Cliente</div><div className="font-semibold truncate">{commessa.cliente}</div></div>
+            <div><div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Operatore</div><div className="truncate">{commessa.operatore_carico || "—"}</div></div>
+            <div><div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Stato</div><div className="uppercase text-xs font-bold text-emerald-700">BOZZA</div></div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1.5">Materiale ({righe.length} righe)</div>
+            <ul className="divide-y divide-slate-100 border border-slate-200 rounded-md max-h-64 overflow-y-auto">
+              {righe.map((r, i) => (
+                <li key={i} className="px-3 py-2" data-testid={`bozza-riga-${i}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-slate-900 truncate">{r.product_name}</div>
+                      <div className="text-[11px] text-slate-500">{r.product_code} · {r.tipo_gestione === "a_seriale" ? "A Seriale" : "A Quantità"}</div>
+                    </div>
+                    <div className="font-mono-tight font-bold text-slate-800 shrink-0">× {r.qty_prelevata}</div>
+                  </div>
+                  {r.seriali_prelevati?.length > 0 && (
+                    <div className="mt-1 text-[11px] font-mono-tight text-slate-600 break-all bg-slate-50 rounded px-2 py-1">
+                      {r.seriali_prelevati.join(", ")}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+            ⚠️ Alla conferma i seriali/quantità verranno rimossi dall'inventario Notion. L'operazione è tracciata nel Registro Log con l'operation_id della commessa.
+          </div>
+        </div>
+        <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
+          <Button variant="outline" onClick={onCancel} disabled={busy} className="w-full sm:w-auto" data-testid="bozza-cancel">
+            <XCircle size={16} /> Annulla bozza
+          </Button>
+          <Button onClick={onConfirm} disabled={busy}
+            className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white"
+            data-testid="bozza-confirm">
+            <CheckCircle size={16} /> {busy ? "Invio…" : "Conferma spedizione"}
           </Button>
         </DialogFooter>
       </DialogContent>

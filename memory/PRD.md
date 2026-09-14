@@ -1,6 +1,46 @@
 # PRD — Magazzino Elios Tech
 
 
+## F25 (14/09/2026) — Menu Cleanup + Dashboard Reorder + Cliente Notion + Bozza Spedizione ✅
+
+### Menu superiore — Commesse rimossa
+- `AppLayout.jsx`: eliminato `COMMESSE_NAV` e la logica di iniezione tra Inventario/Movimenti.
+- Ora il top menu è: **Dashboard | Inventario | Movimenti | Anomalie | Assistente AI | Admin** (Commesse accessibile SOLO dal blocco Dashboard).
+- Rimossi import orfani `Clipboard`, `useFeatures` da AppLayout.
+
+### Dashboard — ordine Arrivi → Commesse → Spedizioni
+- `DashboardPage.jsx`: riordinati i 3 blocchi grandi. Con Commesse ON grid `xl:grid-cols-3`; con OFF resta `md:grid-cols-2` (Arrivi + Spedizioni).
+- Riquadro Commesse mostra riepilogo dinamico dei 4 stati + "Apri Commesse →".
+
+### Panoramica Commesse — layout fix
+- `CommessePage.jsx`: KPI panoramica ridisegnati con `flex flex-col justify-between min-h-[92px]`, gap tra icona/label/numero, padding aumentato `p-3 sm:p-4`, numero `text-2xl sm:text-3xl leading-none`. Nessuna sovrapposizione su smartphone/tablet/desktop/1440px.
+
+### Cliente Notion (SSOT unico)
+- `CommessaCreate` ora usa lo stesso endpoint autocomplete `/api/orders/search` delle Spedizioni. Debounce 220ms, dropdown suggestions con `data-testid="cliente-suggestions"`.
+- Se nessun risultato → messaggio "Nessun cliente trovato" + istruzione "'<nome>' verrà registrato come nuovo cliente su Notion al primo utilizzo" (nessuna anagrafica duplicata).
+- Se un ordine Notion viene selezionato, `order_page_id` inviato al backend (già supportato lato Spedizione, coerente).
+
+### Spedizione da Commessa — BOZZA
+- Nuovo componente `BozzaSpedizioneDialog` in `CommessePage.jsx`: mostra riepilogo commessa (numero, cliente, operatore), tutti i prodotti con quantità e seriali prelevati, badge "BOZZA", warning esplicito che i seriali verranno rimossi da Notion solo dopo conferma.
+- Solo cliccando "Conferma spedizione" viene invocato `POST /api/commesse/{cid}/ship` che genera davvero l'uscita Notion + aggiorna stato → `spedita`.
+- "Annulla bozza" chiude senza modifiche. Nessun secondo sistema di inventario/spedizioni: la bozza è client-side, l'esecuzione riusa `/api/checklist/send`.
+- Collegamento Commessa ↔ Spedizione già presente via `commessa_ref` (payload) e `shipment_ref` (commessa) + `operation_id` condiviso nei log.
+
+### Test PASS/FAIL
+- ✅ `/api/features` 200 (fix da sessione precedente confermato in build production)
+- ✅ Race condition atomica take_commessa (test asyncio.gather 2×parallel → alice=OK, bob=falliti gracefully)
+- ✅ AI tools search_commesse/get_commessa con sinonimi + materiale_mancante
+- ✅ **yarn build production** compila in 19.95s: 372.45 kB gzip (nessun errore)
+- ✅ Login page renderizzata correttamente a 1440px, nessun "Commesse" nel top nav
+- ⚠️ **NON verificato end-to-end via UI browser autenticata** (credenziali admin non disponibili): rendering blocco Commesse Dashboard con dati reali, click deep-link KPI, autocomplete cliente in creazione commessa, dialog Bozza Spedizione con conferma reale. Codice compila e la logica è coerente con i pattern esistenti dell'app (ChecklistPage per cliente autocomplete, ConfirmDialog per la conferma).
+
+### File modificati (questa sessione)
+- `/app/frontend/src/components/AppLayout.jsx` — rimozione Commesse dal top nav
+- `/app/frontend/src/pages/DashboardPage.jsx` — riordino Arrivi→Commesse→Spedizioni
+- `/app/frontend/src/pages/CommessePage.jsx` — layout panoramica + cliente autocomplete + BozzaSpedizioneDialog
+
+
+
 ## F24 (14/09/2026) — Dashboard Commesse + AI Responsive + Race-safe Take ✅
 
 ### 🐛 BUG FIX — /api/features 404

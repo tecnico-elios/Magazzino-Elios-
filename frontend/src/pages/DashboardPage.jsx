@@ -148,7 +148,7 @@ export default function DashboardPage() {
         </button>
       </div>
 
-      {/* Big Arrivi / Spedizioni cards — dark navy + semantic amber glow */}
+      {/* Big cards — ordine: Arrivi → Commesse → Spedizioni (F24 §2) */}
       <div className={`grid grid-cols-1 md:grid-cols-2 ${commesseEnabled ? "xl:grid-cols-3" : ""} gap-4`}>
         <Link
           to="/arrivi"
@@ -164,23 +164,6 @@ export default function DashboardPage() {
             <div className="text-slate-300/80 text-sm mt-2">Registra prodotti in entrata</div>
             <div className="absolute right-0 bottom-0 text-emerald-300/90 text-xs font-mono-tight">
               {arriviToday} oggi →
-            </div>
-          </div>
-        </Link>
-        <Link
-          to="/spedizioni"
-          data-testid="dash-spedizioni-card"
-          className="group relative overflow-hidden rounded-xl p-6 sm:p-8 text-white border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 hover:border-amber-300/60 transition-all shadow-[0_10px_40px_-15px_rgba(2,6,23,0.5)] hover:shadow-[0_20px_60px_-15px_rgba(250,204,21,0.28)]"
-        >
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(250,204,21,0.16),transparent_55%)]" aria-hidden />
-          <div className="relative">
-            <div className="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-amber-400/15 border border-amber-300/30 text-amber-300">
-              <ArrowSquareOut size={26} weight="bold" />
-            </div>
-            <div className="text-3xl sm:text-4xl font-display font-black mt-5 tracking-tight">SPEDIZIONI</div>
-            <div className="text-slate-300/80 text-sm mt-2">Registra prodotti in uscita</div>
-            <div className="absolute right-0 bottom-0 text-amber-300/90 text-xs font-mono-tight">
-              {spedizioniToday} oggi →
             </div>
           </div>
         </Link>
@@ -209,6 +192,23 @@ export default function DashboardPage() {
             </div>
           </Link>
         )}
+        <Link
+          to="/spedizioni"
+          data-testid="dash-spedizioni-card"
+          className="group relative overflow-hidden rounded-xl p-6 sm:p-8 text-white border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 hover:border-amber-300/60 transition-all shadow-[0_10px_40px_-15px_rgba(2,6,23,0.5)] hover:shadow-[0_20px_60px_-15px_rgba(250,204,21,0.28)]"
+        >
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(250,204,21,0.16),transparent_55%)]" aria-hidden />
+          <div className="relative">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-amber-400/15 border border-amber-300/30 text-amber-300">
+              <ArrowSquareOut size={26} weight="bold" />
+            </div>
+            <div className="text-3xl sm:text-4xl font-display font-black mt-5 tracking-tight">SPEDIZIONI</div>
+            <div className="text-slate-300/80 text-sm mt-2">Registra prodotti in uscita</div>
+            <div className="absolute right-0 bottom-0 text-amber-300/90 text-xs font-mono-tight">
+              {spedizioniToday} oggi →
+            </div>
+          </div>
+        </Link>
       </div>
 
       {/* F23 — KPI Commesse cliccabili (deep-link con ?stato=) — mostrati SOLO se abilitato */}
