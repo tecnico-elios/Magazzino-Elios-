@@ -609,7 +609,7 @@ function DaFareRow({ c }) {
         <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono-tight">
           <span>{totPrev}/{totReq} prodotti preparati</span>
           {c.operatore_carico && <span className="flex items-center gap-1"><User size={12} /> {c.operatore_carico}</span>}
-          {c.data_prevista && <span>📅 {c.data_prevista}</span>}
+          {c.data_prevista && <span title="Data di spedizione prevista">📅 {c.data_prevista}</span>}
         </div>
       </div>
       <Link

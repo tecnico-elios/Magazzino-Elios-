@@ -113,7 +113,7 @@ function CommesseList({ onOpen, onCreate, initialStato = "" }) {
                 <span className="text-sm text-slate-700 flex-1 min-w-0 truncate">{c.cliente}</span>
               </div>
               <div className="mt-1 text-xs text-slate-500 flex items-center gap-3 flex-wrap">
-                {c.data_prevista && <span>📅 {c.data_prevista}</span>}
+                {c.data_prevista && <span title="Data di spedizione prevista">📅 {c.data_prevista}</span>}
                 {c.operatore_carico && <span><User size={11} className="inline" /> {c.operatore_carico}</span>}
                 <span>{c.righe?.length ?? 0} righe</span>
               </div>
@@ -232,7 +232,7 @@ function CommessaCreate({ onDone }) {
             )}
           </div>
           <div><Label>Data ordine</Label><Input type="date" value={form.data_ordine} onChange={(e) => setForm({ ...form, data_ordine: e.target.value })} className="mt-1" /></div>
-          <div><Label>Data prevista</Label><Input type="date" value={form.data_prevista} onChange={(e) => setForm({ ...form, data_prevista: e.target.value })} className="mt-1" /></div>
+          <div><Label>Data di spedizione prevista</Label><Input type="date" value={form.data_prevista} onChange={(e) => setForm({ ...form, data_prevista: e.target.value })} className="mt-1" /></div>
           <div><Label>Priorità</Label>
             <select value={form.priorita} onChange={(e) => setForm({ ...form, priorita: e.target.value })}
               className="mt-1 h-10 w-full border border-slate-300 rounded-md px-2 text-sm bg-white">
@@ -481,7 +481,7 @@ function CommessaDetail({ id, onBack }) {
           <Badge className={PRIO_LABEL[c.priorita]?.cls}>{PRIO_LABEL[c.priorita]?.txt}</Badge>
           {c.operatore_carico && <span className="text-xs text-slate-600"><User size={12} className="inline" /> {c.operatore_carico}</span>}
         </div>
-        {c.data_prevista && <div className="text-xs text-slate-600"><Clock size={12} className="inline" /> Prevista: {c.data_prevista}</div>}
+        {c.data_prevista && <div className="text-xs text-slate-600"><Clock size={12} className="inline" /> Data di spedizione prevista: {c.data_prevista}</div>}
         {c.note && <div className="text-xs text-slate-600 whitespace-pre-wrap break-words">📝 {c.note}</div>}
         <div className="text-xs text-slate-500 font-mono-tight">op: {c.operation_id}</div>
       </div>
@@ -841,7 +841,7 @@ function CommessaEditDialog({ commessa, onClose, onSaved }) {
               </div>
             </div>
             <div><Label>Data ordine</Label><Input type="date" value={form.data_ordine} onChange={(e) => setForm({ ...form, data_ordine: e.target.value })} className="mt-1" /></div>
-            <div><Label>Data prevista</Label><Input type="date" value={form.data_prevista} onChange={(e) => setForm({ ...form, data_prevista: e.target.value })} className="mt-1" /></div>
+            <div><Label>Data di spedizione prevista</Label><Input type="date" value={form.data_prevista} onChange={(e) => setForm({ ...form, data_prevista: e.target.value })} className="mt-1" /></div>
             <div><Label>Priorità</Label>
               <select value={form.priorita} onChange={(e) => setForm({ ...form, priorita: e.target.value })}
                 className="mt-1 h-10 w-full border border-slate-300 rounded-md px-2 text-sm bg-white">
