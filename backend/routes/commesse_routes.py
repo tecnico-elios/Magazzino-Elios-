@@ -78,19 +78,22 @@ def _serialize(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _compute_stato(doc: Dict[str, Any]) -> str:
-    """Ricalcola stato in base ai prelievi delle righe (esclude stati terminali/bozza)."""
+    """Ricalcola stato in base ai prelievi delle righe (esclude stati terminali/bozza).
+    F30 — Considera anche qty_spedita: il "residuo" da preparare è (richiesta - spedita)."""
     # F25.b — bozza_spedizione è uno stato manuale: non lo ricalcoliamo dalle righe.
     if doc.get("stato") in ("spedita", "annullata", "bozza_spedizione", "parzialmente_spedita"):
         return doc["stato"]
     if not doc.get("operatore_carico"):
         return "da_preparare"
     righe = doc.get("righe") or []
-    totals = 0
+    residui = 0
     prelevati = 0
     for r in righe:
-        totals += float(r.get("qty_richiesta") or 0)
+        qr = float(r.get("qty_richiesta") or 0)
+        qs = float(r.get("qty_spedita") or 0)
+        residui += max(0.0, qr - qs)
         prelevati += float(r.get("qty_prelevata") or 0)
-    if totals > 0 and prelevati >= totals:
+    if residui > 0 and prelevati >= residui:
         return "pronta"
     if prelevati > 0:
         return "parziale"
@@ -335,12 +338,46 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
 
     @router.delete("/{cid}", dependencies=[Depends(deps.require_admin)])
     async def delete_commessa(cid: str, current=Depends(deps.require_admin)):
-        """F27/F29 — Cancellazione DEFINITIVA (SOLO Admin). Impedita se collegata a spedizione."""
+        """F27/F29/F30 — Cancellazione DEFINITIVA (SOLO Admin).
+
+        Bloccata se la commessa ha qualsiasi attività operativa collegata:
+        - shipment_ref (già spedita) o stato=spedita
+        - shipments_history non vuoto (spedizioni parziali già fatte, anche se poi annullata)
+        - shipment_draft attivo (bozza in corso)
+        - qualsiasi riga con qty_prelevata > 0 o seriali_prelevati non vuoti (picking in corso)
+        - qualsiasi riga con qty_spedita > 0 o seriali_spediti non vuoti (materiale già uscito)
+        Per queste commesse si deve usare "Annulla" (mantiene lo storico). L'eliminazione
+        definitiva è riservata ai casi in cui la commessa non ha mai generato operazioni.
+        """
         await _require_enabled()
         doc = await db.commesse.find_one({"id": cid})
         if not doc: raise HTTPException(404, "Commessa non trovata")
+        blockers = []
         if doc.get("shipment_ref") or doc.get("stato") == "spedita":
-            raise HTTPException(409, "Commessa collegata a una spedizione già effettuata. Non eliminabile.")
+            blockers.append("commessa collegata a una spedizione confermata")
+        if doc.get("shipments_history"):
+            blockers.append(f"esistono {len(doc.get('shipments_history') or [])} spedizioni nello storico")
+        if doc.get("shipment_draft"):
+            blockers.append("è presente una bozza di spedizione in corso")
+        picked_rows = 0
+        shipped_rows = 0
+        for r in (doc.get("righe") or []):
+            if float(r.get("qty_prelevata") or 0) > 0 or (r.get("seriali_prelevati") or []):
+                picked_rows += 1
+            if float(r.get("qty_spedita") or 0) > 0 or (r.get("seriali_spediti") or []):
+                shipped_rows += 1
+        if picked_rows:
+            blockers.append(f"picking effettuato su {picked_rows} righe")
+        if shipped_rows:
+            blockers.append(f"materiale già spedito su {shipped_rows} righe")
+        if blockers:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Cancellazione definitiva bloccata: " + "; ".join(blockers) +
+                    ". Usa 'Annulla' per conservare lo storico."
+                ),
+            )
         # Log PRIMA della cancellazione (retention audit)
         await event_logger.log_event(
             db, category="COMMESSE", event_type="COMMESSA_ELIMINATA",
@@ -349,7 +386,7 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             operation_id=doc.get("operation_id"),
             endpoint=f"DELETE /api/commesse/{cid}",
             customer=doc.get("cliente"),
-            message=f"Commessa #{doc.get('number')} ELIMINATA DEFINITIVAMENTE da Admin {current.get('username')}",
+            message=f"Commessa #{doc.get('number')} ELIMINATA DEFINITIVAMENTE da Admin {current.get('username')} (nessuna attività operativa)",
             details={"commessa_id": cid, "number": doc.get("number"), "cliente": doc.get("cliente"),
                      "stato": doc.get("stato"), "righe_snapshot": doc.get("righe") or []},
         )
@@ -425,8 +462,10 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             new_prev = qty_prev + delta
             if new_prev < 0:
                 raise HTTPException(400, "Quantità prelevata non può essere negativa")
-            if new_prev > qty_req:
-                raise HTTPException(400, f"Superata quantità richiesta ({qty_req})")
+            # F30 — Il residuo è calcolato considerando anche ciò che è già stato spedito
+            qty_ship = float(riga.get("qty_spedita") or 0)
+            if new_prev + qty_ship > qty_req:
+                raise HTTPException(400, f"Superata quantità richiesta ({qty_req}) — già spediti {qty_ship:g}, preparati {new_prev:g}")
             riga["qty_prelevata"] = new_prev
             log_msg = f"Prelievo {delta:+g} × {riga.get('product_name')} (commessa #{doc.get('number')})"
             evt = "PRELIEVO_QUANTITA"
@@ -435,6 +474,7 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
                 raise HTTPException(400, "serial richiesto per prodotti A Seriale")
             sn = body.serial.strip()
             existing = riga.get("seriali_prelevati") or []
+            spediti = riga.get("seriali_spediti") or []
             # F28 — Rimozione seriale (decremento controllato)
             if body.remove:
                 match_idx = next((i for i, s in enumerate(existing) if s.lower() == sn.lower()), None)
@@ -448,12 +488,19 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             else:
                 if any(s.lower() == sn.lower() for s in existing):
                     raise HTTPException(409, "Seriale già prelevato per questa riga")
+                # F30 — Rifiuta seriali già SPEDITI nella stessa riga
+                if any(s.lower() == sn.lower() for s in spediti):
+                    raise HTTPException(409, f"Seriale '{sn}' già spedito in una precedente spedizione di questa commessa")
                 # Verifica cross-righe (non prelevare due volte nella stessa commessa)
+                # F30 — Controlla anche seriali_spediti di altre righe
                 for j, other in enumerate(righe):
                     if j == idx: continue
                     for s in (other.get("seriali_prelevati") or []):
                         if s.lower() == sn.lower():
                             raise HTTPException(409, f"Seriale già prelevato per '{other.get('product_name')}'")
+                    for s in (other.get("seriali_spediti") or []):
+                        if s.lower() == sn.lower():
+                            raise HTTPException(409, f"Seriale già spedito per '{other.get('product_name')}'")
                 # Validazione contro inventario Notion
                 try:
                     from inventory_router import get_svc as _get_svc
@@ -473,8 +520,10 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
                         if other_prod:
                             raise HTTPException(400, f"Il seriale appartiene a '{other_prod}', non a '{riga.get('product_name')}'")
                         raise HTTPException(400, f"Seriale non disponibile in inventario (già spedito o inesistente)")
-                    if qty_prev + 1 > qty_req:
-                        raise HTTPException(400, f"Superata quantità richiesta ({qty_req})")
+                    # F30 — Capienza considerando anche qty_spedita
+                    qty_ship_s = float(riga.get("qty_spedita") or 0)
+                    if qty_prev + 1 + qty_ship_s > qty_req:
+                        raise HTTPException(400, f"Superata quantità richiesta ({qty_req}) — già spediti {qty_ship_s:g}")
                     riga["seriali_prelevati"] = existing + [sn]
                     riga["qty_prelevata"] = qty_prev + 1
                 except HTTPException:
@@ -562,20 +611,36 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
     async def _build_draft_payload(doc: Dict[str, Any], operator: str) -> Dict[str, Any]:
         """Costruisce lo snapshot bozza dai dati correnti della commessa.
         F28.b/c — payload IDENTICO a quello inviato da /ChecklistPage (spedizione normale):
-        include shipping_date, order_page_id, notes, e qr_codes allineati ai seriali."""
+        include shipping_date, order_page_id, notes, e qr_codes allineati ai seriali.
+        F30 — Legge i QR da `qr_bindings` (multi-slot). Per il ChecklistPayload legacy
+        che accetta 1 QR per seriale, includiamo il primo binding attivo trovato.
+        L'elenco completo dei bindings resta comunque persistito e visibile via /qr/bindings.
+        """
         items_payload = []
         for r in doc.get("righe") or []:
             serials = list(r.get("seriali_prelevati") or [])
-            # F28.c — Recupera i QR code associati ai seriali (SSOT: db.qr_associations)
-            # Stessa collection usata da /checklist/send. Ogni seriale può avere 0 o 1 QR attivo.
+            # F30 — Prima cerca in qr_bindings (nuovo), fallback qr_associations (legacy)
             qr_codes: List[str] = []
             if serials:
                 sn_lows = [s.strip().lower() for s in serials if s]
                 if sn_lows:
-                    cursor = db.qr_associations.find({"serial_lower": {"$in": sn_lows}, "active": True})
                     qr_map: Dict[str, str] = {}
-                    async for d in cursor:
-                        qr_map[d.get("serial_lower")] = d.get("qr_code") or ""
+                    # Nuovo: prendi il primo binding attivo per ciascun seriale (qualunque slot)
+                    async for d in db.qr_bindings.find(
+                        {"serial_lower": {"$in": sn_lows}, "active": True}
+                    ).sort("created_at", 1):
+                        sl = d.get("serial_lower")
+                        if sl and sl not in qr_map:
+                            qr_map[sl] = d.get("qr_code") or ""
+                    # Legacy fallback per seriali non ancora in qr_bindings
+                    missing = [s for s in sn_lows if s not in qr_map]
+                    if missing:
+                        async for d in db.qr_associations.find(
+                            {"serial_lower": {"$in": missing}, "active": True}
+                        ):
+                            sl = d.get("serial_lower")
+                            if sl and sl not in qr_map:
+                                qr_map[sl] = d.get("qr_code") or ""
                     qr_codes = [qr_map.get(s.strip().lower(), "") for s in serials]
             items_payload.append({
                 "page_id": r.get("product_page_id"),
@@ -590,8 +655,6 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         # Data spedizione: usa data_prevista della commessa se presente, altrimenti oggi
         ship_date = doc.get("data_prevista") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
         # F28.c — Note: prefisso automatico con riferimento commessa per tracciabilità Notion.
-        # Se il campo "notes" del ChecklistPayload non è mappato su Notion, questa stringa
-        # rimane comunque nel Registro Log/audit come parte del payload.
         base_notes = (doc.get("note") or "").strip()
         combined_notes = f"Commessa #{doc.get('number')}" + (f" — {base_notes}" if base_notes else "")
         return {
@@ -599,7 +662,6 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             "operator": operator,
             "structure": doc.get("cliente"),
             "taken_by": doc.get("operatore_carico") or operator,
-            # F28.c — order_page_id: identico al flusso ChecklistPage (evita ambiguità ricerca)
             "order_page_id": doc.get("order_page_id"),
             "notes": combined_notes,
             "items": items_payload,

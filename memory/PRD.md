@@ -1,6 +1,81 @@
 # PRD — Magazzino Elios Tech
 
 
+## F30 (15/09/2026) — Spedizioni parziali + QR multi-slot + Delete Hardening ✅
+
+Correzione end-to-end della gestione Commesse dopo spedizione parziale, introduzione del modello QR multi-slot generico e hardening dell'eliminazione.
+
+### Fase A — Richiesti / Preparati / Spediti / Rimanenti (separati)
+Il DB aveva già `qty_spedita` / `seriali_spediti`. Bug era solo lato UI + validazioni di picking. Fix:
+- **Backend `pick_commessa`**: la capienza ora considera `qty_prelevata + qty_spedita ≤ qty_richiesta` (prima usava solo la richiesta totale). A Seriale rifiuta esplicitamente seriali già in `seriali_spediti` della stessa riga o di altre righe della commessa.
+- **Backend `_compute_stato`**: il residuo è ora `richiesta − spedita` (prima usava totali grezzi). Ricalcola correttamente `pronta` / `parziale` dopo una spedizione parziale + reopen.
+- **Frontend `CommessePage.jsx`**: ogni riga mostra **4 colonne** distinte (Richiesti/Preparati/Spediti/Rimanenti). `rimanenti = richiesta − spediti`. Il badge "✓ Completo" appare solo quando `qty_spedita ≥ qty_richiesta`. I seriali già usciti compaiono come **chip verdi non-rimovibili "🚚 Seriali spediti"** distinti dai preparati.
+- **BozzaSpedizioneDialog**: il gruppo "Non spedito" ora filtra correttamente su `residuo > 0 && preparata == 0` (prima considerava semplicemente `preparata == 0`, mostrando anche voci già spedite).
+- **Storico spedizioni**: renderizzato dal campo `shipments_history` con data/operatore/ID e lista prodotti+seriali.
+- **`_build_draft_payload`**: legge i QR dal nuovo `qr_bindings` (primo attivo per seriale) con fallback su `qr_associations` legacy.
+
+### Fase B — Modello QR multi-slot generico
+- **Nuova collection `product_qr_config`** — `{ product_page_id (PK), product_code, product_name, enabled, slots: [str], updated_at, updated_by }`. Un prodotto senza config o `enabled=false` NON mostra il prompt di associazione. Config generica: `slots` accetta qualsiasi identificatore (`single`, `right`, `left`, `port_a`, …); non è hardcodato per Daze Duo.
+- **Nuova collection `qr_bindings`** — `{ id, serial(_lower), slot, qr_code(_lower), product_page_id?, product_name?, active, created_at, created_by }`.
+- **Indici** (partial su `active=true`): unique `qr_code_lower` (unicità globale), unique `(serial_lower, slot)`.
+- **Endpoints nuovi** (prefix `/api/qr`):
+  - `GET /product-config/{page_id}` — config o default disabled
+  - `PUT /product-config/{page_id}` (Admin) — configura slots
+  - `GET /product-configs` — lista tutte (per UI Admin)
+  - `GET /bindings?sn=X` — bindings attivi per un seriale
+  - `POST /bindings` — crea binding con **validazione**: QR unico globale, `(serial, slot)` unico, slot dev'essere ammesso dalla config prodotto
+  - `DELETE /bindings/{id}?reason=X` — disattiva (Admin o Responsabile con `modifica_retroattiva`)
+  - `GET /check-multi?qr=X` — verifica utilizzo QR (per anteprima)
+- **Normalizzazione QR centralizzata backend** — `_normalize_qr` allineata al frontend `normalizeQrCode`: `https://qr.eliostech.it/webapp?qrCodeId=QRCODE_1119` → `QRCODE_1119` (verificato).
+- **Seed on-startup** idempotente (`seed_default_configs`): trova il `product_page_id` di **Daze Duo** (via commessa esistente con `product_code=OS01IT64TCP`) e crea config `enabled=true, slots=["right","left"]` senza sovrascrivere modifiche admin.
+
+### Fase C — UI associazione QR post-picking
+- **Nuovo componente `QrSlotAssociationDialog`**:
+  - Compare **solo** se il prodotto è in `product_qr_config` con `enabled=true` e almeno uno slot mancante
+  - Recupera `product-config` + `bindings` esistenti al mount
+  - Se un solo slot mancante → pulsante diretto "Inserisci QR"; se più slot → step di selezione ("🔌 Presa destra" / "🔌 Presa sinistra")
+  - Input manuale + scanner camera (via `BarcodeScanner`) + normalizzazione tramite `normalizeQrCode`
+  - Al successo: chiede subito lo slot successivo; **[Salta] sempre disponibile**, il seriale può essere preparato/spedito anche senza QR
+  - Riepilogo "Già associati" in cima con lista slot + QR
+  - Gestione errori: mostra il conflitto reale se il QR è già usato ("Attualmente su {serial}/{slot}")
+- **Wiring in `CommessePage.jsx`**: al successo di `doPickSerial`, chiama `fetchQrRequirements(page_id, serial)`; se abilitato apre il dialog. Nessun effetto per prodotti non configurati.
+- **Slot ordine libero**: l'utente può scegliere destra o sinistra in qualunque ordine (nessuna sequenza obbligata).
+
+### Fase D — Eliminazione Commesse hardening
+- **Backend `DELETE /api/commesse/{cid}`** (già Admin-only): estesi i blocchi. Cancellazione ora impedita se ANY di:
+  - `shipment_ref` presente o `stato=spedita`
+  - `shipments_history` non vuoto (anche se poi la commessa è stata annullata)
+  - `shipment_draft` attivo (bozza)
+  - Qualsiasi riga con `qty_prelevata > 0` o `seriali_prelevati` (picking)
+  - Qualsiasi riga con `qty_spedita > 0` o `seriali_spediti` (materiale già uscito)
+- Il messaggio 409 elenca tutti i motivi con numeri concreti ("esistono N spedizioni nello storico; picking su M righe; …") e suggerisce di usare "Annulla" invece.
+- Log audit (event `COMMESSA_ELIMINATA`, level WARNING) con: numero, cliente, stato pre-cancellazione, snapshot righe, admin autore, `operation_id`, timestamp.
+- **Frontend `CommessePage.jsx`**: aggiornato copy della conferma per riflettere le regole reali del backend.
+
+### Regole matematiche implementate
+```
+rimanenti = max(0, richiesti − spediti)      // NON più − preparati
+canPickMore = preparata + spediti < richiesti
+done = spediti ≥ richiesti
+canComplete = residuoQty > 0 && pickedQty ≥ residuoQty
+```
+
+### Non-regressioni verificate
+- `yarn build` OK
+- `ast.parse` OK su `server.py`, `routes/commesse_routes.py`, `routes/qr_bindings_routes.py`
+- Backend restart OK
+- Indici Mongo creati correttamente (partial unique su `active=true`)
+- Seed Daze Duo idempotente sul `product_page_id` reale (293a9b09-…-fa20cec5)
+- **Commessa #1 (CMM-20260914-0FE6E3A5) NON modificata** dallo startup: rimane `annullata` con dati storici invariati (Modem/PowerMeter/Stand con doppio conteggio preesistente lasciato intatto; Staffa L con `qty_prelevata=1, qty_spedita=0`; Daze Duo con `seriali_spediti=[26OT0400329]`).
+- Rotte protette da JWT: `/qr/*`, `/commesse/*`, `DELETE /commesse/*` → 401 senza auth.
+- Normalizzazione QR: URL Eliostech Tech + valori raw + `qrCodeId` con parametri extra → tutti restituiscono `QRCODE_XXXX` (verificato via `python -c`).
+
+### Note importanti
+- **Nessuna migrazione automatica destructive dei dati**. Le associazioni QR pre-esistenti in `qr_associations` continuano a funzionare (fallback in `_build_draft_payload`). Le nuove associazioni multi-slot vivono in `qr_bindings`.
+- **Nessuna hardcoding "Daze Duo = 2 QR"** nel motore: il modello è pilotato dalla config `product_qr_config`. Aggiungere/rimuovere slot per qualsiasi prodotto è una `PUT /qr/product-config/{page_id}` da admin.
+
+
+
 ## F30 (14/09/2026) — Permesso granulare "Gestione Commesse" per Responsabile ✅
 
 ### Obiettivo

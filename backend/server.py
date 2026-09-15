@@ -21,7 +21,7 @@ import inventory_local
 from inventory_router import get_svc as _get_inv_svc, get_source as _get_inv_source
 import auth as auth_mod
 import event_logger
-from routes import auth_routes, admin_users_routes, admin_extra_routes, qr_routes, retro_routes, orders_routes, ai_routes, commesse_routes
+from routes import auth_routes, admin_users_routes, admin_extra_routes, qr_routes, qr_bindings_routes, retro_routes, orders_routes, ai_routes, commesse_routes
 try:
     from zoneinfo import ZoneInfo
     ROME_TZ = ZoneInfo("Europe/Rome")
@@ -1691,6 +1691,7 @@ app.include_router(auth_routes.build_router(db, auth_deps, send_email_fn=send_em
 app.include_router(admin_users_routes.build_router(db, auth_deps), prefix="/api")
 app.include_router(admin_extra_routes.build_router(db, auth_deps), prefix="/api")
 app.include_router(qr_routes.build_router(db, auth_deps), prefix="/api")
+app.include_router(qr_bindings_routes.build_router(db, auth_deps), prefix="/api")
 app.include_router(orders_routes.build_router(db, auth_deps), prefix="/api")
 app.include_router(retro_routes.build_router(db, auth_deps, send_email_fn=send_email), prefix="/api")
 app.include_router(ai_routes.build_router(db, auth_deps), prefix="/api")
@@ -1741,6 +1742,9 @@ async def _phase2_startup_indexes():
         # F14 — QR associations (persistente, univocità globale su qr_code)
         await db.qr_associations.create_index("qr_code_lower", unique=True)
         await db.qr_associations.create_index("serial_lower")
+        # F30 — QR bindings multi-slot (nuovo modello)
+        await qr_bindings_routes.ensure_indexes(db)
+        await qr_bindings_routes.seed_default_configs(db)
         # F18 — Registro Log applicativo (eventi strutturati permanenti)
         await event_logger.ensure_indexes(db)
     except Exception as e:

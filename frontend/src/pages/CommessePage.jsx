@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { normalizeQrCode, parseDazeQr } from "../lib/qr";
 import { formatDateIT } from "../lib/dateFmt";
 import BarcodeScanner from "../components/BarcodeScanner";
+import QrSlotAssociationDialog, { fetchQrRequirements } from "../components/QrSlotAssociationDialog";
 import { useAuth } from "../lib/AuthContext";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -334,6 +335,8 @@ function CommessaDetail({ id, onBack }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [busy, setBusy] = useState(false);
+  // F30 — Dialog associazione QR post-picking (multi-slot)
+  const [qrDialog, setQrDialog] = useState(null); // { serial, productPageId, productName, initialConfig }
   // F25.b — Tracciamento dello stato precedente per detection cambiamenti (toast informativo)
   const lastStatoRef = useState({ current: null })[0];
 
@@ -378,7 +381,26 @@ function CommessaDetail({ id, onBack }) {
     const { serial } = parseDazeQr(clean);
     if (!serial) return;
     setBusy(true);
-    try { const { data } = await axios.post(`${API}/commesse/${id}/pick`, { riga_index: idx, serial }); setC(data); toast.success(`Prelevato ${serial}`); }
+    try {
+      const { data } = await axios.post(`${API}/commesse/${id}/pick`, { riga_index: idx, serial });
+      setC(data); toast.success(`Prelevato ${serial}`);
+      // F30 — Se il prodotto è configurato per usare QR e non tutti gli slot sono associati, prompt.
+      const r = data.righe?.[idx];
+      if (r?.product_page_id) {
+        const cfg = await fetchQrRequirements(r.product_page_id, serial);
+        if (cfg.enabled && (cfg.slots || []).length > 0) {
+          const remaining = (cfg.slots || []).filter((s) => !cfg.existingBySlot?.[s]);
+          if (remaining.length > 0) {
+            setQrDialog({
+              serial,
+              productPageId: r.product_page_id,
+              productName: r.product_name,
+              initialConfig: cfg,
+            });
+          }
+        }
+      }
+    }
     catch (e) { toast.error("Seriale non valido", { description: e?.response?.data?.detail }); }
     finally { setBusy(false); }
   };
@@ -491,11 +513,15 @@ function CommessaDetail({ id, onBack }) {
   if (loading || !c) return <div className="text-center py-8 text-slate-500">Caricamento…</div>;
   const canTake = c.stato === "da_preparare";
   const canPick = ["in_preparazione", "parziale"].includes(c.stato);
+  // F30 — Totali basati sul RESIDUO (richiesta - spedita) per calcolare correttamente
+  // le condizioni di completamento/spedizione dopo una parziale.
   const totalQty = (c.righe || []).reduce((s, r) => s + (r.qty_richiesta || 0), 0);
+  const shippedQty = (c.righe || []).reduce((s, r) => s + (r.qty_spedita || 0), 0);
   const pickedQty = (c.righe || []).reduce((s, r) => s + (r.qty_prelevata || 0), 0);
-  const canComplete = totalQty > 0 && pickedQty >= totalQty && ["in_preparazione", "parziale"].includes(c.stato);
+  const residuoQty = Math.max(0, totalQty - shippedQty);
+  const canComplete = residuoQty > 0 && pickedQty >= residuoQty && ["in_preparazione", "parziale"].includes(c.stato);
   const canCreateDraft = c.stato === "pronta";
-  const canShipPartial = c.stato === "parziale" && pickedQty > 0 && pickedQty < totalQty;
+  const canShipPartial = c.stato === "parziale" && pickedQty > 0 && pickedQty < residuoQty;
   const hasBozza = c.stato === "bozza_spedizione";
   const canCancel = !["spedita", "annullata", "bozza_spedizione"].includes(c.stato);
   const canEdit = canManage && ["da_preparare", "in_preparazione", "parziale"].includes(c.stato);
@@ -526,54 +552,74 @@ function CommessaDetail({ id, onBack }) {
 
       <div className="space-y-2">
         {(c.righe || []).map((r, i) => {
-          const done = r.qty_prelevata >= r.qty_richiesta;
-          const rimanenti = Math.max(0, (r.qty_richiesta || 0) - (r.qty_prelevata || 0));
+          // F30 — 4 stati distinti: Richiesti / Preparati / Spediti / Rimanenti
+          const qtyReq = r.qty_richiesta || 0;
+          const qtyPrep = r.qty_prelevata || 0;
+          const qtyShip = r.qty_spedita || 0;
+          const rimanenti = Math.max(0, qtyReq - qtyShip);
+          const canPickMore = qtyPrep + qtyShip < qtyReq;
+          const done = qtyShip >= qtyReq;  // completo = tutto spedito
+          const readyForShip = !done && qtyPrep + qtyShip >= qtyReq; // preparato+spedito raggiunge richiesta
+          const spediti = r.seriali_spediti || [];
           return (
-            <div key={i} className={`et-card p-3 ${done ? "border-emerald-300 bg-emerald-50/30" : ""}`} data-testid={`riga-${i}`}>
+            <div key={i} className={`et-card p-3 ${done ? "border-emerald-300 bg-emerald-50/30" : readyForShip ? "border-indigo-300 bg-indigo-50/30" : ""}`} data-testid={`riga-${i}`}>
               <div className="flex items-start gap-2 flex-wrap">
                 <div className="flex-1 min-w-0">
                   <div className="font-bold text-slate-900 break-words">{r.product_name}</div>
                   <div className="text-xs text-slate-500">{r.product_code} · {r.tipo_gestione === "a_seriale" ? "A Seriale" : "A Quantità"}</div>
                 </div>
-                <div className={`text-lg font-black font-mono-tight shrink-0 ${done ? "text-emerald-600" : "text-slate-800"}`}>
-                  {r.qty_prelevata}/{r.qty_richiesta}
+                <div className={`text-lg font-black font-mono-tight shrink-0 ${done ? "text-emerald-600" : readyForShip ? "text-indigo-600" : "text-slate-800"}`}>
+                  {done ? "✓ Completo" : `${qtyPrep + qtyShip}/${qtyReq}`}
                 </div>
               </div>
-              {/* F28 — Riepilogo R/P/Rim visibile per entrambi i tipi */}
-              <div className="mt-1.5 grid grid-cols-3 gap-1 text-[11px] font-mono-tight">
-                <div className="bg-slate-100 rounded px-2 py-1"><span className="text-slate-500">Richiesti:</span> <b>{r.qty_richiesta}</b></div>
-                <div className={`rounded px-2 py-1 ${(r.qty_prelevata || 0) > 0 ? "bg-emerald-100 text-emerald-800" : "bg-slate-100"}`}><span className="text-slate-500">Preparati:</span> <b>{r.qty_prelevata}</b></div>
-                <div className={`rounded px-2 py-1 ${rimanenti === 0 ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}><span className="text-slate-500">Rimanenti:</span> <b>{rimanenti}</b></div>
+              {/* F30 — Riepilogo 4-colonne: R/P/S/Rim */}
+              <div className="mt-1.5 grid grid-cols-4 gap-1 text-[11px] font-mono-tight">
+                <div className="bg-slate-100 rounded px-2 py-1"><span className="text-slate-500">Richiesti:</span> <b>{qtyReq}</b></div>
+                <div className={`rounded px-2 py-1 ${qtyPrep > 0 ? "bg-amber-100 text-amber-800" : "bg-slate-100"}`}><span className="text-slate-500">Preparati:</span> <b>{qtyPrep}</b></div>
+                <div className={`rounded px-2 py-1 ${qtyShip > 0 ? "bg-emerald-100 text-emerald-800" : "bg-slate-100"}`}><span className="text-slate-500">Spediti:</span> <b>{qtyShip}</b></div>
+                <div className={`rounded px-2 py-1 ${rimanenti === 0 ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"}`}><span className="text-slate-500">Rimanenti:</span> <b>{rimanenti}</b></div>
               </div>
-              {canPick && !done && r.tipo_gestione === "a_quantita" && (
+              {canPick && canPickMore && r.tipo_gestione === "a_quantita" && (
                 <div className="mt-2 flex items-center gap-2">
-                  <Button size="sm" variant="outline" onClick={() => doPickQty(i, -1)} disabled={busy || r.qty_prelevata <= 0} className="h-10 w-10 p-0" data-testid={`minus-${i}`}>−</Button>
-                  <div className="flex-1 text-center font-mono-tight text-lg">{r.qty_prelevata}</div>
-                  <Button size="sm" onClick={() => doPickQty(i, 1)} disabled={busy || r.qty_prelevata >= r.qty_richiesta} className="h-10 w-10 p-0 bg-emerald-600 hover:bg-emerald-700 text-white" data-testid={`plus-${i}`}>+</Button>
-                  <Button size="sm" onClick={() => { setScanRigaIdx(i); setScanMode("qty"); setScannerOpen(true); }} disabled={busy || r.qty_prelevata >= r.qty_richiesta}
+                  <Button size="sm" variant="outline" onClick={() => doPickQty(i, -1)} disabled={busy || qtyPrep <= 0} className="h-10 w-10 p-0" data-testid={`minus-${i}`}>−</Button>
+                  <div className="flex-1 text-center font-mono-tight text-lg">{qtyPrep}</div>
+                  <Button size="sm" onClick={() => doPickQty(i, 1)} disabled={busy || !canPickMore} className="h-10 w-10 p-0 bg-emerald-600 hover:bg-emerald-700 text-white" data-testid={`plus-${i}`}>+</Button>
+                  <Button size="sm" onClick={() => { setScanRigaIdx(i); setScanMode("qty"); setScannerOpen(true); }} disabled={busy || !canPickMore}
                     className="h-10 bg-indigo-600 hover:bg-indigo-700 text-white" data-testid={`scan-qty-${i}`} title="Scansiona codice prodotto">
                     <QrCode size={14} /> Scan
                   </Button>
                 </div>
               )}
-              {/* F28 — Per A Quantità mostra anche i controlli +/- quando c'è già qualche pezzo preparato (per correzioni) */}
-              {canPick && done && r.tipo_gestione === "a_quantita" && (
+              {canPick && !canPickMore && r.tipo_gestione === "a_quantita" && qtyPrep > 0 && (
                 <div className="mt-2 flex items-center gap-2">
-                  <Button size="sm" variant="outline" onClick={() => doPickQty(i, -1)} disabled={busy || r.qty_prelevata <= 0} className="h-10 w-10 p-0" data-testid={`minus-${i}`}>−</Button>
-                  <div className="flex-1 text-center text-xs text-emerald-700 font-semibold">✓ Completo</div>
+                  <Button size="sm" variant="outline" onClick={() => doPickQty(i, -1)} disabled={busy || qtyPrep <= 0} className="h-10 w-10 p-0" data-testid={`minus-${i}`}>−</Button>
+                  <div className="flex-1 text-center text-xs text-indigo-700 font-semibold">Preparazione completata (in attesa di spedizione)</div>
                 </div>
               )}
               {canPick && r.tipo_gestione === "a_seriale" && (
                 <div className="mt-2 flex flex-col sm:flex-row gap-2">
-                  <SerialInput onSubmit={(sn) => doPickSerial(i, sn)} disabled={busy || done} testid={`sn-input-${i}`} placeholder={done ? "Quantità richiesta raggiunta" : "Inserisci seriale…"} />
-                  <Button size="sm" onClick={() => { setScanRigaIdx(i); setScanMode("serial"); setScannerOpen(true); }} disabled={busy || done} className="bg-indigo-600 hover:bg-indigo-700 text-white h-10" data-testid={`scan-${i}`}>
+                  <SerialInput onSubmit={(sn) => doPickSerial(i, sn)} disabled={busy || !canPickMore} testid={`sn-input-${i}`} placeholder={!canPickMore ? "Quantità richiesta raggiunta" : "Inserisci seriale…"} />
+                  <Button size="sm" onClick={() => { setScanRigaIdx(i); setScanMode("serial"); setScannerOpen(true); }} disabled={busy || !canPickMore} className="bg-indigo-600 hover:bg-indigo-700 text-white h-10" data-testid={`scan-${i}`}>
                     <QrCode size={14} /> Scan
                   </Button>
                 </div>
               )}
+              {/* F30 — Seriali già SPEDITI (blu, non rimovibili) */}
+              {spediti.length > 0 && (
+                <div className="mt-2 text-xs bg-emerald-50 border border-emerald-200 rounded p-2">
+                  <div className="font-semibold text-emerald-800 mb-1.5">🚚 Seriali spediti ({spediti.length}):</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {spediti.map((sn, j) => (
+                      <span key={j} className="inline-flex items-center gap-1 bg-white border border-emerald-300 rounded px-2 py-1 font-mono-tight text-emerald-900" data-testid={`sn-ship-chip-${i}-${j}`} title="Seriale già uscito con una precedente spedizione">
+                        <CheckCircle size={11} weight="fill" className="text-emerald-600" /> {sn}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               {r.seriali_prelevati?.length > 0 && (
                 <div className="mt-2 text-xs bg-slate-50 rounded p-2">
-                  <div className="font-semibold text-slate-600 mb-1.5">Seriali prelevati ({r.seriali_prelevati.length}):</div>
+                  <div className="font-semibold text-slate-600 mb-1.5">Seriali preparati (non ancora spediti) ({r.seriali_prelevati.length}):</div>
                   <div className="flex flex-wrap gap-1.5">
                     {r.seriali_prelevati.map((sn, j) => (
                       <span key={j} className="inline-flex items-center gap-1 bg-white border border-slate-200 rounded px-2 py-1 font-mono-tight text-slate-800" data-testid={`sn-chip-${i}-${j}`}>
@@ -668,12 +714,52 @@ function CommessaDetail({ id, onBack }) {
       )}
       {confirmDelete && (
         <ConfirmDialog title="⚠️ Elimina definitivamente"
-          body={`ATTENZIONE: la commessa #${c.number} verrà cancellata DEFINITIVAMENTE dal database. Storico prelievi (${pickedQty}) verrà perso. L'operazione NON è annullabile. Solo Admin.`}
+          body={`ATTENZIONE: la commessa #${c.number} verrà cancellata DEFINITIVAMENTE dal database. L'operazione NON è annullabile e sarà bloccata dal server se esiste qualsiasi attività (picking, spedizioni, bozze, storico). Per commesse con storico usa "Annulla" invece. Solo Admin.`}
           onCancel={() => setConfirmDelete(false)} onConfirm={doDelete} busy={busy} confirmLabel="Elimina definitivamente" danger />
       )}
       {editMode && (
         <CommessaEditDialog commessa={c} onClose={() => setEditMode(false)}
           onSaved={(updated) => { setC(updated); setEditMode(false); toast.success("Commessa aggiornata"); }} />
+      )}
+      {/* F30 — Storico spedizioni multiple */}
+      {(c.shipments_history || []).length > 0 && (
+        <div className="et-card p-3 space-y-2" data-testid="shipments-history">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">📦 Storico spedizioni ({c.shipments_history.length})</div>
+          <div className="space-y-2">
+            {c.shipments_history.map((h, i) => (
+              <div key={i} className="border border-slate-200 rounded-md p-2 bg-slate-50/40 text-xs" data-testid={`history-item-${i}`}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="font-semibold text-slate-800">Spedizione #{i + 1}</div>
+                  <div className="text-slate-500">{h.shipped_at ? new Date(h.shipped_at).toLocaleString("it-IT") : "—"}</div>
+                </div>
+                <div className="text-[11px] text-slate-500 mb-1">
+                  Operatore: <b>{h.operator || "—"}</b> · ID: <span className="font-mono-tight">{h.shipment_id || "—"}</span>
+                </div>
+                <ul className="pl-3 list-disc space-y-0.5">
+                  {(h.items || []).map((it, j) => (
+                    <li key={j}>
+                      <b>{it.product_name}</b> × {it.qty}
+                      {(it.seriali || []).length > 0 && (
+                        <span className="ml-1 font-mono-tight text-slate-600">— {it.seriali.join(", ")}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* F30 — Dialog associazione QR post-picking */}
+      {qrDialog && (
+        <QrSlotAssociationDialog
+          open={true}
+          onClose={() => setQrDialog(null)}
+          serial={qrDialog.serial}
+          productPageId={qrDialog.productPageId}
+          productName={qrDialog.productName}
+          initialConfig={qrDialog.initialConfig}
+        />
       )}
     </div>
   );
@@ -731,9 +817,16 @@ function BozzaSpedizioneDialog({ commessa, busy, onCancel, onCancelDraft, onConf
         qty_richiesta: r.qty_richiesta, qty_prelevata: r.qty_prelevata,
         seriali_prelevati: r.seriali_prelevati || [],
       }));
-  // F29.b — Split "Da spedire" (qty_prelevata > 0) vs "Non spedito" (qty_prelevata == 0)
+  // F29.b — Split "Da spedire" (qty_prelevata > 0) vs "Non spedito" (qty residuo > 0 e nulla preparato)
   const daSpedire = righeSource.filter((r) => (r.qty_prelevata || 0) > 0);
-  const nonSpedito = (commessa.righe || []).filter((r) => (r.qty_prelevata || 0) === 0 && (r.qty_richiesta || 0) > 0);
+  // F30 — Un item è "non spedito in questa parziale" se ha residuo (richiesta > spedita) e nulla preparato ora.
+  const nonSpedito = (commessa.righe || []).filter((r) => {
+    const req = r.qty_richiesta || 0;
+    const ship = r.qty_spedita || 0;
+    const prep = r.qty_prelevata || 0;
+    const residuo = Math.max(0, req - ship);
+    return residuo > 0 && prep === 0;
+  });
   const isPartial = nonSpedito.length > 0;
   // F28.b — Data spedizione modificabile
   const todayISO = new Date().toISOString().slice(0, 10);
