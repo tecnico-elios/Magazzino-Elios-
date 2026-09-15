@@ -1,6 +1,23 @@
 # PRD — Magazzino Elios Tech
 
 
+## F30.c (15/09/2026) — Elimina Commessa dopo annullamento ✅
+
+Dopo il rollback, la commessa restava non-eliminabile perché `shipments_history` conteneva ancora entries (rollback + cancellation). Fix:
+
+**Backend `DELETE /api/commesse/{cid}`** — logica split:
+- Commesse `annullata`: consentito se **tutti** i `checklist` referenced (via `shipment_ref` + `shipments_history[].shipment_id`) hanno `status="cancelled"` in `db.checklists`. Le entry di history con `type="cancellation"` (senza `shipment_id`) vengono ignorate. Se una spedizione risulta ancora attiva → 409 con lista degli ID non annullati.
+- Commesse attive: regole strette invariate (vedi F30/F30.b).
+- Log audit include `shipments_history_snapshot` completo per retention.
+
+**Backend `cancel_commessa`** — durante il rollback ora fa `$unset shipment_ref` (oltre a `shipment_draft`), coerente con il fatto che dopo il rollback quello shipment non è più attivo.
+
+**Frontend `CommessePage.jsx`**:
+- `canDelete` ora include `stato === "annullata"` (backend verifica coerenza)
+- Copy conferma dinamico: per commesse annullate spiega che il server verificherà la coerenza dei rollback; per commesse pristine mantiene il warning classico.
+
+
+
 ## F30.b (15/09/2026) — Annullamento Commessa = Rollback completo atomico ✅
 
 **Regola fondamentale**: annullare una commessa ora esegue il **rollback controllato** di tutte le operazioni generate (spedizioni, uscite Notion, seriali, QR, picking) — non è più un semplice cambio di stato.

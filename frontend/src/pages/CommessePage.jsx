@@ -538,7 +538,9 @@ function CommessaDetail({ id, onBack }) {
     || (["spedita", "parzialmente_spedita"].includes(c.stato) ? 1 : 0);
   const canEdit = canManage && ["da_preparare", "in_preparazione", "parziale"].includes(c.stato);
   const canReopen = isAdmin && c.stato === "annullata";
-  const canDelete = isAdmin && !["spedita"].includes(c.stato) && !c.shipment_ref;
+  // F30.c — Elimina definitivamente: permesso anche su commesse annullate
+  // (backend verifica che i checklist referenced siano tutti cancelled).
+  const canDelete = isAdmin && (c.stato === "annullata" || (!["spedita"].includes(c.stato) && !c.shipment_ref));
   const canReopenPreparation = isAdmin && ["pronta", "parzialmente_spedita"].includes(c.stato);
   const canCancelByRole = isAdmin;  // F29 — solo admin annulla
   const canCreateDraftGate = canCreateDraft || c.stato === "parzialmente_spedita";
@@ -733,7 +735,11 @@ function CommessaDetail({ id, onBack }) {
       )}
       {confirmDelete && (
         <ConfirmDialog title="⚠️ Elimina definitivamente"
-          body={`ATTENZIONE: la commessa #${c.number} verrà cancellata DEFINITIVAMENTE dal database. L'operazione NON è annullabile e sarà bloccata dal server se esiste qualsiasi attività (picking, spedizioni, bozze, storico). Per commesse con storico usa "Annulla" invece. Solo Admin.`}
+          body={
+            c.stato === "annullata"
+              ? `La commessa #${c.number} (annullata) verrà cancellata DEFINITIVAMENTE dal database, insieme al suo storico. L'operazione NON è annullabile. Consentita solo se tutte le spedizioni collegate sono state annullate via rollback (verificato dal server).`
+              : `ATTENZIONE: la commessa #${c.number} verrà cancellata DEFINITIVAMENTE dal database. L'operazione NON è annullabile e sarà bloccata dal server se esiste qualsiasi attività (picking, spedizioni, bozze, storico). Per commesse con storico usa "Annulla" invece. Solo Admin.`
+          }
           onCancel={() => setConfirmDelete(false)} onConfirm={doDelete} busy={busy} confirmLabel="Elimina definitivamente" danger />
       )}
       {editMode && (

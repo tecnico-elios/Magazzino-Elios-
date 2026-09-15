@@ -470,44 +470,70 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
 
     @router.delete("/{cid}", dependencies=[Depends(deps.require_admin)])
     async def delete_commessa(cid: str, current=Depends(deps.require_admin)):
-        """F27/F29/F30 — Cancellazione DEFINITIVA (SOLO Admin).
+        """F27/F29/F30/F30.c — Cancellazione DEFINITIVA (SOLO Admin).
 
-        Bloccata se la commessa ha qualsiasi attività operativa collegata:
-        - shipment_ref (già spedita) o stato=spedita
-        - shipments_history non vuoto (spedizioni parziali già fatte, anche se poi annullata)
-        - shipment_draft attivo (bozza in corso)
-        - qualsiasi riga con qty_prelevata > 0 o seriali_prelevati non vuoti (picking in corso)
-        - qualsiasi riga con qty_spedita > 0 o seriali_spediti non vuoti (materiale già uscito)
-        Per queste commesse si deve usare "Annulla" (mantiene lo storico). L'eliminazione
-        definitiva è riservata ai casi in cui la commessa non ha mai generato operazioni.
+        Regole:
+        - Commesse ATTIVE (stato != annullata): bloccata se esistono operazioni
+          collegate (spedizione confermata, storico spedizioni, bozza in corso,
+          picking o materiale spedito). Usare "Annulla" per queste.
+        - Commesse ANNULLATE: consentita se tutte le spedizioni referenced sono
+          effettivamente `status=cancelled` in db.checklists (rollback completato).
+          Le righe sono state resettate durante il cancel, quindi picking/shipped
+          sono 0. Lo storico spedizioni (incl. entry di cancellation) è ammesso.
         """
         await _require_enabled()
         doc = await db.commesse.find_one({"id": cid})
         if not doc: raise HTTPException(404, "Commessa non trovata")
-        blockers = []
-        if doc.get("shipment_ref") or doc.get("stato") == "spedita":
-            blockers.append("commessa collegata a una spedizione confermata")
-        if doc.get("shipments_history"):
-            blockers.append(f"esistono {len(doc.get('shipments_history') or [])} spedizioni nello storico")
-        if doc.get("shipment_draft"):
-            blockers.append("è presente una bozza di spedizione in corso")
-        picked_rows = 0
-        shipped_rows = 0
-        for r in (doc.get("righe") or []):
-            if float(r.get("qty_prelevata") or 0) > 0 or (r.get("seriali_prelevati") or []):
-                picked_rows += 1
-            if float(r.get("qty_spedita") or 0) > 0 or (r.get("seriali_spediti") or []):
-                shipped_rows += 1
-        if picked_rows:
-            blockers.append(f"picking effettuato su {picked_rows} righe")
-        if shipped_rows:
-            blockers.append(f"materiale già spedito su {shipped_rows} righe")
+        stato = doc.get("stato")
+        blockers: List[str] = []
+
+        if stato == "annullata":
+            # Verifica che tutti i checklist referenced siano effettivamente cancelled.
+            # Le entry di storico con type="cancellation" non hanno shipment_id → skip.
+            ship_ids: set = set()
+            for h in (doc.get("shipments_history") or []):
+                sid = h.get("shipment_id") or h.get("checklist_id")
+                if sid: ship_ids.add(sid)
+            if doc.get("shipment_ref"):
+                ship_ids.add(doc.get("shipment_ref"))
+            active_shipments: List[str] = []
+            for sid in ship_ids:
+                ck = await db.checklists.find_one({"id": sid})
+                if ck and ck.get("status") != "cancelled":
+                    active_shipments.append(sid)
+            if active_shipments:
+                blockers.append(
+                    f"{len(active_shipments)} spedizioni non ancora annullate: "
+                    + ", ".join(active_shipments[:3])
+                    + (" …" if len(active_shipments) > 3 else "")
+                )
+        else:
+            # Regole strette per commesse non-annullate
+            if doc.get("shipment_ref") or stato == "spedita":
+                blockers.append("commessa collegata a una spedizione confermata")
+            if doc.get("shipments_history"):
+                blockers.append(f"esistono {len(doc.get('shipments_history') or [])} spedizioni nello storico")
+            if doc.get("shipment_draft"):
+                blockers.append("è presente una bozza di spedizione in corso")
+            picked_rows = 0
+            shipped_rows = 0
+            for r in (doc.get("righe") or []):
+                if float(r.get("qty_prelevata") or 0) > 0 or (r.get("seriali_prelevati") or []):
+                    picked_rows += 1
+                if float(r.get("qty_spedita") or 0) > 0 or (r.get("seriali_spediti") or []):
+                    shipped_rows += 1
+            if picked_rows:
+                blockers.append(f"picking effettuato su {picked_rows} righe")
+            if shipped_rows:
+                blockers.append(f"materiale già spedito su {shipped_rows} righe")
+
         if blockers:
             raise HTTPException(
                 status_code=409,
                 detail=(
                     "Cancellazione definitiva bloccata: " + "; ".join(blockers) +
-                    ". Usa 'Annulla' per conservare lo storico."
+                    (". Annulla prima le spedizioni pendenti." if stato == "annullata"
+                     else ". Usa 'Annulla' per conservare lo storico.")
                 ),
             )
         # Log PRIMA della cancellazione (retention audit)
@@ -518,9 +544,11 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
             operation_id=doc.get("operation_id"),
             endpoint=f"DELETE /api/commesse/{cid}",
             customer=doc.get("cliente"),
-            message=f"Commessa #{doc.get('number')} ELIMINATA DEFINITIVAMENTE da Admin {current.get('username')} (nessuna attività operativa)",
+            message=(f"Commessa #{doc.get('number')} ELIMINATA DEFINITIVAMENTE da Admin {current.get('username')} "
+                     f"(stato pre-delete: {stato})"),
             details={"commessa_id": cid, "number": doc.get("number"), "cliente": doc.get("cliente"),
-                     "stato": doc.get("stato"), "righe_snapshot": doc.get("righe") or []},
+                     "stato": stato, "righe_snapshot": doc.get("righe") or [],
+                     "shipments_history_snapshot": doc.get("shipments_history") or []},
         )
         await db.commesse.delete_one({"id": cid})
         return {"ok": True, "deleted": cid}
@@ -1102,6 +1130,10 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         update_unset: Dict[str, Any] = {}
         if doc.get("shipment_draft"):
             update_unset["shipment_draft"] = ""
+        # F30.c — dopo il rollback lo shipment_ref non punta più a una spedizione attiva.
+        # Rimuoverlo permette il DELETE della commessa annullata senza confondere le check.
+        if doc.get("shipment_ref"):
+            update_unset["shipment_ref"] = ""
         # Aggiungi record di ANNULLAMENTO nello storico per audit
         annull_entry = {
             "type": "cancellation",
