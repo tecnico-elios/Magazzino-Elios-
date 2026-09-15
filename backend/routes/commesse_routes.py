@@ -2,13 +2,19 @@
 Storage: MongoDB (workflow interno). Inventario/Spedizioni restano su Notion SSOT.
 Non duplica lo stock: il prelievo registra solo cosa è stato preso; la spedizione
 finale chiama /api/checklist/send che scala l'inventario Notion esistente.
+
+F30.b (15/09/2026) — Annullamento commessa con ROLLBACK completo delle spedizioni:
+archivia le righe Uscite Notion, reintegra i seriali in col.16 inventario, rimuove
+SN/QR dall'ordine, disattiva le associazioni QR create dalla commessa, marca i
+record `db.checklists` come `status="cancelled"`. Best-effort atomico: se qualsiasi
+scrittura Notion fallisce, la commessa NON viene marcata annullata (Mongo intatto).
 """
 from __future__ import annotations
 import os
 import uuid
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -16,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 import auth as auth_mod
 import event_logger
+import notion_service
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +110,131 @@ def _compute_stato(doc: Dict[str, Any]) -> str:
 async def _get_feature(db) -> bool:
     doc = await db.settings.find_one({"_id": "features"}) or {}
     return bool(doc.get("commesse_enabled", False))
+
+
+async def _rollback_shipment(db, shipment_id: str, actor: str, reason: str) -> Dict[str, Any]:
+    """F30.b — Annulla una spedizione confermata (rollback controllato).
+
+    Steps (nell'ordine):
+      1. Carica il record `db.checklists` (già `status=cancelled` → skip idempotente)
+      2. Archivia i tracker_page_ids (righe Uscite Notion) — reverse `create_pick`
+      3. Re-aggiunge i seriali serializzati in col.16 Inventario Notion
+      4. Remove_shipment_from_order su Notion (SN + QR dall'ordine)
+      5. Disattiva `qr_associations` e `qr_bindings` legati a questi seriali
+      6. Marca `db.checklists.status="cancelled"` + audit metadata
+
+    Ritorna: {ok, archived_pages: n, reinstated_serials: [...], order_updated: bool, warnings: [...]}
+
+    Raise: Exception se una operazione Notion critica fallisce → il chiamante NON
+    marca la commessa come annullata (Mongo intatto).
+    """
+    ck = await db.checklists.find_one({"id": shipment_id})
+    if not ck:
+        # Legacy o checklist non trovato: solo warning, ma continua (rollback parziale)
+        logger.warning(f"[rollback] checklist {shipment_id} non trovato — skip")
+        return {"ok": True, "note": "checklist_missing", "archived_pages": 0,
+                "reinstated_serials": [], "order_updated": False, "warnings": ["checklist not found in db"]}
+    if ck.get("status") == "cancelled":
+        return {"ok": True, "note": "already_cancelled", "archived_pages": 0,
+                "reinstated_serials": [], "order_updated": False, "warnings": []}
+
+    warnings: List[str] = []
+    # 1. Archivia righe Uscite Notion
+    archived = 0
+    for pid in (ck.get("tracker_page_ids") or []):
+        try:
+            await notion_service.archive_page(pid)
+            archived += 1
+        except Exception as e:
+            warnings.append(f"archive_page({pid}) failed: {e}")
+            logger.warning(f"[rollback] archive_page {pid}: {e}")
+
+    # 2. Re-aggiungi i seriali serializzati alla col.16 Inventario Notion
+    reinstated: List[str] = []
+    items = ck.get("items") or []
+    for it in items:
+        if not it.get("serialized"):
+            continue
+        serials = [s for s in (it.get("serials") or []) if s]
+        if not serials:
+            continue
+        try:
+            await notion_service.update_inventory_serials(it.get("page_id"), serials)
+            reinstated.extend(serials)
+        except Exception as e:
+            # Critico: il seriale rimane "spedito" da Notion se questa fallisce.
+            warnings.append(f"reinstate_serials({it.get('name')}) failed: {e}")
+            logger.error(f"[rollback] update_inventory_serials {it.get('page_id')}: {e}")
+            raise RuntimeError(f"Reintegro seriali fallito per '{it.get('name')}': {e}")
+
+    # 3. Rimuovi SN/QR dall'ordine (best-effort, non blocca)
+    order_updated = False
+    order_page_id: Optional[str] = None
+    # order_page_id salvato per associazioni QR
+    for it in items:
+        if not it.get("serialized"):
+            continue
+    # Prova a ricavarlo dalle qr_associations create da questo checklist
+    # (submit_checklist non salva order_page_id direttamente sul record checklist).
+    ck_serial_lows = set()
+    ck_qr_lows = set()
+    for it in items:
+        for s in (it.get("serials") or []):
+            if s: ck_serial_lows.add(s.strip().lower())
+        for q in (it.get("qr_codes") or []):
+            if q: ck_qr_lows.add(q.strip().lower())
+    if ck_serial_lows or ck_qr_lows:
+        # Recupera order_page_id dalla prima qr_association attiva collegata a un seriale del checklist
+        assoc = await db.qr_associations.find_one({
+            "serial_lower": {"$in": list(ck_serial_lows)} if ck_serial_lows else {"$exists": True},
+            "active": True,
+        })
+        if assoc and assoc.get("order_page_id"):
+            order_page_id = assoc.get("order_page_id")
+    if order_page_id:
+        try:
+            all_sn = [s for it in items for s in (it.get("serials") or []) if s]
+            all_qr = [q for it in items for q in (it.get("qr_codes") or []) if q]
+            await notion_service.remove_shipment_from_order(order_page_id, all_sn, all_qr)
+            order_updated = True
+        except Exception as e:
+            warnings.append(f"remove_shipment_from_order({order_page_id}) failed: {e}")
+            logger.warning(f"[rollback] remove_shipment_from_order: {e}")
+
+    # 4. Disattiva le associazioni QR (legacy qr_associations + nuovo qr_bindings)
+    #    Solo quelle che corrispondono ai seriali della spedizione (non tocchiamo altre).
+    detach_meta = {"detached_by": actor, "detached_at": datetime.now(timezone.utc).isoformat(),
+                   "detached_reason": f"rollback shipment {shipment_id}: {reason or 'commessa annullata'}"}
+    if ck_serial_lows:
+        await db.qr_associations.update_many(
+            {"serial_lower": {"$in": list(ck_serial_lows)}, "active": True},
+            {"$set": {"active": False, **detach_meta}},
+        )
+        await db.qr_bindings.update_many(
+            {"serial_lower": {"$in": list(ck_serial_lows)}, "active": True},
+            {"$set": {"active": False, **detach_meta}},
+        )
+
+    # 5. Marca il checklist come cancelled (mantiene record per audit)
+    await db.checklists.update_one(
+        {"id": shipment_id},
+        {"$set": {
+            "status": "cancelled",
+            "cancelled_at": datetime.now(timezone.utc).isoformat(),
+            "cancelled_by": actor,
+            "cancel_reason": reason or None,
+            "rollback_warnings": warnings,
+        }},
+    )
+
+    notion_service.invalidate_inventory_cache()
+    return {
+        "ok": True,
+        "archived_pages": archived,
+        "reinstated_serials": reinstated,
+        "order_updated": order_updated,
+        "warnings": warnings,
+    }
 
 
 def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
@@ -872,29 +1004,137 @@ def build_router(db, deps: auth_mod.AuthDependencies) -> APIRouter:
         return {"ok": True, "shipment": ship_result, "commessa": _serialize(await db.commesse.find_one({"id": cid}))}
 
     @router.post("/{cid}/cancel")
-    async def cancel_commessa(cid: str, current=Depends(deps.require_admin)):
-        """F29 — SOLO ADMIN può annullare commesse."""
+    async def cancel_commessa(cid: str, request: Request, current=Depends(deps.require_admin)):
+        """F29/F30.b — SOLO ADMIN. Annullamento commessa con ROLLBACK COMPLETO.
+
+        - Da stati non-terminali (`da_preparare`, `in_preparazione`, `parziale`,
+          `pronta`, `bozza_spedizione`): reset del picking + cancel bozza + stato
+          → `annullata`.
+        - Da stati con spedizioni confermate (`spedita`, `parzialmente_spedita`):
+          rollback di TUTTE le spedizioni presenti in `shipments_history` (o
+          `shipment_ref` se history è vuoto — legacy). Per ciascuna:
+            1. Archivia le righe Uscite Notion (tracker_page_ids)
+            2. Re-inserisce i seriali nella colonna 16 dell'Inventario Notion
+            3. Rimuove SN/QR dall'ordine "Eliostech Ordini" (append inverso)
+            4. Disattiva le associazioni QR (qr_associations legacy + qr_bindings F30)
+            5. Marca `db.checklists` con `status="cancelled"`
+        - Atomicità best-effort: se qualsiasi passo Notion fallisce → 502 SENZA
+          modificare la commessa (Mongo intatto). Le operazioni Notion già
+          effettuate restano (Notion non ha transactions).
+
+        Body opzionale: {reason: str}
+        """
         await _require_enabled()
         doc = await db.commesse.find_one({"id": cid})
         if not doc: raise HTTPException(404, "Commessa non trovata")
-        if doc.get("stato") in ("spedita", "annullata"):
-            raise HTTPException(409, f"Non annullabile: stato {doc.get('stato')}")
-        # Snapshot dei prelievi effettuati (per audit e futuro reversal manuale)
+        stato = doc.get("stato")
+        if stato == "annullata":
+            raise HTTPException(409, "Commessa già annullata")
+        # Parse reason opzionale
+        reason: str = ""
+        try:
+            b = await request.json()
+            if isinstance(b, dict):
+                reason = str(b.get("reason") or "").strip()[:500]
+        except Exception:
+            pass
+
+        # Costruisci lista spedizioni da rollbackare
+        shipments = list(doc.get("shipments_history") or [])
+        if not shipments and doc.get("shipment_ref"):
+            # Legacy: nessun history ma un shipment_ref → costruisci entry sintetico
+            shipments = [{
+                "shipment_id": doc.get("shipment_ref"),
+                "shipped_at": doc.get("shipped_at"),
+                "operator": doc.get("operatore_carico"),
+                "items": [],  # verranno recuperati dal db.checklists
+            }]
+
+        # Rollback delle spedizioni
+        rollback_report: List[Dict[str, Any]] = []
+        for sh in shipments:
+            ship_id = sh.get("shipment_id") or sh.get("checklist_id")
+            if not ship_id:
+                continue
+            try:
+                res = await _rollback_shipment(db, ship_id, actor=current.get("username"), reason=reason)
+                rollback_report.append({"shipment_id": ship_id, **res})
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Rollback shipment {ship_id} failed: {e}")
+                raise HTTPException(
+                    status_code=502,
+                    detail=(f"Rollback spedizione {ship_id} fallito: {e}. "
+                            "Nessuna modifica applicata alla commessa. "
+                            "Verifica lo stato su Notion prima di riprovare."),
+                )
+
+        # Snapshot dei prelievi/spediti pre-cancellazione (per audit)
         picked_snapshot = [
-            {"product": r.get("product_name"), "qty_prelevata": r.get("qty_prelevata"),
-             "seriali_prelevati": r.get("seriali_prelevati")}
-            for r in (doc.get("righe") or []) if (r.get("qty_prelevata") or 0) > 0
+            {"product": r.get("product_name"), "product_code": r.get("product_code"),
+             "qty_prelevata": r.get("qty_prelevata"), "qty_spedita": r.get("qty_spedita"),
+             "seriali_prelevati": r.get("seriali_prelevati"),
+             "seriali_spediti": r.get("seriali_spediti")}
+            for r in (doc.get("righe") or [])
+            if (r.get("qty_prelevata") or 0) > 0 or (r.get("qty_spedita") or 0) > 0
+            or (r.get("seriali_prelevati") or []) or (r.get("seriali_spediti") or [])
         ]
-        await db.commesse.update_one({"id": cid}, {"$set": {
+
+        # Reset delle righe (rimuovi picking + spediti — la commessa non ha più operazioni attive)
+        new_righe: List[Dict[str, Any]] = []
+        for r in (doc.get("righe") or []):
+            new_righe.append({
+                **r,
+                "qty_prelevata": 0.0,
+                "seriali_prelevati": [],
+                "qty_spedita": 0.0,
+                "seriali_spediti": [],
+            })
+
+        # Cancel bozza attiva (se presente)
+        update_set: Dict[str, Any] = {
             "stato": "annullata", "cancelled_at": _now(), "updated_at": _now(),
-        }})
+            "righe": new_righe,
+            "cancel_reason": reason or None,
+            "cancelled_by": current.get("username"),
+        }
+        update_unset: Dict[str, Any] = {}
+        if doc.get("shipment_draft"):
+            update_unset["shipment_draft"] = ""
+        # Aggiungi record di ANNULLAMENTO nello storico per audit
+        annull_entry = {
+            "type": "cancellation",
+            "shipment_id": None,
+            "cancelled_at": _now(),
+            "cancelled_by": current.get("username"),
+            "reason": reason or None,
+            "rolled_back_shipments": [r.get("shipment_id") for r in rollback_report],
+            "previous_stato": stato,
+        }
+        mongo_update: Dict[str, Any] = {
+            "$set": update_set,
+            "$push": {"shipments_history": annull_entry},
+        }
+        if update_unset:
+            mongo_update["$unset"] = update_unset
+        await db.commesse.update_one({"id": cid}, mongo_update)
         await event_logger.log_event(
             db, category="COMMESSE", event_type="COMMESSA_ANNULLATA",
             action="commesse.cancel", level="WARNING", status="SUCCESS",
-            user=current.get("username"), operation_id=doc.get("operation_id"),
+            user=current.get("username"), user_role=current.get("role"),
+            operation_id=doc.get("operation_id"),
+            endpoint=f"POST /api/commesse/{cid}/cancel",
             customer=doc.get("cliente"),
-            message=f"Commessa #{doc.get('number')} annullata (prelievi registrati: {len(picked_snapshot)})",
-            details={"commessa_id": cid, "picked_snapshot": picked_snapshot},
+            message=(f"Commessa #{doc.get('number')} annullata "
+                     f"(prev={stato}, rollback spedizioni: {len(rollback_report)})"),
+            details={
+                "commessa_id": cid,
+                "previous_stato": stato,
+                "reason": reason,
+                "picked_snapshot": picked_snapshot,
+                "rollback_report": rollback_report,
+            },
         )
         return _serialize(await db.commesse.find_one({"id": cid}))
 

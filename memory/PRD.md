@@ -1,6 +1,60 @@
 # PRD — Magazzino Elios Tech
 
 
+## F30.b (15/09/2026) — Annullamento Commessa = Rollback completo atomico ✅
+
+**Regola fondamentale**: annullare una commessa ora esegue il **rollback controllato** di tutte le operazioni generate (spedizioni, uscite Notion, seriali, QR, picking) — non è più un semplice cambio di stato.
+
+### Backend — Helper `_rollback_shipment(db, shipment_id, actor, reason)`
+In `routes/commesse_routes.py`, riutilizza lo stesso motore Notion delle spedizioni normali (nessun secondo sistema):
+1. **Archivia** le righe Uscite Notion via `notion_service.archive_page(pid)` per ogni `tracker_page_ids` del checklist
+2. **Reintegra** i seriali serializzati in colonna 16 Inventario via `notion_service.update_inventory_serials(page_id, serials)` — reverse di `remove_inventory_serials`
+3. **Rimuove** SN + QR dall'ordine Notion via `notion_service.remove_shipment_from_order(order_page_id, sn, qr)` — reverse di `append_shipment_to_order`. `order_page_id` recuperato dalle `qr_associations` della spedizione (fallback safe se mancante)
+4. **Disattiva** `qr_associations` (legacy) e `qr_bindings` (F30) di **quei soli seriali** con `active=False`, `detached_by`, `detached_reason`, `detached_at`
+5. **Marca** `db.checklists.status="cancelled"` + `cancelled_at`, `cancelled_by`, `cancel_reason`, `rollback_warnings`
+
+**Idempotenza**: se il checklist è già `status=cancelled` ritorna `note="already_cancelled"` senza toccare nulla.
+
+**Atomicità best-effort**: se il reintegro dei seriali fallisce (op critica) → `RuntimeError` propagato. Il chiamante `cancel_commessa` cattura, **non modifica la commessa** e ritorna 502 con dettaglio → Mongo intatto. Le altre op (archive_page, remove_shipment_from_order) sono best-effort con warnings raccolti nella response.
+
+### Backend — `cancel_commessa` esteso
+`POST /api/commesse/{cid}/cancel` (Admin only) ora accetta stati precedentemente bloccati:
+- Da `spedita`/`parzialmente_spedita`/`bozza_spedizione`: rollback di **tutte** le spedizioni in `shipments_history` (o `shipment_ref` singolo per record legacy)
+- Da stati non-terminali: solo reset picking + cancel bozza (nessuna operazione Notion)
+- Reset delle righe: `qty_prelevata=0, seriali_prelevati=[], qty_spedita=0, seriali_spediti=[]`
+- Cancel bozza attiva (`$unset shipment_draft`)
+- Aggiunge entry `{type:"cancellation", cancelled_at, cancelled_by, reason, rolled_back_shipments:[...]}` in `shipments_history` per audit
+- Body opzionale `{reason: str}` — motivo dell'annullamento
+- Log event `COMMESSA_ANNULLATA` (level WARNING) con snapshot pre-cancellazione + rollback_report
+
+### Frontend — CommessePage
+- `canCancel` ora include anche `spedita`/`parzialmente_spedita` (prima esclusi)
+- Nuovo flag `willRollback` calcolato da stato + presenza spedizioni
+- Copy conferma **dinamico**: se rollback pesante, elenca esplicitamente cosa verrà fatto (archivio uscite, reintegro seriali, rimozione SN/QR ordine, disassociazione QR, reset picking)
+- Toast di successo mostra "Rollback delle spedizioni completato" quando applicabile
+- Toast di errore mostra il dettaglio del backend (`duration: 15000`) per debug di failure Notion
+
+### Differenza chiara Annulla / Elimina
+- **🟠 Annulla Commessa** (`POST /cancel`): rollback completo controllato, mantiene lo storico, stato finale `annullata`. Anche da `spedita`.
+- **🗑️ Elimina Commessa** (`DELETE /`): eliminazione definitiva, consentita SOLO se pristine (F30 hardening: nessuna spedizione, storico, bozza, picking, o `qty_spedita`). Admin only.
+
+### Test locale (senza toccare Commessa #1)
+Test di `_rollback_shipment` con mock Notion:
+- Checklist con 2 tracker_page_ids + 1 riga serialized (SN1, QR1) + 1 A Quantità
+- Risultato: `archive_page` chiamato 2 volte, `update_inventory_serials` 1 volta (solo serialized), `remove_shipment_from_order` skippato (nessun order_page_id nelle qr_associations mockate — comportamento corretto)
+- Re-invocando con `status="cancelled"`: `already_cancelled` senza side-effects → idempotenza verificata
+- Endpoint `POST /commesse/xxx/cancel` senza auth: 401 (protetto)
+- `yarn build` OK, `ast.parse` OK, backend startup OK
+- **Commessa #1** invariata dal nostro codice (l'utente l'ha modificata manualmente frattanto — è ora `in_preparazione`)
+
+### Non regressioni
+- Nessuna modifica al motore di spedizione (`/api/checklist/send`)
+- Nessuna modifica alle operazioni Notion `append_shipment_to_order` / `remove_inventory_serials` / `create_pick`
+- Retro-compat: `qr_associations` continua a funzionare in parallelo a `qr_bindings`
+- La `_build_draft_payload` continua a leggere QR con fallback legacy
+
+
+
 ## F30 (15/09/2026) — Spedizioni parziali + QR multi-slot + Delete Hardening ✅
 
 Correzione end-to-end della gestione Commesse dopo spedizione parziale, introduzione del modello QR multi-slot generico e hardening dell'eliminazione.

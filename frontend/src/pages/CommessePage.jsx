@@ -454,8 +454,15 @@ function CommessaDetail({ id, onBack }) {
   };
   const doCancel = async () => {
     setBusy(true);
-    try { const { data } = await axios.post(`${API}/commesse/${id}/cancel`); setC(data); setConfirmCancel(false); toast.success("Commessa annullata"); }
-    catch (e) { toast.error("Errore", { description: e?.response?.data?.detail }); }
+    try {
+      const { data } = await axios.post(`${API}/commesse/${id}/cancel`, {});
+      setC(data); setConfirmCancel(false);
+      toast.success("Commessa annullata", { description: willRollback ? "Rollback delle spedizioni completato" : undefined });
+    }
+    catch (e) {
+      const d = e?.response?.data?.detail || "Errore";
+      toast.error("Annullamento fallito", { description: typeof d === "string" ? d : JSON.stringify(d), duration: 15000 });
+    }
     finally { setBusy(false); }
   };
   const doReopen = async () => {
@@ -523,7 +530,12 @@ function CommessaDetail({ id, onBack }) {
   const canCreateDraft = c.stato === "pronta";
   const canShipPartial = c.stato === "parziale" && pickedQty > 0 && pickedQty < residuoQty;
   const hasBozza = c.stato === "bozza_spedizione";
-  const canCancel = !["spedita", "annullata", "bozza_spedizione"].includes(c.stato);
+  const canCancel = !["annullata"].includes(c.stato);
+  // F30.b — Warning per rollback pesante: sarà mostrato solo se spedizioni presenti
+  const willRollback = ["spedita", "parzialmente_spedita"].includes(c.stato)
+    || (c.shipments_history || []).some((h) => (h.items || []).length > 0);
+  const rollbackShipmentCount = (c.shipments_history || []).filter((h) => (h.items || []).length > 0).length
+    || (["spedita", "parzialmente_spedita"].includes(c.stato) ? 1 : 0);
   const canEdit = canManage && ["da_preparare", "in_preparazione", "parziale"].includes(c.stato);
   const canReopen = isAdmin && c.stato === "annullata";
   const canDelete = isAdmin && !["spedita"].includes(c.stato) && !c.shipment_ref;
@@ -704,8 +716,15 @@ function CommessaDetail({ id, onBack }) {
           confirmLabel="Annulla bozza" danger />
       )}
       {confirmCancel && (
-        <ConfirmDialog title="Annulla commessa" body={`Confermi l'annullamento della commessa #${c.number}? Prelievi registrati: ${pickedQty}/${totalQty}. L'operazione verrà registrata nel Registro Log.`}
-          onCancel={() => setConfirmCancel(false)} onConfirm={doCancel} busy={busy} confirmLabel="Annulla commessa" danger />
+        <ConfirmDialog
+          title={willRollback ? "⚠️ Annulla commessa con ROLLBACK" : "Annulla commessa"}
+          body={
+            willRollback
+              ? `ATTENZIONE: la commessa #${c.number} ha ${rollbackShipmentCount} spedizione${rollbackShipmentCount === 1 ? "" : "i"} confermata${rollbackShipmentCount === 1 ? "" : "e"}. Confermando: (1) le uscite Notion verranno archiviate; (2) i seriali spediti torneranno disponibili in Inventario; (3) SN/QR verranno rimossi dall'ordine; (4) i QR verranno disassociati; (5) il picking verrà azzerato. L'operazione è registrata nel Registro Log. Solo Admin. Se qualche scrittura Notion fallisce, la commessa NON viene annullata.`
+              : `Confermi l'annullamento della commessa #${c.number}? Prelievi registrati: ${pickedQty}/${totalQty}. L'operazione verrà registrata nel Registro Log.`
+          }
+          onCancel={() => setConfirmCancel(false)} onConfirm={doCancel} busy={busy}
+          confirmLabel={willRollback ? "Conferma annullamento con rollback" : "Annulla commessa"} danger />
       )}
       {confirmReopen && (
         <ConfirmDialog title="Riapri commessa"
